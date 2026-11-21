@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check pull request conventions
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -u
+
+          types='feat|fix|docs|chore|refactor|test|perf|ci|build'
+          subject_re="^($types)(\([a-z0-9][a-z0-9._/-]*\))?: [a-z0-9]"
+          branch_re="^($types)/[a-z0-9]+(-[a-z0-9]+)*$"
+          status=0
+
+          if printf '%s\n' "$PR_TITLE" | grep -Eq "$subject_re"; then
+            echo "ok: pull request title is a conventional commit"
+          else
+            echo "::error::pull request title is not a conventional commit: $PR_TITLE"
+            status=1
+          fi
+
+          if printf '%s\n' "$HEAD_REF" | grep -Eq "$branch_re"; then
+            echo "ok: branch name matches <type>/<kebab-desc>"
+          else
+            echo "::error::branch name does not match <type>/<kebab-desc>: $HEAD_REF"
+            status=1
+          fi
+
+          commits=$(git log --format=%s "$BASE_SHA..$HEAD_SHA")
+          while IFS= read -r subject; do
+            [ -n "$subject" ] || continue
+            if printf '%s\n' "$subject" | grep -Eq "$subject_re"; then
+              echo "ok: commit subject is a conventional commit: $subject"
+            else
+              echo "::error::commit subject is not a conventional commit: $subject"
+              status=1
+            fi
+          done <<<"$commits"
+
+          exit "$status"
