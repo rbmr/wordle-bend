@@ -287,3 +287,56 @@ def Nat.lt_of_ge_false(a: Nat, b: Nat, e: {Nat.is_ge(a, b) == False{} : Bool}) -
 def Nat.ge_of_lt_false(a: Nat, b: Nat, e: {Nat.is_lt(a, b) == False{} : Bool}) ->
   {Nat.is_ge(a, b) == True{} : Bool}:
   Cmp.ge_of_lt_false(Nat.cmp(a, b), e)
+
+def Nat.cmp_refl(n: Nat) -> {Nat.cmp(n, n) == EQ{} : Cmp}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      Nat.cmp_refl(p)
+
+def Nat.is_lt_self_false(n: Nat) -> {Nat.is_lt(n, n) == False{} : Bool}:
+  %Equal.sym(Cmp, Nat.cmp(n, n), EQ{}, Nat.cmp_refl(n)) : {Cmp.is_lt(_) == False{} : Bool}
+  {==}
+
+def SolveProof.inf_not_lt_self(n: Nat, e: {Nat.is_lt(n, n) == True{} : Bool}) -> Empty:
+  Bool.false_ne_true(Equal.trans(Bool, False{}, Nat.is_lt(n, n), True{},
+    Equal.sym(Bool, Nat.is_lt(n, n), False{}, Nat.is_lt_self_false(n)), e))
+
+def SolveProof.sat_add_lt_l_go(+inf: Nat, +a: Nat, +b: Nat, +ga: Bool, +gb: Bool,
+    +ea: {ga == Nat.is_ge(a, inf) : Bool},
+    +eb: {gb == Nat.is_ge(b, inf) : Bool},
+    +e: {Nat.is_lt(Feedback.Bool.case(Nat, ga, inf,
+                            Feedback.Bool.case(Nat, gb, inf, Nat.add(a, b))), inf) == True{} : Bool}) ->
+  {Nat.is_lt(a, inf) == True{} : Bool}:
+  match ga:
+    case True{}:
+      Empty.absurd({Nat.is_lt(a, inf) == True{} : Bool}, SolveProof.inf_not_lt_self(inf, e))
+    case False{}:
+      Nat.lt_of_ge_false(a, inf, Equal.sym(Bool, False{}, Nat.is_ge(a, inf), ea))
+
+def SolveProof.sat_add_lt_l(+inf: Nat, +a: Nat, +b: Nat,
+    +e: {Nat.is_lt(Solve.sat_add(inf, a, b), inf) == True{} : Bool}) ->
+  {Nat.is_lt(a, inf) == True{} : Bool}:
+  SolveProof.sat_add_lt_l_go(inf, a, b, Nat.is_ge(a, inf), Nat.is_ge(b, inf), {==}, {==}, e)
+
+def SolveProof.sat_add_lt_r_go(+inf: Nat, +a: Nat, +b: Nat, +ga: Bool, +gb: Bool,
+    +ea: {ga == Nat.is_ge(a, inf) : Bool},
+    +eb: {gb == Nat.is_ge(b, inf) : Bool},
+    +e: {Nat.is_lt(Feedback.Bool.case(Nat, ga, inf,
+                            Feedback.Bool.case(Nat, gb, inf, Nat.add(a, b))), inf) == True{} : Bool}) ->
+  {Nat.is_lt(b, inf) == True{} : Bool}:
+  match ga:
+    case True{}:
+      Empty.absurd({Nat.is_lt(b, inf) == True{} : Bool}, SolveProof.inf_not_lt_self(inf, e))
+    case False{}:
+      match gb:
+        case True{}:
+          Empty.absurd({Nat.is_lt(b, inf) == True{} : Bool}, SolveProof.inf_not_lt_self(inf, e))
+        case False{}:
+          Nat.lt_of_ge_false(b, inf, Equal.sym(Bool, False{}, Nat.is_ge(b, inf), eb))
+
+def SolveProof.sat_add_lt_r(+inf: Nat, +a: Nat, +b: Nat,
+    +e: {Nat.is_lt(Solve.sat_add(inf, a, b), inf) == True{} : Bool}) ->
+  {Nat.is_lt(b, inf) == True{} : Bool}:
+  SolveProof.sat_add_lt_r_go(inf, a, b, Nat.is_ge(a, inf), Nat.is_ge(b, inf), {==}, {==}, e)
