@@ -142,7 +142,7 @@ def parse.go(
         case MStart{}:
           parse.go(t, MNatsOpen{}, frames, cur, fb, nums, k)
         case MNatsOpen{}:
-          parse.go(t, MNatsBody{}, frames, cur, fb, nums, k)
+          parse.go(t, MNatsBody{}, frames, cur, fb, nums, 0n)
         case MKidsStart{}:
           parse.go(t, MKidsBody{}, frames, cur, fb, nums, k)
         case MKidsBody{}:
@@ -156,9 +156,9 @@ def parse.go(
     case SCon{']', t}:
       match mode:
         case MNatsBody{}:
-          parse.go(t, MNatsDone{}, frames, cur, fb, nums, k)
+          parse.go(t, MNatsDone{}, frames, cur, fb, nums, 0n)
         case MNatsNext{}:
-          parse.go(t, MNatsDone{}, frames, cur, fb, nums, k)
+          parse.go(t, MNatsDone{}, frames, cur, fb, nums, 0n)
         case MKidsBody{}:
           parse.go(t, MKidsClosed{}, frames, cur, fb, nums, k)
         case MKidsNext{}:
@@ -186,9 +186,9 @@ def parse.go(
     case SCon{',', t}:
       match mode:
         case MNatsNext{}:
-          parse.go(t, MNatsBody{}, frames, cur, fb, nums, k)
+          parse.go(t, MNatsBody{}, frames, cur, fb, nums, 0n)
         case MNatsDone{}:
-          parse.go(t, MKidsStart{}, frames, cur, fb, nums, k)
+          parse.go(t, MKidsStart{}, frames, cur, fb, nums, 0n)
         case MKidsNext{}:
           parse.go(t, MKidsBody{}, frames, cur, fb, nums, k)
         case MFbNext{}:
@@ -200,7 +200,7 @@ def parse.go(
     case SCon{'0', t}:
       match mode:
         case MNatsBody{}:
-          parse.go(t, MNatsNext{}, frames, cur, fb, List.append(&2, Nat, nums, one_nat(0n)), k)
+          parse.go(t, MNatsNext{}, frames, cur, fb, List.append(&2, Nat, nums, one_nat(0n)), 0n)
         case MNatsDigits{}:
           parse.go(t, MNatsNext{}, frames, cur, fb, List.append(&2, Nat, nums, one_nat(k)), 0n)
         case MFbBody{}:

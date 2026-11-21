@@ -215,3 +215,48 @@ def NatProof.add_one(+a: Nat) -> {Nat.add(a, 1n) == 1n+a : Nat}:
   e1 = NatProof.add_succ(a, 0n)
   e2 = Equal.cong(Nat, Nat, m => 1n+m, Nat.add(a, 0n), a, NatProof.add_zero(a))
   Equal.trans(Nat, Nat.add(a, 1n), 1n+Nat.add(a, 0n), 1n+a, e1, e2)
+
+# Parsing one letter from the digits state. Consumes n ones and the closing
+# zero, and appends the value to the guess.
+def LetterProof.digits(+n: Nat, +k: Nat, +rest: String, frames: +List<Json.Frame>,
+    cur: +List<Tree.Child>, fb: +List<Feedback.Color>, nums: +List<Nat>) ->
+  {Json.parse.go(Json.show_letter(n) ++ rest, Json.MNatsDigits{}, frames, cur, fb, nums, k)
+    == Json.parse.go(rest, Json.MNatsNext{}, frames, cur, fb,
+                     List.append(&2, Nat, nums, Json.one_nat(Nat.add(n, k))), 0n)
+   : Maybe<&1, Tree.Tree & String>}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %NatProof.add_succ(p, k) :
+        {Json.parse.go(Json.show_letter(1n+p) ++ rest, Json.MNatsDigits{}, frames, cur, fb, nums, k)
+          == Json.parse.go(rest, Json.MNatsNext{}, frames, cur, fb,
+                           List.append(&2, Nat, nums, Json.one_nat(_)), 0n)
+         : Maybe<&1, Tree.Tree & String>}
+      %LetterProof.digits(p, 1n+k, rest, frames, cur, fb, nums) :
+        {Json.parse.go(Json.show_letter(p) ++ rest, Json.MNatsDigits{}, frames, cur, fb, nums, 1n+k)
+          == _
+         : Maybe<&1, Tree.Tree & String>}
+      {==}
+
+# Parsing one letter from the body of a guess array.
+def LetterProof.body(+n: Nat, +rest: String, +k: Nat, frames: +List<Json.Frame>,
+    cur: +List<Tree.Child>, fb: +List<Feedback.Color>, nums: +List<Nat>) ->
+  {Json.parse.go(Json.show_letter(n) ++ rest, Json.MNatsBody{}, frames, cur, fb, nums, k)
+    == Json.parse.go(rest, Json.MNatsNext{}, frames, cur, fb,
+                     List.append(&2, Nat, nums, Json.one_nat(n)), 0n)
+   : Maybe<&1, Tree.Tree & String>}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %NatProof.add_one(p) :
+        {Json.parse.go(Json.show_letter(1n+p) ++ rest, Json.MNatsBody{}, frames, cur, fb, nums, k)
+          == Json.parse.go(rest, Json.MNatsNext{}, frames, cur, fb,
+                           List.append(&2, Nat, nums, Json.one_nat(_)), 0n)
+         : Maybe<&1, Tree.Tree & String>}
+      %LetterProof.digits(p, 1n, rest, frames, cur, fb, nums) :
+        {Json.parse.go(Json.show_letter(p) ++ rest, Json.MNatsDigits{}, frames, cur, fb, nums, 1n)
+          == _
+         : Maybe<&1, Tree.Tree & String>}
+      {==}
