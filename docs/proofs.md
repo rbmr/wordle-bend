@@ -1,0 +1,189 @@
+# Proofs
+
+All eight laws in `LAWS.bend` are proved. `PROOF.bend` imports the solver modules and the helper
+modules under `proofs/`, then defines one `def Laws.<name>` for each law. `PENDING_LAWS` is empty,
+so no law is allowed to be open.
+
+This document maps the proof modules, explains the gate, and records the local commands and the
+Bend restrictions that shaped the proofs. The laws themselves, with their proof strategies, are in
+[laws.md](laws.md).
+
+## Map of `proofs/`
+
+Each module has a header comment with the exact statement it proves. The groups below follow the
+purpose of the proof work, not the import order.
+
+### Feedback
+
+| File | What it proves |
+| --- | --- |
+| `feedback.bend` | Feedback equality is symmetric, from the component-wise symmetry of colour equality. This aligns `lookup`, which tests the feedbacks in one order, with `depth`, which tests them in the other. |
+| `depth.bend` | `lookup` and `depth.go` scan a child list in the same way, so the child found by one is the child found by the other. This bridges `Valid`, which is defined with `depth`, and trees selected with `lookup`. |
+
+### JSON
+
+| File | What it proves |
+| --- | --- |
+| `decimal.bend` | The arithmetic of decimal numerals: the printer's least-significant-first digit list, its value, and the canonical decimal form used by the independent renderer. |
+| `json_spec.bend` | The digit bridge and the renderer induction behind `print_matches_render`, plus the recogniser lemmas for decimal letters, guess arrays, feedback arrays, kids arrays and whole trees behind `tree_json_wellformed`. |
+
+### Grouping
+
+| File | What it proves |
+| --- | --- |
+| `groups.bend` | The membership half of the feedback partition: every candidate other than the guess lies in some group built by `groups_build`. |
+| `groupsdistinct.bend` | The groups built for one guess have pairwise different feedback patterns, so a child list has at most one child per feedback. |
+| `groupsmeasure.bend` | Turns the `groups_smaller` boolean into a proof-carrying list with one size bound per group, so the validity induction can read the bound for the group it is looking at. |
+| `depthgroups.bend` | A candidate in a group is found by the `depth` scan over the group children. The lemma threads the feedbacks still above the candidate in one traversal, so the membership fact is not needed twice. |
+| `children.bend` | Names the children of a guess in group order, proves that the accumulator inside the evaluator is their reverse, and that reversing twice is the identity. |
+| `kids.bend` | The child that `lookup` finds for a group's feedback is valid for that group, transported from facts about the `Maybe` result without using the lookup equation twice. |
+
+### Cost arithmetic
+
+| File | What it proves |
+| --- | --- |
+| `logic.bend` | Small logical helpers used across the proofs, including the type family that turns a boolean equality into `Empty` or `Unit`. |
+| `nat.bend` | The `Nat` order and arithmetic lemmas the solver needs. Base provides `Nat.cmp` and the comparisons but proves very little about them. |
+| `maybe.bend` | `Maybe Nat` costs with `None` as infinity: saturating addition, comparison, and minimum with `None` as the identity. |
+| `min.bend` | The minimum of a list is below its accumulator, below every member, and is either the accumulator or a member. This is the guess-selection fold. |
+| `sat.bend` | Saturating addition: a finite accumulated guess cost means every part is finite, which turns a finite guess cost into finite, valid child costs. |
+| `nodecost.bend` | The cost of `Node(g, kids)` over a candidate list is the number of candidates plus the children's costs, one per non-guess candidate. |
+| `groupcost.bend` | The total child cost over a group list, and how it grows when one word is added to a group. |
+| `classbound_nat.bend` | The multiplication lemmas behind the class bound: distributivity, commutativity, monotonicity, and a fold over a multiplied list. |
+| `classbound_sum.bend` | A saturating sum that stays below infinity is the plain sum of its parts, and the `Maybe` fold agrees with that sum. It returns both facts from one traversal. |
+| `classbound.bend` | The partition arithmetic: class sizes sum to at most `|S|`, so with a cost bound of `m*m` per class the node cost fits `|S|*|S|`, which is below the solver's infinity. |
+| `classbound_kids.bend` | The finished guess's node cost splits into the candidate count plus the class costs, and the stored cost agrees with the cost of the tree it carries. |
+| `optimalvalue.bend` | The value of a search result as a `Maybe` cost, its correspondence with the saturating sum, associativity of `MAdd`, and monotonicity of `MMin`. |
+| `optsum.bend` | The class sums of one guess in plain `Nat` order: the folded sum is below the children's total when every class result is below its child's cost. |
+
+### Cover lemma
+
+| File | What it proves |
+| --- | --- |
+| `cover.bend` | The cover lemma: a valid tree costs at least the per-class oracle's minimum for its root. A usable root splits into feedback classes; an unusable root has one class holding all candidates and descends on the same list. |
+| `cover_groups.bend` | A class is a subsequence of the candidate list, a class at least as long as the list is the list itself, and a full class exists when `groups_smaller` is false. |
+| `cover_kids.bend` | Turns a valid node's depth evidence into `GroupKids`: for every class, the child found by `lookup` is a valid tree for that class. |
+| `cover_list.bend` | List and equality helpers for the cover argument: syntactic word equality reflects to propositional equality, a subsequence is no longer than its supersequence, and a same-length subsequence is the list itself. |
+| `cover_maybe.bend` | The copyable `Maybe<&2, Nat>` used for oracle costs, with its own arithmetic and order lemmas so the oracle can copy entries freely. |
+| `cover_oracle.bend` | The per-class optimality oracle, the value it gives a guess, the minimum over guesses, and the order lemmas the cover induction uses. |
+
+### Validity
+
+| File | What it proves |
+| --- | --- |
+| `spec.bend` | The proof-carrying outcome of the solver: a tree with validity and optimality proofs, or a proof that no valid tree exists. |
+| `eval.bend` | A recursive specification evaluator for the flat schedule: the class fold, the guess fold and the guess-list fold, with equations showing that `step` is exactly that computation. |
+| `stepsched.bend` | A datatype mirror of the flat schedule. Inducting on it is inducting on the schedule the solver actually runs, while `items` erases the proof-only context back to the list `step` consumes. |
+| `best_nil.bend` | The zero-fuel base case: an empty candidate list has a valid tree of cost zero, or no valid tree when the guess list is empty. |
+| `bestok.bend` | The invariant that the stored result is either absent or a valid tree, and that `better` and the zero-fuel fold preserve it. |
+| `nodevalid.bend` | A node built from a guess and its group children is valid: the guess is in the input list, every non-guess candidate is in a class, and each class child gives its candidates a depth. |
+| `validbag.bend` | Flattens the per-word depth facts of the classes into one linear bag, then strings them back together in candidate order for the node. |
+| `solvevalid.bend` | The arithmetic and fold plumbing for validity, and the node step that recovers each candidate's depth from its feedback class. |
+| `stepvalid.bend` | Every finite result of `step` is a valid tree, by induction on fuel together with a loop invariant over the schedule and the accumulated children. |
+| `mainvalid.bend` | The validity invariant at every fuel for the whole fused search, ending in `Laws.solve_valid`. |
+
+### Optimality
+
+| File | What it proves |
+| --- | --- |
+| `optnode.bend` | The node step of the optimality induction: for a usable root, the node cost splits into one guess per candidate plus the class costs, and the class results are below the children's costs. |
+| `optfold.bend` | `better` keeps the cheaper result, so the folded guess cost is below every candidate cost the fold produced. The facts are `Bool` equalities so they can be reused. |
+| `optguess.bend` | The guess fold reaches the cost of the guess a valid tree uses: that guess is in the list, and the fold only lowers the cost from there. |
+| `optind.bend` | The fuel induction of the lower bound: the stored cost is at most the cost of any valid tree, with every class of every guess handed its own obligation at the smaller fuel. |
+| `optcost.bend` | When the stored cost is finite it is the cost of the tree the search returns, because the saturating sum is then a plain sum and the returned tree is the node of class results. |
+| `optcomplete.bend` | Completeness: if a valid tree exists, the stored cost is below infinity and fits the square of the candidate count, by the same fuel induction over the classes of the given tree. |
+| `optstrong.bend` | Merges the optimality and completeness walks: one traversal of the given tree produces both the cost comparison and the class size and cost bounds, ending in `Laws.solve_optimal`. |
+
+## How the gate works
+
+`scripts/check-proofs.sh` is the gate. CI runs it, and contributors run the same script locally.
+
+- It reads the law names from the `law <name>:` lines in `LAWS.bend` and the proved names from the
+  `def Laws.<name>(` lines in `PROOF.bend`.
+- Every law must have a proof def, unless it is named in `PENDING_LAWS`.
+- Every name in `PENDING_LAWS` must be a law in `LAWS.bend` and must not have a proof def. A stale
+  or misspelled entry fails the gate.
+
+`PENDING_LAWS` is a plain text file at the repository root, one law name per line. Blank lines and
+`#` comments are ignored. It exists so that a law can be stated before its implementation and still
+pass the gate. It is not a place for broken proofs.
+
+When the pending list is empty, the gate requires `bend PROOF.bend` to exit 0 and print
+`ALL PROOFS CHECK`, then runs `bend PROOF.bend --verdict` and requires the same. An empty list means
+that no law is allowed to be open: every law has a proof and the whole development must pass both
+Bend's checker and the kernel recheck. It also prints the summary, currently:
+
+```text
+check-proofs: 8 of 8 law(s) proved, 0 pending
+```
+
+When the pending list is non-empty, the gate instead requires `bend PROOF.bend` to exit 1 with
+`SOME PROOFS FAIL` and exactly one error, `Error: N TODOs found.`, where `N` is the number of
+pending laws. Any other error fails the gate, so a pending law means "not attempted", never
+"broken". In that mode `--verdict` is skipped, because the kernel needs every proof to be present.
+
+## Running the checks locally
+
+From the repository root:
+
+```sh
+bend PROOF.bend
+bend PROOF.bend --verdict
+scripts/check-proofs.sh
+```
+
+- `bend PROOF.bend` checks and proves the development with Bend's own checker. Success is
+  `ALL PROOFS CHECK` and exit 0.
+- `bend PROOF.bend --verdict` checks it again with the proven kernel. Success is the same line.
+- `scripts/check-proofs.sh` runs both, after checking the law and pending lists.
+
+To type-check the law statements alone, without proving them, run
+`bend LAWS.bend --check-only`. Open laws appear there as TODOs.
+
+The checks need the toolchain pinned in `.github/workflows/proofs.yml`:
+
+| Tool | Version |
+| --- | --- |
+| Bend | 2.0.40 |
+| elan | 4.4.0 |
+| Lean | `leanprover/lean4:v4.34.0` |
+
+CI also sets `BEND_NO_TELEMETRY=1` and caches the Lean toolchain and the kernel under
+`~/.bend/bendtt`. A toolchain bump changes what the proofs accept, so it belongs in its own pull
+request.
+
+## What the Lean kernel recheck is
+
+Bend's normal check is its own type checker. `--verdict` additionally translates the development to
+BendTT and rechecks it with the proven kernel, which runs on Lean. The two checks are independent:
+a proof that Bend accepts but the kernel rejects fails the gate. That is why the verdict run needs
+elan and the pinned Lean toolchain, and why the gate only runs it when every law has a proof.
+
+## Bend limitations that shaped the proofs
+
+The proofs are written around three restrictions in Bend. They explain the shape of the modules,
+not just their content.
+
+**No mutual recursion and no forward references.** A definition can only use definitions that
+appear before it, and two definitions cannot call each other. The proofs are therefore split into
+small modules with a linear import order: a lemma lives in an earlier file than every proof that
+uses it. It also means a useful lemma shape is sometimes written twice for two types rather than
+shared through a mutual definition, as `maybe.bend` and `cover_maybe.bend` do for the two `Maybe`
+cost types.
+
+**Proof values are affine.** A hypothesis or proof value is consumed when it is matched, so a proof
+cannot use the same fact twice in two branches. Two techniques avoid that:
+
+- State the fact as a `Bool` equality (`{... == True{} : Bool}`). A boolean equality is `Data`, so
+  it can be copied and used in several places. `optfold.bend`, `optind.bend` and `classbound_kids.bend`
+  rely on this.
+- Prove both facts in one traversal and return them together. `classbound_sum.bend` returns the
+  plain sum and the `Maybe` fold together, `depthgroups.bend` threads the feedbacks still above the
+  candidate in one list, and `optstrong.bend` merges the optimality and completeness walks so the
+  same class subtrees are read once.
+
+**Recursion must be structural.** The solver's recursion is fused into one definition, `step`,
+driven by a flat schedule and a fuel argument, because that is the form whose termination Bend
+accepts. The proofs follow the same structure: they induct on the fuel, on the schedule datatype in
+`stepsched.bend`, or on the candidate list, and the class results are handed to the next level as a
+single conjunction rather than fetched again from an induction hypothesis.
