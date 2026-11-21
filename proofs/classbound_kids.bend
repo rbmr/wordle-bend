@@ -27,6 +27,7 @@ import ./nodecost.bend as NodeCost
 import ./classbound_nat.bend as CBN
 import ./sat.bend as Sat
 import ./classbound.bend as CBProof
+import ./classbound_sum.bend as CBS
 
 # Every group feedback differs from `fb`.
 def CBK.allNe(+fb: +List<Feedback.Color>, +gs: +List<Groups.Group>) -> Bool:
@@ -529,3 +530,44 @@ def CBK.node_bound_sq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     CBK.bounds_of(p, G, S, Groups.groups_build(g, S, Nil{}), inf,
       Groups.len_words(S), f),
     CBProof.CB.partition_le(g, S))
+
+# The stored candidate cost fits the square of the top-level candidate count.
+# This is the upper half of the optimality invariant: below infinity the guess
+# cost is a plain sum, and the class bounds place it under `N*N`.
+def CBK.sat_node_upper(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +N: Nat,
+    f: CBK.ClassFits(p, G, S, Groups.groups_build(g, S, Nil{}), inf,
+      Groups.len_words(S)),
+    +leN: {Nat.is_le(Groups.len_words(S), N) == True{} : Bool}) ->
+  {Nat.is_le(SolveRef.sat_add(inf, Groups.len_words(S),
+     CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+     Nat.mul(N, N)) == True{} : Bool}:
+  +le1 : {Nat.is_le(SolveRef.sat_add(inf, Groups.len_words(S),
+             CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+            Nat.add(Groups.len_words(S),
+             CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))))
+          == True{} : Bool} =
+    CBS.CU.sat_add_le_add(inf, Groups.len_words(S),
+      CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
+  +le2 : {Nat.is_le(Nat.add(Groups.len_words(S),
+             CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+            Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool} =
+    CBK.node_bound_sq(p, G, S, g, inf, f)
+  +le3a : {Nat.is_le(Nat.mul(Groups.len_words(S), Groups.len_words(S)),
+             Nat.mul(N, Groups.len_words(S))) == True{} : Bool} =
+    CBN.CB.is_le_mul_l(Groups.len_words(S), N, Groups.len_words(S), leN)
+  +le3b : {Nat.is_le(Nat.mul(N, Groups.len_words(S)), Nat.mul(N, N))
+           == True{} : Bool} =
+    CBN.CB.is_le_mul_r(Groups.len_words(S), N, N, leN)
+  +le3 : {Nat.is_le(Nat.mul(Groups.len_words(S), Groups.len_words(S)),
+            Nat.mul(N, N)) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(Nat.mul(Groups.len_words(S), Groups.len_words(S)),
+      Nat.mul(N, Groups.len_words(S)), Nat.mul(N, N), le3a, le3b)
+  NatProof.Nat.is_le_trans(SolveRef.sat_add(inf, Groups.len_words(S),
+      CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+    Nat.add(Groups.len_words(S),
+      CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+    Nat.mul(N, N), le1,
+    NatProof.Nat.is_le_trans(Nat.add(Groups.len_words(S),
+        CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+      Nat.mul(Groups.len_words(S), Groups.len_words(S)), Nat.mul(N, N), le2, le3))
