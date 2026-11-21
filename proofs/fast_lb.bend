@@ -20,6 +20,7 @@ import ../src/groups.bend as Groups
 import ../src/feedback.bend as Feedback
 import ./logic.bend as Logic
 import ./nat.bend as NatProof
+import ./feedback.bend as FbProof
 import ./eval.bend as Eval
 import ./sat.bend as Sat
 import ./bestok.bend as BO
@@ -72,6 +73,31 @@ def FS.max_cong(+a1: Nat, +a2: Nat, +b1: Nat, +b2: Nat,
     Equal.cong(Nat, Nat, x => Nat.max(x, b1), a1, a2, ea),
     Equal.cong(Nat, Nat, y => Nat.max(a2, y), b1, b2, eb))
 
+# `1 + word_mult(h, t)` agrees with `LBProof2.LB.mult(h, h <> t)`.
+def FS.head_mult_eq(+h: +List<Nat>, +t: +List<+List<Nat>>) ->
+  {Nat.add(1n, SolveFast.word_mult(h, t))
+   == LBProof2.LB.mult(h, h <> t) : Nat}:
+  +hith : {LBProof2.LB.hit(h, h) == 1n : Nat} =
+    Equal.trans(Nat, LBProof2.LB.hit(h, h), LBProof2.LB.hit_bool(True{}), 1n,
+      LBProof2.LB.hit_bool_eq(Feedback.word_eq(h, h), True{},
+        FbProof.FbPrf.word_eq_refl(h)),
+      {==})
+  +e1 : {Nat.add(1n, SolveFast.word_mult(h, t))
+         == Nat.add(1n, LBProof2.LB.mult(h, t)) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+      SolveFast.word_mult(h, t), LBProof2.LB.mult(h, t),
+      FS.word_mult_eq(h, t))
+  +e2 : {Nat.add(1n, LBProof2.LB.mult(h, t))
+         == Nat.add(LBProof2.LB.hit(h, h), LBProof2.LB.mult(h, t)) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.add(x, LBProof2.LB.mult(h, t)),
+      1n, LBProof2.LB.hit(h, h),
+      Equal.sym(Nat, LBProof2.LB.hit(h, h), 1n, hith))
+  Equal.trans(Nat,
+    Nat.add(1n, SolveFast.word_mult(h, t)),
+    Nat.add(1n, LBProof2.LB.mult(h, t)),
+    LBProof2.LB.mult(h, h <> t),
+    e1, e2)
+
 # `SolveFast.max_mult` agrees with `LBProof2.LB.maxMult`.
 def FS.max_mult_eq(+S: +List<+List<Nat>>) ->
   {SolveFast.max_mult(S) == LBProof2.LB.maxMult(S) : Nat}:
@@ -80,9 +106,9 @@ def FS.max_mult_eq(+S: +List<+List<Nat>>) ->
       {==}
     case Con{+h, +t}:
       FS.max_cong(
-        SolveFast.word_mult(h, h <> t), LBProof2.LB.mult(h, h <> t),
+        Nat.add(1n, SolveFast.word_mult(h, t)), LBProof2.LB.mult(h, h <> t),
         SolveFast.max_mult(t), LBProof2.LB.maxMult(t),
-        FS.word_mult_eq(h, h <> t),
+        FS.head_mult_eq(h, t),
         FS.max_mult_eq(t))
 
 # Subtracting zero leaves a number unchanged.

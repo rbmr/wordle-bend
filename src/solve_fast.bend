@@ -113,13 +113,14 @@ def word_mult(+g: +List<Nat>, +S: +List<+List<Nat>>) -> Nat:
     case Con{+h, +t}:
       Nat.add(hit_word(g, h), word_mult(g, t))
 
-# The largest multiplicity of any candidate in `S`.
+# The largest multiplicity of any candidate in `S`. Each head `h` contributes
+# `1 + word_mult(h, t)` without comparing `h` with itself.
 def max_mult(+S: +List<+List<Nat>>) -> Nat:
   match S:
     case Nil{}:
       0n
     case Con{+h, +t}:
-      Nat.max(word_mult(h, S), max_mult(t))
+      Nat.max(Nat.add(1n, word_mult(h, t)), max_mult(t))
 
 # The depth-two lower bound on the cost of any valid tree for a class `ws`:
 # `2 * |ws| - max_mult(ws)` (`proofs/lb_twice.bend`).
@@ -318,9 +319,37 @@ def schedule_go(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>, +n: Nat) -> +List<
       schedule_guess(g, groups, n, schedule_go(rest, S, n),
                      groups_smaller_fast(n, groups))
 
+# Fast schedule for a singleton candidate list `[w]`: a guess `g` is usable
+# exactly when `g == w` (producing no children and bound 1); any `g != w` puts
+# `w` into one class of size 1 and is unusable, so its feedback does not need
+# to be computed.
+def schedule_one_guess(+g: +List<Nat>, +rest: +List<Item>,
+                       same: Bool) -> +List<Item>:
+  match same:
+    case True{}:
+      Begin{g, 1n} <> (End{} <> rest)
+    case False{}:
+      rest
+
+def schedule_one(+G: +List<+List<Nat>>, +w: +List<Nat>) -> +List<Item>:
+  match G:
+    case Nil{}:
+      Nil{}
+    case Con{+g, +rest}:
+      schedule_one_guess(g, schedule_one(rest, w), word_eq_fast(g, w))
+
 # The schedule for a guess list: one block per usable guess, in G order.
 def schedule(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) -> +List<Item>:
-  schedule_go(G, S, Groups.len_words(S))
+  match S:
+    case Nil{}:
+      schedule_go(G, Nil{}, 0n)
+    case Con{+w, +t}:
+      match t:
+        case Nil{}:
+          schedule_one(G, w)
+        case Con{+w2, +t2}:
+          schedule_go(G, w <> (w2 <> t2),
+            Groups.len_words(w <> (w2 <> t2)))
 
 # One step of the pruned search. The arguments and the fuel are the reference's;
 # `skip` says whether the current block is skipped. A skipped block searches no

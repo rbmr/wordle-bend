@@ -504,3 +504,50 @@ def FG.groups_smaller_fast_eq(+S: +List<+List<Nat>>,
             SolveFast.groups_smaller_fast(Groups.len_words(S), rest),
             Groups.groups_smaller(S, rest),
             FG.groups_smaller_fast_eq(S, rest))
+
+# One guess step of `schedule_one` agrees with `schedule_go` on `[w]`.
+def FG.schedule_one_step_eq(+g: +List<Nat>, +w: +List<Nat>,
+    +tail1: +List<SolveFast.Item>, +tail2: +List<SolveFast.Item>,
+    same: Bool, et: {tail1 == tail2 : +List<SolveFast.Item>}) ->
+  {SolveFast.schedule_one_guess(g, tail1, same)
+   == SolveFast.schedule_guess(g,
+        SolveFast.groups_next_acc(g, w, Nil{}, same), 1n, tail2,
+        SolveFast.groups_smaller_fast(1n,
+          SolveFast.groups_next_acc(g, w, Nil{}, same)))
+   : +List<SolveFast.Item>}:
+  match same:
+    case True{}:
+      Equal.cong(+List<SolveFast.Item>, +List<SolveFast.Item>,
+        r => SolveFast.Begin{g, 1n} <> (SolveFast.End{} <> r),
+        tail1, tail2, et)
+    case False{}:
+      et
+
+# `schedule_one(G, w)` agrees with `schedule_go(G, [w], 1n)`.
+def FG.schedule_one_eq(+G: +List<+List<Nat>>, +w: +List<Nat>) ->
+  {SolveFast.schedule_one(G, w)
+   == SolveFast.schedule_go(G, w <> Nil{}, 1n) : +List<SolveFast.Item>}:
+  match G:
+    case Nil{}:
+      {==}
+    case Con{+g, +rest}:
+      FG.schedule_one_step_eq(g, w,
+        SolveFast.schedule_one(rest, w),
+        SolveFast.schedule_go(rest, w <> Nil{}, 1n),
+        SolveFast.word_eq_fast(g, w),
+        FG.schedule_one_eq(rest, w))
+
+# `schedule(G, S)` agrees with `schedule_go(G, S, len_words(S))`.
+def FG.schedule_eq(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) ->
+  {SolveFast.schedule(G, S)
+   == SolveFast.schedule_go(G, S, Groups.len_words(S))
+   : +List<SolveFast.Item>}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{+w, +t}:
+      match t:
+        case Nil{}:
+          FG.schedule_one_eq(G, w)
+        case Con{w2, t2}:
+          {==}
