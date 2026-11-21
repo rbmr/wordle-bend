@@ -256,3 +256,34 @@ def SolveProof.groups_smaller_sound(+S: +List<+List<Nat>>, +groups: +List<Solve.
            SolveProof.groups_smaller_sound(S, rest,
              Bool.and_true_r(Nat.is_lt(Solve.len_words(ws), Solve.len_words(S)),
                              Solve.groups_smaller(S, rest), e)))
+
+def Bool.true_ne_false(e: {True{} == False{} : Bool}) -> Empty:
+  Bool.false_ne_true(Equal.sym(Bool, True{}, False{}, e))
+
+def Cmp.lt_of_ge_false(c: Cmp, e: {Cmp.is_ge(c) == False{} : Bool}) ->
+  {Cmp.is_lt(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      {==}
+    case EQ{}:
+      Empty.absurd({Cmp.is_lt(EQ{}) == True{} : Bool}, Bool.true_ne_false(e))
+    case GT{}:
+      Empty.absurd({Cmp.is_lt(GT{}) == True{} : Bool}, Bool.true_ne_false(e))
+
+def Cmp.ge_of_lt_false(c: Cmp, e: {Cmp.is_lt(c) == False{} : Bool}) ->
+  {Cmp.is_ge(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      Empty.absurd({Cmp.is_ge(LT{}) == True{} : Bool}, Bool.true_ne_false(e))
+    case EQ{}:
+      {==}
+    case GT{}:
+      {==}
+
+def Nat.lt_of_ge_false(a: Nat, b: Nat, e: {Nat.is_ge(a, b) == False{} : Bool}) ->
+  {Nat.is_lt(a, b) == True{} : Bool}:
+  Cmp.lt_of_ge_false(Nat.cmp(a, b), e)
+
+def Nat.ge_of_lt_false(a: Nat, b: Nat, e: {Nat.is_lt(a, b) == False{} : Bool}) ->
+  {Nat.is_ge(a, b) == True{} : Bool}:
+  Cmp.ge_of_lt_false(Nat.cmp(a, b), e)
