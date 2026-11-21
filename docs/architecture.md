@@ -75,12 +75,17 @@ proof is a definition named after the law, `def Laws.<law>`. See [laws.md](laws.
 The command-line entry point:
 
 ```sh
-bend src/main.bend --guesses words/guesses.txt --candidates words/candidates.txt
+bend src/main.bend -o wordle-bend
+./wordle-bend --guesses words/guesses.txt --candidates words/candidates.txt
 ```
 
-It reads both files (one word per line), maps letters to `Nat` by code point with lower-case ASCII
-folded to upper case, calls `solve`, prints the JSON tree on stdout, or a clear error on stderr when
-`solve` returns `None`. No other flags are accepted.
+It reads the two files named by `--guesses` and `--candidates`, maps letters to `Nat` by code
+point, calls `solve`, and prints the JSON tree on stdout. The whole of each file is read, in
+chunks, so a list is never truncated. Leading and trailing whitespace on a line is ignored, which
+handles CRLF files and blank lines, and letters are left exactly as they are, so any alphabet
+works. `--help` prints the usage. Every error, including a missing or unknown flag, an unreadable
+file, an empty list and a `None` from `solve`, prints one line on stderr and exits non-zero. See
+[cli.md](cli.md) for the full command-line contract.
 
 ## Data flow
 
