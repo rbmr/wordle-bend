@@ -1,0 +1,31 @@
+#!/bin/sh
+# Reject commit messages that are not Conventional Commits, and reject
+# Co-authored-by trailers.
+#
+# Usage: commit-msg <message-file>   (invoked by git)
+
+set -eu
+
+msg_file=$1
+
+types='feat|fix|docs|chore|refactor|test|perf|ci|build'
+
+# Drop comment lines so the checks see the message git will record.
+message=$(git stripspace --strip-comments <"$msg_file")
+
+subject=$(printf '%s\n' "$message" | head -n 1)
+
+if ! printf '%s\n' "$subject" | grep -Eq "^($types)(\([a-z0-9][a-z0-9._/-]*\))?: [a-z0-9]"; then
+	echo "commit-msg: subject is not a Conventional Commit" >&2
+	echo "commit-msg: expected '<type>(<optional scope>): <lowercase imperative summary>'" >&2
+	echo "commit-msg: types are: feat fix docs chore refactor test perf ci build" >&2
+	echo "commit-msg: got: $subject" >&2
+	exit 1
+fi
+
+if printf '%s\n' "$message" | grep -Eqi '^[[:space:]]*co-authored-by[[:space:]]*:'; then
+	echo "commit-msg: Co-authored-by trailers are not allowed" >&2
+	exit 1
+fi
+
+exit 0
