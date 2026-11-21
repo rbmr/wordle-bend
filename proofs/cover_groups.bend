@@ -180,6 +180,14 @@ def Cover.all_subseq_build(+g: +List<Nat>, +S: +List<+List<Nat>>,
       Cover.all_subseq_build_go(g, w, t, acc, ys, Feedback.word_eq(g, w), {==}, p,
         acc2 => ys2 => p2 => Cover.all_subseq_build(g, t, acc2, ys2, p2))
 
+# Transport the subsequence invariant along an equality of group lists.
+def Cover.groups_subseq_eq(+S: +List<+List<Nat>>,
+    +g1: +List<Groups.Group>, +g2: +List<Groups.Group>,
+    e: {g1 == g2 : +List<Groups.Group>},
+    p: Cover.AllSubseq(g1, S)) -> Cover.AllSubseq(g2, S):
+  %e : Cover.AllSubseq(_, S)
+  p
+
 # The starting call: every class is a subsequence of `S`.
 def Cover.all_subseq_nil(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
   Cover.AllSubseq(Groups.groups_build(g, S, Nil{}), S):

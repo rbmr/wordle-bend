@@ -16,6 +16,7 @@ import ./cover_maybe.bend as CoverMaybe
 import ./cover_list.bend as CoverList
 import ./nodecost.bend as NodeCost
 import ./groupcost.bend as GC
+import ./groups.bend as Grp
 
 # A lower bound `n` on every valid tree for the candidate list `ws`, or the
 # claim that no valid tree exists at all.
@@ -166,13 +167,17 @@ def Cover.TotalOpts(+os: +List<Maybe<&2, Nat>>, +groups: +List<Groups.Group>) ->
         case Con{gp, gs2}:
           CoverMaybe.Cover.MAdd(o, Cover.TotalOpts(os2, gs2))
 
-# The value of one guess: `|S|` plus its class optima, or infinity.
-def Cover.GuessValue(+S: +List<+List<Nat>>, +g: +List<Nat>,
-    +os: +List<Maybe<&2, Nat>>) -> Maybe<&2, Nat>:
-  +groups = Groups.groups_build(g, S, Nil{})
+# The value of one guess for an explicit class list.
+def Cover.GuessValueOf(+S: +List<+List<Nat>>, +g: +List<Nat>,
+    +os: +List<Maybe<&2, Nat>>, +groups: +List<Groups.Group>) -> Maybe<&2, Nat>:
   Feedback.Bool.case(Maybe<&2, Nat>, Groups.groups_smaller(S, groups),
     CoverMaybe.Cover.MAdd(Some{Groups.len_words(S)}, Cover.TotalOpts(os, groups)),
     None{})
+
+# The value of one guess: `|S|` plus its class optima, or infinity.
+def Cover.GuessValue(+S: +List<+List<Nat>>, +g: +List<Nat>,
+    +os: +List<Maybe<&2, Nat>>) -> Maybe<&2, Nat>:
+  Cover.GuessValueOf(S, g, os, Groups.groups_build(g, S, Nil{}))
 
 # The minimum of the guess values, with no guesses giving infinity.
 def Cover.BestValue(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
@@ -319,7 +324,7 @@ def Cover.total_opts_le(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +os: +List<Maybe<&2, Nat>>, +groups: +List<Groups.Group>,
     +kids: +List<Tree.Child>,
     ok: Cover.EntryOK(G, S, os, groups),
-    small: Cover.EntrySmall(S, os, groups),
+    small: Cover.GroupSmall(S, groups),
     kidsok: Cover.GroupKids(G, kids, groups)) ->
   CoverMaybe.Cover.MLe(Cover.TotalOpts(os, groups), Some{GC.GC.Total(kids, groups)}):
   match os:
@@ -350,33 +355,42 @@ def Cover.total_opts_le(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
 # The guess value is below the cost of the node the guess builds.
 def Cover.guess_value_le(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +g: +List<Nat>, +os: +List<Maybe<&2, Nat>>, +kids: +List<Tree.Child>,
+    +groups: +List<Groups.Group>,
+    +eg: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
     v: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
-    +us: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{} : Bool},
-    ok: Cover.GuessOK(G, S, g, os),
-    small: Cover.GuessSmall(S, g, os),
-    kidsok: Cover.GroupKids(G, kids, Groups.groups_build(g, S, Nil{}))) ->
-  CoverMaybe.Cover.MLe(Cover.GuessValue(S, g, os),
+    +us: {Groups.groups_smaller(S, groups) == True{} : Bool},
+    ok: Cover.EntryOK(G, S, os, groups),
+    small: Cover.GroupSmall(S, groups),
+    kidsok: Cover.GroupKids(G, kids, groups)) ->
+  CoverMaybe.Cover.MLe(Cover.GuessValueOf(S, g, os, groups),
     Some{Tree.cost(Tree.Node{g, kids}, S)}):
-  +groups : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
   +n : Nat = Groups.len_words(S)
   tot : CoverMaybe.Cover.MLe(Cover.TotalOpts(os, groups),
-            Some{GC.GC.Total(kids, groups)}) =
+          Some{GC.GC.Total(kids, groups)}) =
     Cover.total_opts_le(G, S, os, groups, kids, ok, small, kidsok)
   madd : CoverMaybe.Cover.MLe(
-            CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups)),
-            Some{Nat.add(n, GC.GC.Total(kids, groups))}) =
+           CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups)),
+           Some{Nat.add(n, GC.GC.Total(kids, groups))}) =
     CoverMaybe.Cover.MAdd_le_some(Some{n}, Cover.TotalOpts(os, groups),
       n, GC.GC.Total(kids, groups), CoverMaybe.Cover.MLe_refl(Some{n}), tot)
-  gv : {Cover.GuessValue(S, g, os)
-         == CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups))
-         : Maybe<&2, Nat>} =
-    Cover.guess_value_usable(S, g, os, us)
+  gv : {Cover.GuessValueOf(S, g, os, groups)
+        == CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups))
+        : Maybe<&2, Nat>} =
+    Cover.bool_case_true(Maybe<&2, Nat>, Groups.groups_smaller(S, groups),
+      CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups)), None{}, us)
   cn : {Tree.cost(Tree.Node{g, kids}, S)
-         == Nat.add(Groups.len_words(S), NodeCost.NodeCost.kid_sum(g, kids, S)) : Nat} =
+        == Nat.add(Groups.len_words(S), NodeCost.NodeCost.kid_sum(g, kids, S)) : Nat} =
     NodeCost.NodeCost.cost_node(g, kids, S, v)
-  gt : {GC.GC.Total(kids, groups) == NodeCost.NodeCost.kid_sum(g, kids, S) : Nat} =
+  gt0 : {GC.GC.Total(kids, Groups.groups_build(g, S, Nil{}))
+         == NodeCost.NodeCost.kid_sum(g, kids, S) : Nat} =
     GC.GC.groups_build_total(g, kids, S)
-  e_cost : {Nat.add(n, GC.GC.Total(kids, groups))
+  gt : {GC.GC.Total(kids, groups) == NodeCost.NodeCost.kid_sum(g, kids, S) : Nat} =
+    Equal.trans(Nat, GC.GC.Total(kids, groups),
+      GC.GC.Total(kids, Groups.groups_build(g, S, Nil{})),
+      NodeCost.NodeCost.kid_sum(g, kids, S),
+      Equal.cong(+List<Groups.Group>, Nat, z => GC.GC.Total(kids, z),
+        groups, Groups.groups_build(g, S, Nil{}), eg), gt0)
+  +e_cost : {Nat.add(n, GC.GC.Total(kids, groups))
              == Tree.cost(Tree.Node{g, kids}, S) : Nat} =
     Equal.trans(Nat, Nat.add(n, GC.GC.Total(kids, groups)),
       Nat.add(n, NodeCost.NodeCost.kid_sum(g, kids, S)),
@@ -385,12 +399,12 @@ def Cover.guess_value_le(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         GC.GC.Total(kids, groups), NodeCost.NodeCost.kid_sum(g, kids, S), gt),
       Equal.sym(Nat, Tree.cost(Tree.Node{g, kids}, S),
         Nat.add(n, NodeCost.NodeCost.kid_sum(g, kids, S)), cn))
-  e1 : CoverMaybe.Cover.MLe(Cover.GuessValue(S, g, os),
+  e1 : CoverMaybe.Cover.MLe(Cover.GuessValueOf(S, g, os, groups),
           Some{Nat.add(n, GC.GC.Total(kids, groups))}) =
-    Cover.mle_eq_l(Cover.GuessValue(S, g, os),
+    Cover.mle_eq_l(Cover.GuessValueOf(S, g, os, groups),
       CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups)),
       Some{Nat.add(n, GC.GC.Total(kids, groups))}, gv, madd)
-  Cover.mle_eq_r(Cover.GuessValue(S, g, os),
+  Cover.mle_eq_r(Cover.GuessValueOf(S, g, os, groups),
     Some{Nat.add(n, GC.GC.Total(kids, groups))},
     Some{Tree.cost(Tree.Node{g, kids}, S)},
     Cover.some_eq(Nat.add(n, GC.GC.Total(kids, groups)),
@@ -543,3 +557,12 @@ def Cover.find(+G0: +List<+List<Nat>>, +S: +List<+List<Nat>>,
           Cover.find_head(G0, S, g, h, rest, es, erest, okh, okrest,
             Feedback.word_eq(g, h), {==}, mem,
             or2 => m2 => Cover.find(G0, S, rest, erest, or2, g, m2))
+
+# Transport the per-group depth facts along an equality of group lists.
+def Cover.allgd_eq(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +g1: +List<Groups.Group>, +g2: +List<Groups.Group>,
+    e: {g1 == g2 : +List<Groups.Group>},
+    agd: Grp.Grp.AllGroupDepths(g, kids, g1)) ->
+  Grp.Grp.AllGroupDepths(g, kids, g2):
+  %e : Grp.Grp.AllGroupDepths(g, kids, _)
+  agd
