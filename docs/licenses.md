@@ -18,10 +18,11 @@ Word lists are data with their own origin and their own terms, and those terms a
 MIT, and sometimes not permissive at all. The MIT licence on the code does not extend to data
 bundled in `words/`.
 
-The lists in `words/` were carried over unchanged from the earlier, unverified Rust implementation
-of this solver. No upstream source is asserted here, and no licence is claimed for them beyond what
-that earlier implementation established. If the lists are replaced or a new list is added, record
-its source, licence, attribution and any modification in this document in the same change.
+The lists in `words/` were carried over from the earlier, unverified Rust implementation of this
+solver; `words/guesses.txt` was then upper-cased as recorded below. No upstream source is asserted
+here, and no licence is claimed for them beyond what that earlier implementation established. If
+the lists are replaced or a new list is added, record its source, licence, attribution and any
+modification in this document in the same change.
 
 | File | Contents | Provenance |
 | --- | --- | --- |
