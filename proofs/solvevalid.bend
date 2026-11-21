@@ -854,3 +854,103 @@ def SV.all_depth(+p: Nat, +G: +List<+List<Nat>>, +S0: +List<+List<Nat>>,
             List.append(&2, +List<Nat>,
               List.append(&2, +List<Nat>, pre, w <> Nil{}), t),
             ePre, SV.append_singleton(pre, w, t))))
+
+# Split a pair of a bound and a product.
+def SV.use_costs(-R: Type, +inf: Nat,
+    p: {Nat.is_lt(0n, inf) == True{} : Bool}
+       & Sat.SB.CostsLt(inf, Nil{}),
+    k: Sat.SB.CostsLt(inf, Nil{}) -> R) -> R:
+  match p:
+    case (a, b):
+      k(b)
+
+# Split the result of `items_lt`.
+def SV.split_items(-R: Type,
+    r: {Nat.is_lt(0n, 0n) == True{} : Bool} & R, k: R -> R) -> R:
+  match r:
+    case (a, b):
+      k(b)
+
+# Transport a validity proof along an equality of trees.
+def SV.valid_transport(+t1: Tree.Tree, +t2: Tree.Tree,
+    e: {t1 == t2 : Tree.Tree}, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    v: Tree.Valid(t1, G, S)) -> Tree.Valid(t2, G, S):
+  %e : Tree.Valid(_, G, S)
+  v
+
+# Open the bound-and-costs pair of `items_lt`.
+def SV.items_go(-R: Type, +inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    r: {Nat.is_lt(0n, inf) == True{} : Bool}
+       & Sat.SB.CostsLt(inf, Sat.SB.child_costs(p, G, groups, inf)),
+    k: Sat.SB.CostsLt(inf, Sat.SB.child_costs(p, G, groups, inf)) -> R) -> R:
+  match r:
+    case (a, b):
+      k(b)
+
+# The node of a finished guess is valid when its cost is finite.
+def SV.end_valid(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +kids: +List<Tree.Child>, sum: Nat,
+    +lt: {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S), sum), inf) == True{}
+          : Bool},
+    oks: SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{})),
+    +eSum: {sum == Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+    +eKids: {kids == SolveRef.rev_kids(
+               CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{})
+             : +List<Tree.Child>},
+    gin: Tree.WordIn(g, G)) ->
+  Tree.Valid(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S):
+  +eSumLt : {Nat.is_lt(sum, inf) == True{} : Bool} =
+    Sat.SB.sat_add_lt_r(inf, Groups.len_words(S), sum, lt)
+  SV.items_go(Tree.Valid(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S),
+    inf, p, G, Groups.groups_build(g, S, Nil{}),
+    Sat.SB.items_lt(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+    Nil{}, 0n, inf,
+    Equal.trans(Bool,
+      Nat.is_lt(Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), inf),
+      Nat.is_lt(sum, inf), True{},
+      Equal.sym(Bool, Nat.is_lt(sum, inf),
+        Nat.is_lt(Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), inf),
+        Equal.cong(Nat, Bool, x => Nat.is_lt(x, inf), sum,
+          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), eSum)),
+      eSumLt)),
+    costs =>
+  SV.epi(
+    Tree.Valid(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S),
+    p, G, S, g, inf, Groups.groups_build(g, S, Nil{}), Nil{},
+    Groups.groups_build(g, S, Nil{}), {==}, {==}, costs, oks,
+    kik => bag => eWords =>
+      SV.valid_transport(
+        Tree.Node{g, CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)},
+        Tree.Node{g, SolveRef.rev_kids(kids, Nil{})},
+        Equal.cong(+List<Tree.Child>, Tree.Tree,
+          l => Tree.Node{g, l},
+          CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+          SolveRef.rev_kids(kids, Nil{}),
+          Equal.trans(+List<Tree.Child>,
+            CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+            SolveRef.rev_kids(SolveRef.rev_kids(
+              CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+            SolveRef.rev_kids(kids, Nil{}),
+            Equal.sym(+List<Tree.Child>,
+              SolveRef.rev_kids(SolveRef.rev_kids(
+                CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+              CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+              CH.CH.rev_rev(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf))),
+            Equal.sym(+List<Tree.Child>,
+              SolveRef.rev_kids(kids, Nil{}),
+              SolveRef.rev_kids(SolveRef.rev_kids(
+                CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+              Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
+                l => SolveRef.rev_kids(l, Nil{}), kids,
+                SolveRef.rev_kids(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}),
+                eKids)))),
+        G, S,
+        (((gin, kik)),
+         SV.all_depth(p, G, S, g, inf, Groups.groups_build(g, S, Nil{}),
+           CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+           bag, eWords, {==}, S, Nil{}, {==})))))
