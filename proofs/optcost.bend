@@ -1118,3 +1118,28 @@ def OC.c_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     OC.CFlat(fuel, inf, G, jobs), MV.MV.Flat(fuel, inf, G, jobs),
     OC.c_flat_both(fuel, inf, G, jobs, bounds, hz),
     cf => mf => cf)
+
+# The tree the solver returns costs at most the cost it stores.
+def OC.machine_cost(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
+  OC.CostOK(SolveRef.inf_of(Groups.len_words(C)), MV.MV.solve_best(G, C), C):
+  +n : Nat = Groups.len_words(C)
+  +inf : Nat = SolveRef.inf_of(n)
+  +hz : {Nat.is_lt(0n, inf) == True{} : Bool} =
+    Ind.OQ.zero_lt_succ_add(Nat.mul(n, n))
+  +le : {Nat.is_le(Groups.len_words(C), n) == True{} : Bool} =
+    NatProof.Nat.is_le_refl(n)
+  MV.MV.use_pair(OC.CostOK(inf, MV.MV.solve_best(G, C), C),
+    OC.CJob(n, inf, G, C), OC.CFlat(n, inf, G, Nil{}),
+    OC.c_flat(n, inf, G, C <> Nil{}, Tuple{le, Unit{}}, hz),
+    j => u => j)
+
+# A finite stored cost turns the result into the tree it carries.
+def OC.best_to_maybe_fin(+inf: Nat, best: SolveRef.Best,
+    +e: {Nat.is_lt(Eval.Eval.cost_of(best), inf) == True{} : Bool}) ->
+  {SolveRef.best_to_maybe(inf, best) == Some{Eval.Eval.tree_of(best)}
+   : Maybe<Tree.Tree>}:
+  match best:
+    case SolveRef.Best{tree, +cost}:
+      Equal.cong(Bool, Maybe<Tree.Tree>,
+        x => Feedback.Bool.case(Maybe<Tree.Tree>, x, None{}, Some{tree}),
+        Nat.is_ge(cost, inf), False{}, OV.OV.ge_false_of_lt(cost, inf, e))
