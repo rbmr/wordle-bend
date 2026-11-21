@@ -6,6 +6,7 @@ import ./groupsdistinct.bend as GroupsDistinct
 import ./children.bend as Children
 import ./sat.bend as Sat
 import ./bestok.bend as BestOK
+import ./nodevalid.bend as NodeValid
 
 # Optimality: no valid tree for the same input costs less.
 def Optimal(T: Tree.Tree, G: +List<+List<Nat>>, S: +List<+List<Nat>>) -> Type:
