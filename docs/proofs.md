@@ -102,6 +102,7 @@ They are what a pruning rule needs to discard a guess or a class before searchin
 | File | What it proves |
 | --- | --- |
 | `lb_size.bend` | Every depth the tree produces is absent or at least one, so a valid tree costs at least the number of candidates: `cost(T, S) >= |S|`. |
+| `lb_twice.bend` | Only the root guess can end a candidate at depth one, so `2|S| <= cost(T, S) + mult(root, S)`, with `mult` the number of candidates equal to the root guess. This is exact with duplicates; `mult <= maxMult(S)` and the duplicate-free `2|S| - 1` bound follow. |
 
 ## How the gate works
 
