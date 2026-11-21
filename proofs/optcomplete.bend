@@ -249,3 +249,91 @@ def FC.fin_zero_nil(+inf: Nat, +G: +List<+List<Nat>>) ->
       hz => T => v => FC.fin_zero_empty(inf, T, v, hz)
     case Con{g, t}:
       hz => T => v => FC.fin_zero_cons(inf, g, t, hz)
+
+# Move a filtered class obligation to an equal test.
+def FC.classif_b(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    b1: Bool, b2: Bool, +eb: {b1 == b2 : Bool}, +groups: +List<Groups.Group>,
+    f: FC.FinClassIf(fuel, inf, G, b1, groups)) ->
+  FC.FinClassIf(fuel, inf, G, b2, groups):
+  %eb : FC.FinClassIf(fuel, inf, G, _, groups)
+  f
+
+# Move a class obligation to an equal group list.
+def FC.classif_g(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, +b: Bool,
+    +g1: +List<Groups.Group>, +g2: +List<Groups.Group>,
+    e: {g1 == g2 : +List<Groups.Group>},
+    f: FC.FinClassIf(fuel, inf, G, b, g1)) ->
+  FC.FinClassIf(fuel, inf, G, b, g2):
+  %e : FC.FinClassIf(fuel, inf, G, b, _)
+  f
+
+# The head branch of the membership walk, with the word test as a parameter.
+def FC.finbygs_at_head(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +h: +List<Nat>, +t: +List<+List<Nat>>,
+    +g: +List<Nat>, +mem: {Tree.member_word(g, h <> t) == True{} : Bool},
+    head: FC.FinClassIf(fuel, inf, G,
+      Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+      Groups.groups_build(h, S, Nil{})),
+    b: Bool,
+    +eb: {b == Feedback.word_eq(g, h) : Bool},
+    k: {Tree.member_word(g, t) == True{} : Bool}
+       -> FC.FinClassIf(fuel, inf, G,
+            Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+            Groups.groups_build(g, S, Nil{}))) ->
+  FC.FinClassIf(fuel, inf, G,
+    Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+    Groups.groups_build(g, S, Nil{})):
+  match b:
+    case True{}:
+      +egh : {g == h : +List<Nat>} =
+        Clist.Cover.word_eq_true(g, h, Equal.sym(Bool, True{}, Feedback.word_eq(g, h), eb))
+      +egrp : {Groups.groups_build(g, S, Nil{})
+               == Groups.groups_build(h, S, Nil{}) : +List<Groups.Group>} =
+        Equal.cong(+List<Nat>, +List<Groups.Group>,
+          x => Groups.groups_build(x, S, Nil{}), g, h, egh)
+      +e_back : {Groups.groups_build(h, S, Nil{})
+                 == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>} =
+        Equal.sym(+List<Groups.Group>, Groups.groups_build(g, S, Nil{}),
+          Groups.groups_build(h, S, Nil{}), egrp)
+      +ebk : {Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{}))
+              == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+              : Bool} =
+        Equal.cong(+List<Groups.Group>, Bool,
+          z => Groups.groups_smaller(S, z),
+          Groups.groups_build(h, S, Nil{}), Groups.groups_build(g, S, Nil{}), e_back)
+      f1 : FC.FinClassIf(fuel, inf, G,
+        Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+        Groups.groups_build(g, S, Nil{})) =
+        FC.classif_g(fuel, inf, G,
+          Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+          Groups.groups_build(h, S, Nil{}), Groups.groups_build(g, S, Nil{}),
+          e_back, head)
+      FC.classif_b(fuel, inf, G,
+        Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), ebk,
+        Groups.groups_build(g, S, Nil{}), f1)
+    case False{}:
+      +mt : {Tree.member_word(g, t) == True{} : Bool} =
+        Cora.Cover.member_tail(g, h, t, b, eb, {==}, mem)
+      k(mt)
+
+# The class obligation of the guess a membership points at.
+def FC.finbygs_at(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>, +g: +List<Nat>,
+    +mem: {Tree.member_word(g, gs) == True{} : Bool},
+    f: FC.FinByGs(fuel, inf, G, S, gs)) ->
+  FC.FinClassIf(fuel, inf, G,
+    Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+    Groups.groups_build(g, S, Nil{})):
+  match gs:
+    case Nil{}:
+      Empty.absurd(
+        FC.FinClassIf(fuel, inf, G,
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+          Groups.groups_build(g, S, Nil{})),
+        Logic.Proof.false_ne_true(mem))
+    case Con{h, t}:
+      (fh, ft) = f
+      FC.finbygs_at_head(fuel, inf, G, S, h, t, g, mem, fh,
+        Feedback.word_eq(g, h), {==},
+        mt => FC.finbygs_at(fuel, inf, G, S, t, g, mt, ft))
