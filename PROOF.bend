@@ -25,6 +25,11 @@ import ./proofs/optimalvalue.bend as OVProof
 import ./proofs/classbound.bend as CBProof
 import ./proofs/classbound_kids.bend as CBKids
 import ./proofs/classbound_sum.bend as CBSum
+import ./proofs/optfold.bend as OQProof
+import ./proofs/optsum.bend as OQSumProof
+import ./proofs/optguess.bend as OQGuessProof
+import ./proofs/optnode.bend as OQNodeProof
+import ./proofs/optind.bend as OQIndProof
 
 def Bool.disc(b: Bool) -> Type:
   match b:
