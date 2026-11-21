@@ -17,6 +17,10 @@ import ./eval.bend as Eval
 import ./sat.bend as Sat
 import ./cover_maybe.bend as CoverMaybe
 import ./cover.bend as Cover
+import ./feedback.bend as Fb
+import ./groupsdistinct.bend as GD
+import ./children.bend as CH
+import ./groupcost.bend as GC
 
 # The cost of a result as a `Maybe`: `None` at or above infinity.
 def OV.mv(+inf: Nat, +cost: Nat) -> Maybe<&2, Nat>:
@@ -293,3 +297,155 @@ def OV.val_some_lt(+inf: Nat, best: SolveRef.Best, +n: Nat,
   match best:
     case SolveRef.Best{tree, +cost}:
       OV.val_some_lt_go(inf, cost, Nat.is_ge(cost, inf), {==}, n, e)
+
+# A left fold of the saturating sum over a cost list.
+def OV.sumL(+inf: Nat, +cs: +List<Nat>, acc: Nat) -> Nat:
+  match cs:
+    case Nil{}:
+      acc
+    case Con{c, t}:
+      OV.sumL(inf, t, SolveRef.sat_add(inf, acc, c))
+
+# The item fold's accumulated sum is the saturating sum of the class costs.
+def OV.sum_fold(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +groups: +List<Groups.Group>, +kids: +List<Tree.Child>,
+    +sum: Nat, +inf: Nat) ->
+  {Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, groups, kids, sum, inf))
+   == OV.sumL(inf, Sat.SB.child_costs(p, G, groups, inf), sum) : Nat}:
+  match groups:
+    case Nil{}:
+      {==}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{+fb, +ws}:
+          +cr : SolveRef.Best = SolveRef.step(p, SolveRef.mk_schedule(G, ws), G, ws, inf,
+            Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
+          +k2 : +List<Tree.Child> =
+            Tree.Child{fb, Eval.Eval.tree_of(cr)} <> kids
+          +s2 : Nat = SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(cr))
+          +eq : {Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> t, kids, sum, inf)
+                 == Eval.Eval.items(p, G, S, g, t, k2, s2, inf) : Eval.KS} =
+            Eval.Eval.with_kid_eq(fb, kids, sum, inf, cr,
+              a => b => Eval.Eval.items(p, G, S, g, t, a, b, inf))
+          +l : {Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                    Groups.Group{fb, ws} <> t, kids, sum, inf))
+                == Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, t, k2, s2, inf)) : Nat} =
+            Equal.cong(Eval.KS, Nat, Sat.SB.ks_sum,
+              Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> t, kids, sum, inf),
+              Eval.Eval.items(p, G, S, g, t, k2, s2, inf), eq)
+          +r : {Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, t, k2, s2, inf))
+                == OV.sumL(inf, Sat.SB.child_costs(p, G, t, inf), s2) : Nat} =
+            OV.sum_fold(p, G, S, g, t, k2, s2, inf)
+          Equal.trans(Nat,
+            Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+              Groups.Group{fb, ws} <> t, kids, sum, inf)),
+            Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, t, k2, s2, inf)),
+            OV.sumL(inf, Sat.SB.child_costs(p, G,
+              Groups.Group{fb, ws} <> t, inf), sum),
+            l,
+            Equal.trans(Nat,
+              Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, t, k2, s2, inf)),
+              OV.sumL(inf, Sat.SB.child_costs(p, G, t, inf), s2),
+              OV.sumL(inf, Sat.SB.child_costs(p, G,
+                Groups.Group{fb, ws} <> t, inf), sum),
+              r, {==}))
+
+# The lookup skips a child whose feedback differs.
+def OV.lookup_skip(+fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    child: Tree.Tree, +rest: +List<Tree.Child>,
+    +e: {Feedback.feedback_eq(fb, f) == False{} : Bool}) ->
+  {Tree.lookup(fb, Tree.Child{f, child} <> rest) == Tree.lookup(fb, rest)
+   : Maybe<Tree.Tree>}:
+  Equal.cong(Bool, Maybe<Tree.Tree>,
+    x => Feedback.Bool.case(Maybe<Tree.Tree>, x, Some{child}, Tree.lookup(fb, rest)),
+    Feedback.feedback_eq(fb, f), False{}, e)
+
+# The lookup takes the child whose feedback matches.
+def OV.lookup_head(+fb: +List<Feedback.Color>, child: Tree.Tree,
+    +rest: +List<Tree.Child>,
+    +e: {Feedback.feedback_eq(fb, fb) == True{} : Bool}) ->
+  {Tree.lookup(fb, Tree.Child{fb, child} <> rest) == Some{child}
+   : Maybe<Tree.Tree>}:
+  Equal.cong(Bool, Maybe<Tree.Tree>,
+    x => Feedback.Bool.case(Maybe<Tree.Tree>, x, Some{child}, Tree.lookup(fb, rest)),
+    Feedback.feedback_eq(fb, fb), True{}, e)
+
+# A plain sum of a cost list, in the same shape as `GC.GC.Total`.
+def OV.sumN(+cs: +List<Nat>) -> Nat:
+  match cs:
+    case Nil{}:
+      0n
+    case Con{c, t}:
+      Nat.add(c, OV.sumN(t))
+
+# The addition of two equal pairs.
+def OV.add_cong(+a: Nat, +b: Nat, +c: Nat, +d: Nat,
+    e1: {a == b : Nat}, e2: {c == d : Nat}) ->
+  {Nat.add(a, c) == Nat.add(b, d) : Nat}:
+  Equal.trans(Nat, Nat.add(a, c), Nat.add(b, c), Nat.add(b, d),
+    Equal.cong(Nat, Nat, x => Nat.add(x, c), a, b, e1),
+    Equal.cong(Nat, Nat, x => Nat.add(b, x), c, d, e2))
+
+# The group cost ignores which child list it is given, apart from the lookup.
+def OV.group_cost_irrel(+ks1: +List<Tree.Child>, +ks2: +List<Tree.Child>,
+    +ws: +List<+List<Nat>>, m: Maybe<Tree.Tree>) ->
+  {GC.GC.group_cost_of(ks1, ws, m) == GC.GC.group_cost_of(ks2, ws, m) : Nat}:
+  match m:
+    case None{}:
+      {==}
+    case Some{t}:
+      {==}
+
+# A child whose feedback no group uses does not change the total.
+def OV.total_skip(+fb: +List<Feedback.Color>, +tree: Tree.Tree,
+    +rest: +List<Tree.Child>, +gs: +List<Groups.Group>,
+    nf: GD.GD.Distinct(gs), p: GD.GD.NotFb(fb, gs)) ->
+  {GC.GC.Total(Tree.Child{fb, tree} <> rest, gs) == GC.GC.Total(rest, gs) : Nat}:
+  match gs:
+    case Nil{}:
+      {==}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (dt, drest) = nf
+          (nfh, nft) = p
+          +skip : {Tree.lookup(f, Tree.Child{fb, tree} <> rest) == Tree.lookup(f, rest)
+                   : Maybe<Tree.Tree>} =
+            OV.lookup_skip(f, fb, tree, rest, GD.GD.fb_false_sym(fb, f, nfh))
+          +eg1 : {GC.GC.GroupCost(Tree.Child{fb, tree} <> rest, Groups.Group{f, ws})
+                  == GC.GC.group_cost_of(Tree.Child{fb, tree} <> rest, ws,
+                       Tree.lookup(f, rest)) : Nat} =
+            Equal.cong(Maybe<Tree.Tree>, Nat,
+              m => GC.GC.group_cost_of(Tree.Child{fb, tree} <> rest, ws, m),
+              Tree.lookup(f, Tree.Child{fb, tree} <> rest), Tree.lookup(f, rest), skip)
+          +eg2 : {GC.GC.group_cost_of(Tree.Child{fb, tree} <> rest, ws,
+                       Tree.lookup(f, rest))
+                  == GC.GC.GroupCost(rest, Groups.Group{f, ws}) : Nat} =
+            OV.group_cost_irrel(Tree.Child{fb, tree} <> rest, rest, ws,
+              Tree.lookup(f, rest))
+          +eg : {GC.GC.GroupCost(Tree.Child{fb, tree} <> rest, Groups.Group{f, ws})
+                 == GC.GC.GroupCost(rest, Groups.Group{f, ws}) : Nat} =
+            Equal.trans(Nat,
+              GC.GC.GroupCost(Tree.Child{fb, tree} <> rest, Groups.Group{f, ws}),
+              GC.GC.group_cost_of(Tree.Child{fb, tree} <> rest, ws,
+                Tree.lookup(f, rest)),
+              GC.GC.GroupCost(rest, Groups.Group{f, ws}), eg1, eg2)
+          OV.add_cong(GC.GC.GroupCost(Tree.Child{fb, tree} <> rest, Groups.Group{f, ws}),
+            GC.GC.GroupCost(rest, Groups.Group{f, ws}),
+            GC.GC.Total(Tree.Child{fb, tree} <> rest, t),
+            GC.GC.Total(rest, t), eg, OV.total_skip(fb, tree, rest, t, drest, nft))
+
+# Each class's result tree costs what the result says.
+def OV.CostsOk(+p: Nat, +G: +List<+List<Nat>>, +inf: Nat,
+    +groups: +List<Groups.Group>) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          {Tree.cost(Eval.Eval.tree_of(SolveRef.step(p, SolveRef.mk_schedule(G, ws),
+              G, ws, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+              Eval.Eval.dummy_zero())), ws)
+           == Sat.SB.child_cost(p, G, ws, inf) : Nat}
+          & OV.CostsOk(p, G, inf, t)
