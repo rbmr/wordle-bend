@@ -870,3 +870,83 @@ def OQ.ajob_nil(+inf: Nat, +G: +List<+List<Nat>>,
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
   Node.OQ.AJob(0n, inf, G, Nil{}):
   T => v => OQ.ajob_nil_at(inf, G, T, v, hz)
+
+# A job moved along an equality of candidate lists.
+def OQ.ajob_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S1: +List<+List<Nat>>, +S2: +List<+List<Nat>>,
+    e: {S1 == S2 : +List<+List<Nat>>},
+    j: Node.OQ.AJob(fuel, inf, G, S1)) -> Node.OQ.AJob(fuel, inf, G, S2):
+  %e : Node.OQ.AJob(fuel, inf, G, _)
+  j
+
+# Zero fuel: every job is empty.
+def OQ.a_flat_zero(+inf: Nat, +G: +List<+List<Nat>>,
+    jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(0n, jobs),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  Node.OQ.AFlat(0n, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{+S, +t}:
+      (b, bt) = bounds
+      +eS : {S == Nil{} : +List<+List<Nat>>} =
+        MV.MV.nil_of_len_zero(S,
+          NatProof.Nat.eq_zero_of_le_zero(Groups.len_words(S), b))
+      (OQ.ajob_transport(0n, inf, G, Nil{}, S,
+         Equal.sym(+List<+List<Nat>>, S, Nil{}, eS), OQ.ajob_nil(inf, G, hz)),
+       OQ.a_flat_zero(inf, G, t, bt, hz))
+
+# One step of the fuel: every job at the next level gets its bound.
+def OQ.a_flat_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    jobs: +List<+List<+List<Nat>>>,
+    fl: Node.OQ.AFlat(p, inf, G, MV.MV.next_jobs(G, jobs)),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  Node.OQ.AFlat(1n+p, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{+S, +t}:
+      MV.MV.use_pair(
+        (Node.OQ.AJob(1n+p, inf, G, S)
+         & Node.OQ.AFlat(1n+p, inf, G, t)),
+        Node.OQ.AFlat(p, inf, G, MV.MV.next_guess(G, S)),
+        Node.OQ.AFlat(p, inf, G, MV.MV.next_jobs(G, t)),
+        OQ.aflat_append(p, inf, G, MV.MV.next_guess(G, S),
+          MV.MV.next_jobs(G, t), fl),
+        fS => ft =>
+          ((T => v =>
+              OQ.a_bound(p, inf, G, T)(S, OQ.abgs_of_flat(p, inf, G, S, G, fS),
+                v)),
+           OQ.a_flat_step(inf, p, G, t, ft, hz)))
+
+# The fuel induction on the flat conjunction of jobs.
+def OQ.a_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(fuel, jobs),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  Node.OQ.AFlat(fuel, inf, G, jobs):
+  match fuel:
+    case 0n:
+      OQ.a_flat_zero(inf, G, jobs, bounds, hz)
+    case 1n+p:
+      OQ.a_flat_step(inf, p, G, jobs,
+        OQ.a_flat(p, inf, G, MV.MV.next_jobs(G, jobs),
+          MV.MV.next_bounds(p, G, jobs, bounds), hz), hz)
+
+# The lower half of the optimality invariant: the search costs at most any
+# valid tree for the same candidate list.
+def OQ.cost_le_valid(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    T2: Tree.Tree, v: Tree.Valid(T2, G, C)) ->
+  {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), Tree.cost(T2, C))
+   == True{} : Bool}:
+  +n : Nat = Groups.len_words(C)
+  +hz : {Nat.is_lt(0n, SolveRef.inf_of(n)) == True{} : Bool} =
+    OQ.zero_lt_succ_add(Nat.mul(n, n))
+  +le : {Nat.is_le(Groups.len_words(C), n) == True{} : Bool} =
+    NatProof.Nat.is_le_refl(n)
+  MV.MV.use_pair(
+    {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), Tree.cost(T2, C))
+     == True{} : Bool},
+    Node.OQ.AJob(n, SolveRef.inf_of(n), G, C),
+    Node.OQ.AFlat(n, SolveRef.inf_of(n), G, Nil{}),
+    OQ.a_flat(n, SolveRef.inf_of(n), G, C <> Nil{}, Tuple{le, Unit{}}, hz),
+    fC => u => fC(T2, v))
