@@ -45,9 +45,60 @@ A faster solver that returns a wrong tree is a regression, not a performance win
 that is slow is still correct. Performance work is judged against benchmark results, and correctness
 work is judged by the laws.
 
+## Proof gate on pull requests
+
+`.github/workflows/proofs.yml` runs the proof checks on every pull request. While `PROOF.bend` is
+absent from the repository root the job passes with a notice and skips the checks, because the file
+arrives in a later change. Once it exists, both checks must pass:
+
+| Command | Contract |
+| --- | --- |
+| `bend PROOF.bend` | prints `ALL PROOFS CHECK` and exits 0; prints `SOME PROOFS FAIL` and exits 1 when any law is open or false |
+| `bend PROOF.bend --verdict` | the same contract, as a second independent check with the kernel proven in Lean |
+
+### Running the checks locally
+
+Install the pinned Bend release into `~/.bend`, which is where the binary looks for its runtime
+data:
+
+```sh
+curl -O https://github.com/bendlang/bend/releases/download/v2.0.40/bend-2.0.40-linux-x64.tar.gz
+tar -xzf bend-2.0.40-linux-x64.tar.gz
+mkdir -p ~/.bend/bin
+install -m 0755 bend/bin/bend ~/.bend/bin/bend
+mv bend/bend2 bend/guide ~/.bend/
+export PATH="$HOME/.bend/bin:$PATH"
+```
+
+Then run the two checks from the repository root:
+
+```sh
+bend PROOF.bend
+bend PROOF.bend --verdict
+```
+
+`--verdict` builds the Lean kernel on first use. That takes about 40 seconds and the result is
+cached under `~/.bend/bendtt`. It needs elan with the pinned Lean toolchain, which the workflow sets
+through `ELAN_TOOLCHAIN`:
+
+```sh
+elan toolchain install leanprover/lean4:v4.34.0
+ELAN_TOOLCHAIN=leanprover/lean4:v4.34.0 bend PROOF.bend --verdict
+```
+
+CI caches `~/.elan/toolchains` and `~/.bend/bendtt` under a key built from the Bend and Lean
+versions.
+
+### Bumping the pinned Bend version
+
+`BEND_VERSION` and `BEND_SHA256` at the top of `.github/workflows/proofs.yml` pin the release that
+CI installs. To bump, download the new `bend-<version>-linux-x64.tar.gz`, confirm its sha256, and
+update both values together. Do it in its own pull request: the proof checks are tied to the
+toolchain, so a version bump is a deliberate change rather than routine maintenance.
+
 ## Current checks in CI
 
-CI currently checks pull request conventions only: the PR title and every commit subject are
-conventional commits, and the head branch name matches the branch naming rule. See
-[contributing.md](contributing.md). Solver checks, law checks, and benchmarks are not wired into CI
-yet.
+CI checks pull request conventions: the PR title and every commit subject are conventional commits,
+and the head branch name matches the branch naming rule. See [contributing.md](contributing.md).
+It also runs the proof gate above, which passes with a notice until `PROOF.bend` lands. Solver
+benchmarks are not wired into CI yet.
