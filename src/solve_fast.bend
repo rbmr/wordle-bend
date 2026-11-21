@@ -2,44 +2,50 @@
 #
 # This module is a drop-in replacement for the reference search in
 # `src/solve_ref.bend`: `solve_fast` returns the same tree as `solve`, but it
-# skips a guess whose cost cannot be strictly below the best cost found so far.
+# skips any guess or class whose lower bound cannot strictly beat the best
+# cost found so far.
 #
 # For a guess `g` over a candidate list `S`, the reference builds one child per
 # class of the feedback partition and the node costs one per candidate plus the
 # children's costs. In any valid subtree for a class `ws`, only the subtree's
 # root guess can end at depth one, so `cost(T, ws) >= 2 * |ws| - max_mult(ws)`
-# (`proofs/lb_twice.bend`). Any tree rooted at `g` therefore costs at least
+# (`proofs/lb_twice.bend`). When the root candidate list has no duplicates
+# (checked once at the root by `no_dup_fast`), every feedback class is a
+# subsequence of its parent (`proofs/cover_groups.bend`) and also has no
+# duplicates, so `max_mult(ws) = 1`, `class_lb(ws) = 2 * |ws| - 1` in O(1),
+# and every tree over `S` costs at least `2 * |S| - 1` — allowing immediate
+# early exit from the node's guess loop once `best_cost(best) <= 2 * |S| - 1`.
 #
-#   bound(S, g) = |S| + sum over classes ws of (2 * |ws| - max_mult(ws))
-#
-# The search evaluates the guesses in order and keeps the best cost. `better`
-# only replaces on a strictly lower cost, so ties keep the earlier guess. A
-# guess whose bound is at least the best cost so far therefore cannot change
-# the result and is skipped.
-#
-# The schedule has the reference's shape: one `Begin` per usable guess,
-# followed by that guess's class items and `End`. A skipped guess still walks
-# its items, but `skip` is true, so no class is searched and `best` is left
-# unchanged. Skipping therefore costs a few steps instead of a subtree search.
+# Feedback classes are accumulated in `FGroup{fb, len, rwords}` with O(1)
+# prepend and cached length; usability and the depth-two lower bound are
+# checked in tail-recursive passes before reversing any class or building
+# schedule items. Each live `ClassItem` passes the tight remaining budget
+# `best_cost(best) - (sum + tail_lb)` into its recursive child search, and
+# `OneItem` resolves singleton classes directly in O(1) once the root confirms
+# every candidate belongs to `G`.
 import Base
 import ./feedback.bend as Feedback
 import ./tree.bend as Tree
 import ./groups.bend as Groups
 import ./solve_ref.bend as SolveRef
 
-# `Begin` carries the guess and its initial lower bound. `ClassItem` and `Add`
-# carry `tail_lb`, the lower bound of the remaining classes plus `|S|`: each
+# `Begin` starts a usable guess that passed the initial lower-bound test.
+# `ClassItem` carries the class words, their cached length `wlen`, and
+# `tail_lb` (the lower bound of the remaining classes plus `|S|`) so each
 # recursive child search runs with tight upper-bound cutoff
-# `best_cost(best) - (sum + tail_lb)`, and `Add` immediately switches to
-# `skip = True{}` whenever the updated `sum + tail_lb` can no longer beat
-# `best`. `OneItem` resolves a singleton feedback class `[w]` directly in O(1)
-# once the root confirms every candidate is in `G`.
+# `best_cost(best) - (sum + tail_lb)`. `Add` consumes the child and switches
+# to `skip = True{}` as soon as `sum2 + tail_lb >= best_cost(best)`. `OneItem`
+# resolves a singleton feedback class `[w]` directly in O(1).
 type Item is Data:
-  Begin{guess: +List<Nat>, lb: Nat}
-  ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>, tail_lb: Nat}
+  Begin{guess: +List<Nat>}
+  ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>, wlen: Nat, tail_lb: Nat}
   OneItem{fb: +List<Feedback.Color>, word: +List<Nat>}
   Add{fb: +List<Feedback.Color>, tail_lb: Nat}
   End{}
+
+# A feedback class accumulated in reverse candidate order with its cached size.
+type FGroup is Data:
+  FGroup{fb: +List<Feedback.Color>, len: Nat, rwords: +List<+List<Nat>>}
 
 # Single-pass word and feedback equality. `Feedback.word_eq` and
 # `Feedback.feedback_eq` compute both list lengths and allocate a zipped pair
@@ -68,8 +74,8 @@ def word_eq_go(+a: +List<Nat>, +b: +List<Nat>, same: Bool) -> Bool:
 def word_eq_fast(+a: +List<Nat>, +b: +List<Nat>) -> Bool:
   word_eq_go(a, b, Feedback.next_same(a, b))
 
-# Linear membership and subset checks matching `Tree.member_word`: stop at the
-# first matching guess / first missing candidate.
+# Linear membership, subset, and duplicate-free checks: tail-recursive loops
+# that stop at the first match / missing candidate / repeated candidate.
 def next_word_hit(+w: +List<Nat>, +gs: +List<+List<Nat>>) -> Bool:
   match gs:
     case Nil{}:
@@ -114,6 +120,27 @@ def all_in_go(+S: +List<+List<Nat>>, +G: +List<+List<Nat>>,
 def all_in_fast(+S: +List<+List<Nat>>, +G: +List<+List<Nat>>) -> Bool:
   all_in_go(S, G, next_in(S, G))
 
+def next_dup(+S: +List<+List<Nat>>) -> Bool:
+  match S:
+    case Nil{}:
+      False{}
+    case Con{w, t}:
+      member_word_fast(w, t)
+
+def no_dup_go(+S: +List<+List<Nat>>, dup: Bool) -> Bool:
+  match S:
+    case Nil{}:
+      True{}
+    case Con{w, t}:
+      match dup:
+        case True{}:
+          False{}
+        case False{}:
+          no_dup_go(t, next_dup(t))
+
+def no_dup_fast(+S: +List<+List<Nat>>) -> Bool:
+  no_dup_go(S, next_dup(S))
+
 def next_fb_same(+a: +List<Feedback.Color>,
                  +b: +List<Feedback.Color>) -> Bool:
   match a:
@@ -157,7 +184,7 @@ def hit_bool(b: Bool) -> Nat:
 def hit_word(+g: +List<Nat>, +w: +List<Nat>) -> Nat:
   hit_bool(word_eq_fast(g, w))
 
-# The number of candidates in `S` not equal to `g`, and the fast pre-grouping
+# The number of candidates in `S` not equal to `g`, and the pre-grouping
 # lower bound `|S| + keep_fast(g, S) = 2 * |S| - word_mult(g, S)`.
 def keep_step(+rest: Nat, same: Bool) -> Nat:
   match same:
@@ -199,6 +226,16 @@ def class_lb(+ws: +List<+List<Nat>>) -> Nat:
   +m = Groups.len_words(ws)
   Nat.sub(Nat.add(m, m), max_mult(ws))
 
+# In duplicate-free mode, `max_mult(ws) = 1` for every non-empty class (and
+# `2*0 - 1 = 0 = class_lb(Nil{})`), so `class_lb_fast` runs in O(1) using the
+# cached length `len`.
+def class_lb_fast(+nodup: Bool, +len: Nat, +ws: +List<+List<Nat>>) -> Nat:
+  match nodup:
+    case True{}:
+      Nat.sub(Nat.add(len, len), 1n)
+    case False{}:
+      class_lb(ws)
+
 # The sum of class lower bounds over a class list.
 def class_words(+groups: +List<Groups.Group>) -> Nat:
   match groups:
@@ -229,16 +266,34 @@ def best_cost(+best: SolveRef.Best) -> Nat:
 def skippable(+best: SolveRef.Best, +lb: Nat) -> Bool:
   Nat.is_le(best_cost(best), lb)
 
+# When candidates are duplicate-free, every valid tree over `n` candidates
+# costs at least `2*n - 1` (`0` when `n = 0`), so reaching `best_cost <= 2*n - 1`
+# ends the node's guess loop immediately.
+def is_floor_hit(+nodup: Bool, +n: Nat, +best: SolveRef.Best) -> Bool:
+  match nodup:
+    case True{}:
+      skippable(best, Nat.sub(Nat.add(n, n), 1n))
+    case False{}:
+      False{}
+
 def dummy_inf(+inf: Nat) -> SolveRef.Best:
   SolveRef.Best{Tree.Node{Nil{}, Nil{}}, inf}
 
 def dummy_zero() -> SolveRef.Best:
   SolveRef.Best{Tree.Node{Nil{}, Nil{}}, 0n}
 
-# The class items of one guess: singleton classes `[w]` become a single O(1)
-# `OneItem{f, w}`, and larger classes carry `tail_lb = lower_bound(n, rest)`
-# on both `ClassItem` (to compute the recursive child cutoff) and `Add` (to
-# trigger mid-guess pruning after consuming the child).
+# Tail-recursive list reversal for restoring input order on unpruned classes.
+def rev_words(+xs: +List<+List<Nat>>,
+              +acc: +List<+List<Nat>>) -> +List<+List<Nat>>:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{w, t}:
+      rev_words(t, w <> acc)
+
+# Specification of the class items of one guess: singleton classes `[w]`
+# become `OneItem{f, w}`, and larger classes carry `wlen = |ws|` and
+# `tail_lb = lower_bound(n, rest)` on `ClassItem` and `Add`.
 def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
   match groups:
     case Nil{}:
@@ -249,7 +304,7 @@ def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
           match ws:
             case Nil{}:
               +tlb = lower_bound(n, rest)
-              ClassItem{f, Nil{}, tlb} <> (Add{f, tlb} <> group_items(n, rest))
+              ClassItem{f, Nil{}, 0n, tlb} <> (Add{f, tlb} <> group_items(n, rest))
             case Con{+w, +wt}:
               match wt:
                 case Nil{}:
@@ -257,21 +312,21 @@ def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
                 case Con{+w2, +wt2}:
                   +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
                   +tlb = lower_bound(n, rest)
-                  ClassItem{f, ws2, tlb} <> (Add{f, tlb} <> group_items(n, rest))
+                  ClassItem{f, ws2, Groups.len_words(ws2), tlb}
+                  <> (Add{f, tlb} <> group_items(n, rest))
 
-# Single-pass construction of a guess's lower bound and schedule items onto
-# `tail`, computing `class_lb(ws)` once per multi-word class and using `1`
-# directly for singleton classes without a separate `class_words` or
-# `List.append` pass.
+# Single-pass construction of a guess's lower bound and schedule items from
+# `FGroup`s onto `tail`, reversing each multi-word class once and using O(1)
+# `class_lb_fast` in duplicate-free mode.
 type ItemsBound is Data:
   ItemsBound{lb: Nat, items: +List<Item>}
 
 def group_items_step(+f: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
-                     +clb: Nat, ib: ItemsBound) -> ItemsBound:
+                     +wlen: Nat, +clb: Nat, ib: ItemsBound) -> ItemsBound:
   match ib:
     case ItemsBound{+rem_lb, +rest_items}:
       ItemsBound{Nat.add(clb, rem_lb),
-        ClassItem{f, ws, rem_lb} <> (Add{f, rem_lb} <> rest_items)}
+        ClassItem{f, ws, wlen, rem_lb} <> (Add{f, rem_lb} <> rest_items)}
 
 def group_items_one_step(+f: +List<Feedback.Color>, +w: +List<Nat>,
                          ib: ItemsBound) -> ItemsBound:
@@ -279,33 +334,31 @@ def group_items_one_step(+f: +List<Feedback.Color>, +w: +List<Nat>,
     case ItemsBound{+rem_lb, +rest_items}:
       ItemsBound{Nat.add(1n, rem_lb), OneItem{f, w} <> rest_items}
 
-def group_items_build(+n: Nat, +groups: +List<Groups.Group>,
-                      +tail: +List<Item>) -> ItemsBound:
-  match groups:
+def fgroup_items_build(+nodup: Bool, +n: Nat, +fgroups: +List<FGroup>,
+                       +tail: +List<Item>) -> ItemsBound:
+  match fgroups:
     case Nil{}:
       ItemsBound{n, tail}
     case Con{gp, rest}:
       match gp:
-        case Groups.Group{+f, +ws}:
-          match ws:
+        case FGroup{+f, +len, +rws}:
+          match rws:
             case Nil{}:
-              group_items_step(f, Nil{}, 0n,
-                group_items_build(n, rest, tail))
+              group_items_step(f, Nil{}, 0n, 0n,
+                fgroup_items_build(nodup, n, rest, tail))
             case Con{+w, +wt}:
               match wt:
                 case Nil{}:
                   group_items_one_step(f, w,
-                    group_items_build(n, rest, tail))
+                    fgroup_items_build(nodup, n, rest, tail))
                 case Con{+w2, +wt2}:
-                  +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
-                  group_items_step(f, ws2, class_lb(ws2),
-                    group_items_build(n, rest, tail))
+                  +ws : +List<+List<Nat>> = rev_words(wt2, w2 <> (w <> Nil{}))
+                  group_items_step(f, ws, len, class_lb_fast(nodup, len, ws),
+                    fgroup_items_build(nodup, n, rest, tail))
 
-# Linear feedback and group partitioning. In `src/feedback.bend` and
-# `src/groups.bend`, the recursive calls sit inside both branches of
-# `Feedback.Bool.case`, which evaluates both arguments at every step. Matching
-# on the `Bool` parameter instead makes one recursive call per step while
-# returning the exact same lists (`proofs/fast_groups.bend`).
+# Linear feedback and group partitioning. Matching on the `Bool` parameter
+# makes one recursive call per step while returning the exact same feedbacks
+# and partitions as `src/feedback.bend` and `src/groups.bend`.
 def non_green_pick(+a: Nat, +rest: +List<Nat>, same: Bool) -> +List<Nat>:
   match same:
     case True{}:
@@ -373,130 +426,204 @@ def feedback_fast(+guess: +List<Nat>,
   feedback_go_fast(guess, answer, non_green_fast(guess, answer),
                    Feedback.next_same(guess, answer))
 
-def next_group_hit(+fb: +List<Feedback.Color>,
-                   +groups: +List<Groups.Group>) -> Bool:
-  match groups:
+# O(1)-prepend feedback grouping with cached class sizes.
+def next_fgroup_hit(+fb: +List<Feedback.Color>,
+                    +fgroups: +List<FGroup>) -> Bool:
+  match fgroups:
     case Nil{}:
       False{}
     case Con{gp, rest}:
       match gp:
-        case Groups.Group{f, ws}:
+        case FGroup{f, len, rws}:
           feedback_eq_fast(fb, f)
 
-def group_add_go(+w: +List<Nat>, +fb: +List<Feedback.Color>,
-                 +groups: +List<Groups.Group>,
-                 hit: Bool) -> +List<Groups.Group>:
-  match groups:
+def fgroup_add_go(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+                  +fgroups: +List<FGroup>, hit: Bool) -> +List<FGroup>:
+  match fgroups:
     case Nil{}:
-      Groups.Group{fb, [w]} <> Nil{}
+      FGroup{fb, 1n, [w]} <> Nil{}
     case Con{gp, rest}:
       match gp:
-        case Groups.Group{+f, +ws}:
+        case FGroup{+f, +len, +rws}:
           match hit:
             case True{}:
-              Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])} <> rest
+              FGroup{f, Nat.add(1n, len), w <> rws} <> rest
             case False{}:
-              Groups.Group{f, ws}
-              <> group_add_go(w, fb, rest, next_group_hit(fb, rest))
+              FGroup{f, len, rws}
+              <> fgroup_add_go(w, fb, rest, next_fgroup_hit(fb, rest))
 
-def group_add_fast(+w: +List<Nat>, +fb: +List<Feedback.Color>,
-                   +groups: +List<Groups.Group>) -> +List<Groups.Group>:
-  group_add_go(w, fb, groups, next_group_hit(fb, groups))
+def fgroup_add_fast(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+                    +fgroups: +List<FGroup>) -> +List<FGroup>:
+  fgroup_add_go(w, fb, fgroups, next_fgroup_hit(fb, fgroups))
 
-def groups_next_acc(+g: +List<Nat>, +w: +List<Nat>,
-                    +acc: +List<Groups.Group>,
-                    same: Bool) -> +List<Groups.Group>:
+def fgroups_next_acc(+g: +List<Nat>, +w: +List<Nat>,
+                     +acc: +List<FGroup>, same: Bool) -> +List<FGroup>:
   match same:
     case True{}:
       acc
     case False{}:
-      group_add_fast(w, feedback_fast(g, w), acc)
+      fgroup_add_fast(w, feedback_fast(g, w), acc)
 
-def groups_build_fast(+g: +List<Nat>, +S: +List<+List<Nat>>,
-                      +acc: +List<Groups.Group>) -> +List<Groups.Group>:
+def fgroups_build_fast(+g: +List<Nat>, +S: +List<+List<Nat>>,
+                       +acc: +List<FGroup>) -> +List<FGroup>:
   match S:
     case Nil{}:
       acc
     case Con{+w, +rest}:
-      groups_build_fast(g, rest,
-        groups_next_acc(g, w, acc, word_eq_fast(g, w)))
+      fgroups_build_fast(g, rest,
+        fgroups_next_acc(g, w, acc, word_eq_fast(g, w)))
 
-def groups_smaller_fast(+n: Nat, +groups: +List<Groups.Group>) -> Bool:
-  match groups:
+# Tail-recursive usability check using cached class lengths.
+def next_fgroup_lt(+n: Nat, +fgroups: +List<FGroup>) -> Bool:
+  match fgroups:
     case Nil{}:
       True{}
     case Con{gp, rest}:
       match gp:
-        case Groups.Group{f, ws}:
-          Bool.and(Nat.is_lt(Groups.len_words(ws), n),
-                   groups_smaller_fast(n, rest))
+        case FGroup{f, len, rws}:
+          Nat.is_lt(len, n)
 
-# The block of one guess, followed by the rest of the schedule. The usability
-# decision is a parameter so the recursive call builds the rest exactly once:
-# both branches of a strict `case` would build it twice.
+def fgroups_smaller_go(+n: Nat, +fgroups: +List<FGroup>, ok: Bool) -> Bool:
+  match fgroups:
+    case Nil{}:
+      True{}
+    case Con{gp, rest}:
+      match ok:
+        case True{}:
+          fgroups_smaller_go(n, rest, next_fgroup_lt(n, rest))
+        case False{}:
+          False{}
+
+def fgroups_smaller(+n: Nat, +fgroups: +List<FGroup>) -> Bool:
+  fgroups_smaller_go(n, fgroups, next_fgroup_lt(n, fgroups))
+
+# Tail-recursive depth-two lower bound over `FGroup`s before reversing or
+# allocating schedule items.
+def fgroups_lb_nodup(+fgroups: +List<FGroup>, +acc: Nat) -> Nat:
+  match fgroups:
+    case Nil{}:
+      acc
+    case Con{gp, rest}:
+      match gp:
+        case FGroup{f, +len, rws}:
+          fgroups_lb_nodup(rest, Nat.add(acc, Nat.sub(Nat.add(len, len), 1n)))
+
+def fgroups_lb_dup(+fgroups: +List<FGroup>, +acc: Nat) -> Nat:
+  match fgroups:
+    case Nil{}:
+      acc
+    case Con{gp, rest}:
+      match gp:
+        case FGroup{f, len, rws}:
+          fgroups_lb_dup(rest, Nat.add(acc, class_lb(rev_words(rws, Nil{}))))
+
+def fgroups_lb(+nodup: Bool, +n: Nat, +fgroups: +List<FGroup>) -> Nat:
+  match nodup:
+    case True{}:
+      fgroups_lb_nodup(fgroups, n)
+    case False{}:
+      fgroups_lb_dup(fgroups, n)
+
+# Schedule one guess: skip before reversing or allocating items whenever the
+# guess is unusable or its depth-two lower bound cannot beat `best`.
 def schedule_guess_ib(+g: +List<Nat>, ib: ItemsBound) -> +List<Item>:
   match ib:
-    case ItemsBound{+lb, +items}:
-      Begin{g, lb} <> items
+    case ItemsBound{lb, +items}:
+      Begin{g} <> items
 
-def schedule_guess(+g: +List<Nat>, +groups: +List<Groups.Group>, +n: Nat,
-                   +rest: +List<Item>, usable: Bool) -> +List<Item>:
-  match usable:
+def schedule_fguess_lb(+nodup: Bool, +g: +List<Nat>, +fgroups: +List<FGroup>,
+                       +n: Nat, skip: Bool) -> +List<Item>:
+  match skip:
     case True{}:
-      schedule_guess_ib(g, group_items_build(n, groups, End{} <> rest))
+      Nil{}
     case False{}:
-      rest
+      schedule_guess_ib(g, fgroup_items_build(nodup, n, fgroups, End{} <> Nil{}))
+
+def schedule_fguess(+nodup: Bool, +g: +List<Nat>, +fgroups: +List<FGroup>,
+                    +n: Nat, +best: SolveRef.Best, usable: Bool) -> +List<Item>:
+  match usable:
+    case False{}:
+      Nil{}
+    case True{}:
+      schedule_fguess_lb(nodup, g, fgroups, n,
+        skippable(best, fgroups_lb(nodup, n, fgroups)))
 
 # Fast schedule for a singleton candidate list `[w]`: a guess `g` is usable
-# exactly when `g == w` (producing no children and bound 1); any `g != w` puts
-# `w` into one class of size 1 and is unusable, so its feedback does not need
-# to be computed.
-def schedule_one_guess(+g: +List<Nat>, +rest: +List<Item>,
+# exactly when `g == w` (producing no children and bound 1).
+def schedule_one_lb(+g: +List<Nat>, skip: Bool) -> +List<Item>:
+  match skip:
+    case True{}:
+      Nil{}
+    case False{}:
+      Begin{g} <> (End{} <> Nil{})
+
+def schedule_one_guess(+g: +List<Nat>, +best: SolveRef.Best,
                        same: Bool) -> +List<Item>:
   match same:
     case True{}:
-      Begin{g, 1n} <> (End{} <> rest)
+      schedule_one_lb(g, skippable(best, 1n))
     case False{}:
-      rest
+      Nil{}
 
-# Per-guess lazy schedule items. When `cs` is exhausted, `step` pops the next
-# guess `g` from `gs` and builds its schedule items only if the cheap pre-bound
-# `pre_lb(|S|, g, S) = |S| + keep_fast(g, S)` can still beat `best`. On a
-# singleton candidate list `[w]`, `schedule_one_guess` avoids computing feedback
-# for non-matching guesses.
-def guess_body(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat) -> +List<Item>:
+# Per-guess lazy schedule items. In duplicate-free mode, `best_cost > 2*n`
+# skips the pre-grouping candidate scan altogether, while `best_cost == 2*n`
+# uses tail-recursive `member_word_fast` to skip every non-candidate guess
+# without grouping.
+def guess_body(+nodup: Bool, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+               +best: SolveRef.Best) -> +List<Item>:
   match S:
     case Nil{}:
-      +groups = groups_build_fast(g, Nil{}, Nil{})
-      schedule_guess(g, groups, 0n, Nil{}, groups_smaller_fast(0n, groups))
+      +fg = fgroups_build_fast(g, Nil{}, Nil{})
+      schedule_fguess(nodup, g, fg, 0n, best, fgroups_smaller(0n, fg))
     case Con{+w, +t}:
       match t:
         case Nil{}:
-          schedule_one_guess(g, Nil{}, word_eq_fast(g, w))
+          schedule_one_guess(g, best, word_eq_fast(g, w))
         case Con{+w2, +t2}:
-          +groups = groups_build_fast(g, w <> (w2 <> t2), Nil{})
-          schedule_guess(g, groups, n, Nil{}, groups_smaller_fast(n, groups))
+          +fg = fgroups_build_fast(g, w <> (w2 <> t2), Nil{})
+          schedule_fguess(nodup, g, fg, n, best, fgroups_smaller(n, fg))
 
-def guess_items_go(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
-                   pre_skip: Bool) -> +List<Item>:
+def guess_items_go(+nodup: Bool, +g: +List<Nat>, +S: +List<+List<Nat>>,
+                   +n: Nat, +best: SolveRef.Best, pre_skip: Bool) -> +List<Item>:
   match pre_skip:
     case True{}:
       Nil{}
     case False{}:
-      guess_body(g, S, n)
+      guess_body(nodup, g, S, n, best)
 
-def guess_items(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+def guess_items_mem(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+                    +best: SolveRef.Best, in_s: Bool) -> +List<Item>:
+  match in_s:
+    case True{}:
+      guess_body(True{}, g, S, n, best)
+    case False{}:
+      Nil{}
+
+def guess_items_nodup(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+                      +best: SolveRef.Best, le_2n: Bool) -> +List<Item>:
+  match le_2n:
+    case False{}:
+      guess_body(True{}, g, S, n, best)
+    case True{}:
+      guess_items_mem(g, S, n, best, member_word_fast(g, S))
+
+def guess_items(+nodup: Bool, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
                 +best: SolveRef.Best) -> +List<Item>:
-  guess_items_go(g, S, n, skippable(best, pre_lb(n, g, S)))
+  match nodup:
+    case True{}:
+      guess_items_nodup(g, S, n, best, skippable(best, Nat.add(n, n)))
+    case False{}:
+      guess_items_go(False{}, g, S, n, best, skippable(best, pre_lb(n, g, S)))
 
-# One step of the pruned search. `gs` holds the remaining unscheduled guesses at
-# this node and `cs` holds the items of the current guess. Lexicographic
-# structural recursion on `(fuel, gs, cs)` lets `step` build each guess's
-# feedback groups lazily when `cs` becomes `Nil{}`.
+# One step of the pruned search. Lexicographic structural recursion on
+# `(fuel, gs, cs)` builds each guess lazily when `cs` becomes `Nil{}`, caches
+# `n = |S|` and `nodup`, and exits the node immediately once `done` signals
+# `best_cost(best) <= 2 * n - 1` in duplicate-free mode.
 def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
-         +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+         +G: +List<+List<Nat>>, +S: +List<+List<Nat>>, +n: Nat, +nodup: Bool,
          +inf: Nat, +g: +List<Nat>, +kids: +List<Tree.Child>, +sum: Nat,
-         +best: SolveRef.Best, +pending: SolveRef.Best, skip: Bool) -> SolveRef.Best:
+         +best: SolveRef.Best, +pending: SolveRef.Best, skip: Bool,
+         done: Bool) -> SolveRef.Best:
   match fuel:
     case 0n:
       match gs:
@@ -506,45 +633,51 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
               best
             case Con{item, rest}:
               match item:
-                case Begin{g2, lb}:
-                  step(0n, Nil{}, rest, G, S, inf, g2, Nil{}, 0n, best, pending, False{})
-                case ClassItem{fb, words, tail_lb}:
+                case Begin{g2}:
+                  step(0n, Nil{}, rest, G, S, n, nodup, inf, g2, Nil{}, 0n,
+                       best, pending, False{}, False{})
+                case ClassItem{fb, words, wlen, tail_lb}:
                   dummy_inf(inf)
                 case OneItem{fb, w}:
                   dummy_inf(inf)
                 case Add{fb, tail_lb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
-                      step(0n, Nil{}, rest, G, S, inf, g,
+                      step(0n, Nil{}, rest, G, S, n, nodup, inf, g,
                            Tree.Child{fb, tree} <> kids,
-                           SolveRef.sat_add(inf, sum, cost), best, dummy_zero(), skip)
+                           SolveRef.sat_add(inf, sum, cost), best,
+                           dummy_zero(), skip, False{})
                 case End{}:
-                  step(0n, Nil{}, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                       SolveRef.finish_guess(inf, g, kids, sum, Groups.len_words(S), best),
-                       dummy_zero(), False{})
+                  step(0n, Nil{}, rest, G, S, n, nodup, inf, Nil{}, Nil{}, 0n,
+                       SolveRef.finish_guess(inf, g, kids, sum, n, best),
+                       dummy_zero(), False{}, False{})
         case Con{+g2, +grest}:
           match cs:
             case Nil{}:
-              step(0n, grest, guess_body(g2, S, Groups.len_words(S)),
-                   G, S, inf, Nil{}, Nil{}, 0n, best, dummy_zero(), False{})
+              step(0n, grest, Begin{g2} <> (End{} <> Nil{}),
+                   G, S, n, nodup, inf, Nil{}, Nil{}, 0n, best,
+                   dummy_zero(), False{}, False{})
             case Con{item, rest}:
               match item:
-                case Begin{g3, lb}:
-                  step(0n, g2 <> grest, rest, G, S, inf, g3, Nil{}, 0n, best, pending, False{})
-                case ClassItem{fb, words, tail_lb}:
+                case Begin{g3}:
+                  step(0n, g2 <> grest, rest, G, S, n, nodup, inf, g3,
+                       Nil{}, 0n, best, pending, False{}, False{})
+                case ClassItem{fb, words, wlen, tail_lb}:
                   dummy_inf(inf)
                 case OneItem{fb, w}:
                   dummy_inf(inf)
                 case Add{fb, tail_lb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
-                      step(0n, g2 <> grest, rest, G, S, inf, g,
+                      step(0n, g2 <> grest, rest, G, S, n, nodup, inf, g,
                            Tree.Child{fb, tree} <> kids,
-                           SolveRef.sat_add(inf, sum, cost), best, dummy_zero(), skip)
+                           SolveRef.sat_add(inf, sum, cost), best,
+                           dummy_zero(), skip, False{})
                 case End{}:
-                  step(0n, g2 <> grest, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                       SolveRef.finish_guess(inf, g, kids, sum, Groups.len_words(S), best),
-                       dummy_zero(), False{})
+                  step(0n, g2 <> grest, rest, G, S, n, nodup, inf,
+                       Nil{}, Nil{}, 0n,
+                       SolveRef.finish_guess(inf, g, kids, sum, n, best),
+                       dummy_zero(), False{}, False{})
     case 1n+p:
       match gs:
         case Nil{}:
@@ -553,122 +686,131 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
               best
             case Con{item, rest}:
               match item:
-                case Begin{g2, lb}:
-                  step(fuel, Nil{}, rest, G, S, inf, g2, Nil{}, 0n, best, dummy_zero(),
-                       skippable(best, lb))
-                case ClassItem{fb, words, +tail_lb}:
+                case Begin{g2}:
+                  step(fuel, Nil{}, rest, G, S, n, nodup, inf, g2, Nil{}, 0n,
+                       best, dummy_zero(), False{}, False{})
+                case ClassItem{fb, words, +wlen, +tail_lb}:
                   match skip:
                     case True{}:
-                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), True{})
+                      step(fuel, Nil{}, rest, G, S, n, nodup, inf, g, kids,
+                           sum, best, dummy_zero(), True{}, False{})
                     case False{}:
-                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
-                           step(p, G, Nil{}, G, words, inf,
-                                Nil{}, Nil{}, 0n,
-                                dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb))),
-                                dummy_zero(), False{}),
-                           False{})
+                      +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
+                      step(fuel, Nil{}, rest, G, S, n, nodup, inf, g, kids,
+                           sum, best,
+                           step(p, G, Nil{}, G, words, wlen, nodup, inf,
+                                Nil{}, Nil{}, 0n, b0, dummy_zero(), False{},
+                                is_floor_hit(nodup, wlen, b0)),
+                           False{}, False{})
                 case OneItem{fb, w}:
                   match skip:
                     case True{}:
-                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), True{})
+                      step(fuel, Nil{}, rest, G, S, n, nodup, inf, g, kids,
+                           sum, best, dummy_zero(), True{}, False{})
                     case False{}:
-                      step(fuel, Nil{}, rest, G, S, inf, g,
+                      step(fuel, Nil{}, rest, G, S, n, nodup, inf, g,
                            Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                            SolveRef.sat_add(inf, sum, 1n), best,
-                           dummy_zero(), False{})
+                           dummy_zero(), False{}, False{})
                 case Add{fb, +tail_lb}:
                   match pending:
                     case SolveRef.Best{tree, +cost}:
                       match skip:
                         case True{}:
-                          step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
-                               dummy_zero(), True{})
+                          step(fuel, Nil{}, rest, G, S, n, nodup, inf, g, kids,
+                               sum, best, dummy_zero(), True{}, False{})
                         case False{}:
                           +sum2 = SolveRef.sat_add(inf, sum, cost)
-                          step(fuel, Nil{}, rest, G, S, inf, g,
+                          step(fuel, Nil{}, rest, G, S, n, nodup, inf, g,
                                Tree.Child{fb, tree} <> kids,
                                sum2, best, dummy_zero(),
-                               skippable(best, Nat.add(sum2, tail_lb)))
+                               skippable(best, Nat.add(sum2, tail_lb)), False{})
                 case End{}:
                   match skip:
                     case True{}:
-                      step(fuel, Nil{}, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                           best, dummy_zero(), False{})
+                      step(fuel, Nil{}, rest, G, S, n, nodup, inf,
+                           Nil{}, Nil{}, 0n, best, dummy_zero(), False{}, False{})
                     case False{}:
-                      step(fuel, Nil{}, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                           SolveRef.finish_guess(inf, g, kids, sum,
-                             Groups.len_words(S), best),
-                           dummy_zero(), False{})
+                      +best2 = SolveRef.finish_guess(inf, g, kids, sum, n, best)
+                      step(fuel, Nil{}, rest, G, S, n, nodup, inf,
+                           Nil{}, Nil{}, 0n, best2, dummy_zero(), False{},
+                           is_floor_hit(nodup, n, best2))
         case Con{+g2, +grest}:
           match cs:
             case Nil{}:
-              step(fuel, grest, guess_items(g2, S, Groups.len_words(S), best),
-                   G, S, inf, Nil{}, Nil{}, 0n, best, dummy_zero(), False{})
+              match done:
+                case True{}:
+                  best
+                case False{}:
+                  step(fuel, grest, guess_items(nodup, g2, S, n, best),
+                       G, S, n, nodup, inf, Nil{}, Nil{}, 0n, best,
+                       dummy_zero(), False{}, False{})
             case Con{item, rest}:
               match item:
-                case Begin{g3, lb}:
-                  step(fuel, g2 <> grest, rest, G, S, inf, g3, Nil{}, 0n, best, dummy_zero(),
-                       skippable(best, lb))
-                case ClassItem{fb, words, +tail_lb}:
+                case Begin{g3}:
+                  step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g3,
+                       Nil{}, 0n, best, dummy_zero(), False{}, False{})
+                case ClassItem{fb, words, +wlen, +tail_lb}:
                   match skip:
                     case True{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), True{})
+                      step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g,
+                           kids, sum, best, dummy_zero(), True{}, False{})
                     case False{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
-                           step(p, G, Nil{}, G, words, inf,
-                                Nil{}, Nil{}, 0n,
-                                dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb))),
-                                dummy_zero(), False{}),
-                           False{})
+                      +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
+                      step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g,
+                           kids, sum, best,
+                           step(p, G, Nil{}, G, words, wlen, nodup, inf,
+                                Nil{}, Nil{}, 0n, b0, dummy_zero(), False{},
+                                is_floor_hit(nodup, wlen, b0)),
+                           False{}, False{})
                 case OneItem{fb, w}:
                   match skip:
                     case True{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), True{})
+                      step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g,
+                           kids, sum, best, dummy_zero(), True{}, False{})
                     case False{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g,
+                      step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g,
                            Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                            SolveRef.sat_add(inf, sum, 1n), best,
-                           dummy_zero(), False{})
+                           dummy_zero(), False{}, False{})
                 case Add{fb, +tail_lb}:
                   match pending:
                     case SolveRef.Best{tree, +cost}:
                       match skip:
                         case True{}:
-                          step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
-                               dummy_zero(), True{})
+                          step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g,
+                               kids, sum, best, dummy_zero(), True{}, False{})
                         case False{}:
                           +sum2 = SolveRef.sat_add(inf, sum, cost)
-                          step(fuel, g2 <> grest, rest, G, S, inf, g,
+                          step(fuel, g2 <> grest, rest, G, S, n, nodup, inf, g,
                                Tree.Child{fb, tree} <> kids,
                                sum2, best, dummy_zero(),
-                               skippable(best, Nat.add(sum2, tail_lb)))
+                               skippable(best, Nat.add(sum2, tail_lb)), False{})
                 case End{}:
                   match skip:
                     case True{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                           best, dummy_zero(), False{})
+                      step(fuel, g2 <> grest, rest, G, S, n, nodup, inf,
+                           Nil{}, Nil{}, 0n, best, dummy_zero(), False{}, False{})
                     case False{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                           SolveRef.finish_guess(inf, g, kids, sum,
-                             Groups.len_words(S), best),
-                           dummy_zero(), False{})
+                      +best2 = SolveRef.finish_guess(inf, g, kids, sum, n, best)
+                      step(fuel, g2 <> grest, rest, G, S, n, nodup, inf,
+                           Nil{}, Nil{}, 0n, best2, dummy_zero(), False{},
+                           is_floor_hit(nodup, n, best2))
 
 # The pruned search on a guess list and candidate list. Checks once at the root
-# that every candidate belongs to `guesses`; if not, no valid tree exists and
-# `None{}` is returned immediately. Otherwise every singleton leaf resolves in
-# O(1) to `Tree.Node{w, Nil{}}` of cost 1.
+# that every candidate belongs to `guesses` (returning `None{}` immediately if
+# not) and whether `candidates` is duplicate-free (enabling O(1) `class_lb`,
+# O(1) floor exit at `2 * |S| - 1`, and fast pre-bound filtering throughout).
 def solve_fast_valid(+guesses: +List<+List<Nat>>,
                      +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
   match candidates:
     case Nil{}:
       +inf = SolveRef.inf_of(0n)
+      +b0 = dummy_inf(inf)
       SolveRef.best_to_maybe(inf,
-        step(0n, guesses, Nil{}, guesses, Nil{}, inf,
-             Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
+        step(0n, guesses, Nil{}, guesses, Nil{}, 0n, True{}, inf,
+             Nil{}, Nil{}, 0n, b0, dummy_zero(), False{},
+             is_floor_hit(True{}, 0n, b0)))
     case Con{+w, +t}:
       match t:
         case Nil{}:
@@ -677,9 +819,12 @@ def solve_fast_valid(+guesses: +List<+List<Nat>>,
           +cs : +List<+List<Nat>> = w <> (w2 <> t2)
           +n = Groups.len_words(cs)
           +inf = SolveRef.inf_of(n)
+          +nd = no_dup_fast(cs)
+          +b0 = dummy_inf(inf)
           SolveRef.best_to_maybe(inf,
-            step(n, guesses, Nil{}, guesses, cs, inf,
-                 Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
+            step(n, guesses, Nil{}, guesses, cs, n, nd, inf,
+                 Nil{}, Nil{}, 0n, b0, dummy_zero(), False{},
+                 is_floor_hit(nd, n, b0)))
 
 def solve_fast_checked(ok: Bool, +guesses: +List<+List<Nat>>,
                        +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
