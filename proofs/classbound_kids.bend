@@ -25,6 +25,7 @@ import ./children.bend as CH
 import ./groupcost.bend as GC
 import ./nodecost.bend as NodeCost
 import ./classbound_nat.bend as CBN
+import ./sat.bend as Sat
 
 # Every group feedback differs from `fb`.
 def CBK.allNe(+fb: +List<Feedback.Color>, +gs: +List<Groups.Group>) -> Bool:
@@ -361,3 +362,108 @@ def CBK.cost_tree_eq(+T1: Tree.Tree, +T2: Tree.Tree, +S: +List<+List<Nat>>,
     e: {T1 == T2 : Tree.Tree}) ->
   {Tree.cost(T1, S) == Tree.cost(T2, S) : Nat}:
   Equal.cong(Tree.Tree, Nat, t => Tree.cost(t, S), T1, T2, e)
+
+# One class's stored cost equals the cost of the tree it carries.
+def CBK.CostEqs(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>, +inf: Nat) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          {Sat.SB.child_cost(p, G, ws, inf)
+           == Tree.cost(CBK.tree_of_class(p, G, ws, inf), ws) : Nat}
+          & CBK.CostEqs(p, G, S, t, inf)
+
+# With that, the fold's cost list is the class-cost list of the node.
+def CBK.costs_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>, +inf: Nat,
+    eq: CBK.CostEqs(p, G, S, groups, inf)) ->
+  {Sat.SB.child_costs(p, G, groups, inf)
+   == CBK.class_costs(p, G, S, groups, inf) : +List<Nat>}:
+  match groups:
+    case Nil{}:
+      {==}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{+f, +ws}:
+          (eh, et) = eq
+          +ih : {Sat.SB.child_costs(p, G, t, inf)
+                 == CBK.class_costs(p, G, S, t, inf) : +List<Nat>} =
+            CBK.costs_eq(p, G, S, t, inf, et)
+          +e1 : {Sat.SB.child_cost(p, G, ws, inf) <> Sat.SB.child_costs(p, G, t, inf)
+                 == Tree.cost(CBK.tree_of_class(p, G, ws, inf), ws)
+                    <> Sat.SB.child_costs(p, G, t, inf) : +List<Nat>} =
+            Equal.cong(Nat, +List<Nat>,
+              x => x <> Sat.SB.child_costs(p, G, t, inf),
+              Sat.SB.child_cost(p, G, ws, inf),
+              Tree.cost(CBK.tree_of_class(p, G, ws, inf), ws), eh)
+          Equal.trans(+List<Nat>,
+            Sat.SB.child_cost(p, G, ws, inf) <> Sat.SB.child_costs(p, G, t, inf),
+            Tree.cost(CBK.tree_of_class(p, G, ws, inf), ws)
+              <> Sat.SB.child_costs(p, G, t, inf),
+            Tree.cost(CBK.tree_of_class(p, G, ws, inf), ws)
+              <> CBK.class_costs(p, G, S, t, inf), e1,
+            Equal.cong(+List<Nat>, +List<Nat>,
+              x => Tree.cost(CBK.tree_of_class(p, G, ws, inf), ws) <> x,
+              Sat.SB.child_costs(p, G, t, inf),
+              CBK.class_costs(p, G, S, t, inf), ih))
+
+# The cost of the tree `finish_guess` builds from the accumulator. The machine's
+# child list is the reverse of the class children, and the stored cost list is
+# the class-cost list, so this is `CBK.node_cost` transported to the exact tree
+# and cost the solver holds.
+def CBK.machine_cost(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +kids: +List<Tree.Child>,
+    depths: Tree.AllHaveDepth(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S),
+    +kids_eq: {SolveRef.rev_kids(kids, Nil{})
+               == CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)
+               : +List<Tree.Child>},
+    costEq: CBK.CostEqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf)) ->
+  {Tree.cost(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S)
+   == Nat.add(Groups.len_words(S),
+        CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
+   : Nat}:
+  +groups : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+  +kids2 : +List<Tree.Child> = CH.CH.children(p, G, S, groups, inf)
+  d2 : Tree.AllHaveDepth(Tree.Node{g, kids2}, S) =
+    CBK.depths_transport(g, SolveRef.rev_kids(kids, Nil{}), kids2, S, kids_eq, depths)
+  +nc : {Tree.cost(Tree.Node{g, kids2}, S)
+         == Nat.add(Groups.len_words(S),
+              CBN.CB.sum(CBK.class_costs(p, G, S, groups, inf))) : Nat} =
+    CBK.node_cost(p, G, S, g, inf, d2, CBK.distinctB_build(g, S))
+  +ct : {Sat.SB.child_costs(p, G, groups, inf)
+         == CBK.class_costs(p, G, S, groups, inf) : +List<Nat>} =
+    CBK.costs_eq(p, G, S, groups, inf, costEq)
+  +cs : {CBN.CB.sum(CBK.class_costs(p, G, S, groups, inf))
+         == CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf)) : Nat} =
+    Equal.cong(+List<Nat>, Nat, l => CBN.CB.sum(l),
+      CBK.class_costs(p, G, S, groups, inf),
+      Sat.SB.child_costs(p, G, groups, inf),
+      Equal.sym(+List<Nat>, Sat.SB.child_costs(p, G, groups, inf),
+                CBK.class_costs(p, G, S, groups, inf), ct))
+  +e_add : {Nat.add(Groups.len_words(S),
+              CBN.CB.sum(CBK.class_costs(p, G, S, groups, inf)))
+            == Nat.add(Groups.len_words(S),
+                 CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf))) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.add(Groups.len_words(S), x),
+               CBN.CB.sum(CBK.class_costs(p, G, S, groups, inf)),
+               CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf)), cs)
+  +e_tree : {Tree.Node{g, SolveRef.rev_kids(kids, Nil{})} == Tree.Node{g, kids2}
+             : Tree.Tree} =
+    Equal.cong(+List<Tree.Child>, Tree.Tree, ks => Tree.Node{g, ks},
+               SolveRef.rev_kids(kids, Nil{}), kids2, kids_eq)
+  +e_cost : {Tree.cost(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S)
+             == Tree.cost(Tree.Node{g, kids2}, S) : Nat} =
+    CBK.cost_tree_eq(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})},
+      Tree.Node{g, kids2}, S, e_tree)
+  Equal.trans(Nat, Tree.cost(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S),
+    Tree.cost(Tree.Node{g, kids2}, S),
+    Nat.add(Groups.len_words(S),
+      CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf))),
+    e_cost, Equal.trans(Nat, Tree.cost(Tree.Node{g, kids2}, S),
+      Nat.add(Groups.len_words(S),
+        CBN.CB.sum(CBK.class_costs(p, G, S, groups, inf))),
+      Nat.add(Groups.len_words(S),
+        CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf))), nc, e_add))
