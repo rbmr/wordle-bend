@@ -4,6 +4,10 @@ import ./src/feedback.bend as Feedback
 import ./src/tree.bend as Tree
 import ./src/solve.bend as Solve
 import ./src/json.bend as Json
+import ./proofs/spec.bend as Spec
+import ./proofs/logic.bend as Logic
+import ./proofs/nat.bend as NatProof
+import ./proofs/min.bend as Min
 
 def Bool.disc(b: Bool) -> Type:
   match b:
