@@ -28,8 +28,9 @@ import ./tree.bend as Tree
 #   child    = "[" feedback "," tree "]"
 #   feedback = "[" c1 "," c2 ... "]"        ("[]" if empty)
 #
-# A colour is "0" Gray, "1" Yellow or "2" Green. A letter is its code point in
-# ordinary decimal, as Base's Nat.show writes it.
+# A colour is "0" Gray, "1" Yellow or "2" Green. A letter is its code point as
+# an ordinary decimal numeral: most significant digit first, no leading zeros,
+# and "0" for zero. `decimal` below is that numeral, written out directly.
 
 def render_color(c: Feedback.Color) -> String:
   match c:
@@ -57,19 +58,102 @@ def render_feedback.body(xs: +List<Feedback.Color>) -> String:
 def render_feedback(xs: +List<Feedback.Color>) -> String:
   "[" ++ render_feedback.body(xs) ++ "]"
 
+# Decimal numerals
+# -----------------
+#
+# A numeral is the digits of the number in base ten, most significant first.
+# `decimal.digits` peels the number with `Nat.divmod(n, 10)`: the quotient is
+# rendered first and the remainder is the digit appended last. A single-digit
+# number stops after that one digit, so there is no leading zero; zero itself
+# is the one-character string "0".
+
+def digit_char(n: Nat) -> String:
+  match n:
+    case 0n:
+      "0"
+    case 1n+p:
+      match p:
+        case 0n:
+          "1"
+        case 1n+q:
+          match q:
+            case 0n:
+              "2"
+            case 1n+r:
+              match r:
+                case 0n:
+                  "3"
+                case 1n+s:
+                  match s:
+                    case 0n:
+                      "4"
+                    case 1n+t:
+                      match t:
+                        case 0n:
+                          "5"
+                        case 1n+u:
+                          match u:
+                            case 0n:
+                              "6"
+                            case 1n+v:
+                              match v:
+                                case 0n:
+                                  "7"
+                                case 1n+w:
+                                  match w:
+                                    case 0n:
+                                      "8"
+                                    case 1n+x:
+                                      match x:
+                                        case 0n:
+                                          "9"
+                                        case 1n++_:
+                                          ""
+
+def decimal.digits(fuel: Nat, n: Nat, qr: Nat & Nat) -> +List<Nat>:
+  match fuel:
+    case 0n:
+      Nil{}
+    case 1n+f:
+      match n:
+        case 0n:
+          Nil{}
+        case 1n+p:
+          match qr:
+            case (q, r):
+              match q:
+                case 0n:
+                  Con{r, Nil{}}
+                case 1n++_:
+                  List.append(&2, Nat, decimal.digits(f, q, Nat.divmod(q, 10n)), Con{r, Nil{}})
+
+def decimal.chars(xs: +List<Nat>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{h, t}:
+      String.append(digit_char(h), decimal.chars(t))
+
+def decimal(n: Nat) -> String:
+  match n:
+    case 0n:
+      "0"
+    case 1n++p:
+      decimal.chars(decimal.digits(1n+p, 1n+p, Nat.divmod(1n+p, 10n)))
+
 def render_nats.more(xs: +List<Nat>) -> String:
   match xs:
     case Nil{}:
       ""
     case Con{h, t}:
-      "," ++ Nat.show(h) ++ render_nats.more(t)
+      "," ++ decimal(h) ++ render_nats.more(t)
 
 def render_nats.body(xs: +List<Nat>) -> String:
   match xs:
     case Nil{}:
       ""
     case Con{h, t}:
-      Nat.show(h) ++ render_nats.more(t)
+      decimal(h) ++ render_nats.more(t)
 
 def render_nats(xs: +List<Nat>) -> String:
   "[" ++ render_nats.body(xs) ++ "]"
