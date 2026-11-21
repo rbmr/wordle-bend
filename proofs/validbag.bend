@@ -32,8 +32,8 @@ def VB.entry(+g: +List<Nat>, +kids: +List<Tree.Child>, +w: +List<Nat>,
   Tuple{w, f}
 
 # The words of a bag, in the same order, as reusable data.
-def VB.words(+g: +List<Nat>, +kids: +List<Tree.Child>, bag: VB.Bag(g, kids))
-    -> +List<+List<Nat>>:
+def VB.words(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>) -> +List<+List<Nat>>:
   match bag:
     case Nil{}:
       Nil{}
@@ -80,7 +80,8 @@ def VB.fact_eq(+g: +List<Nat>, +kids: +List<Tree.Child>, +x: +List<Nat>,
   f
 
 # Find a candidate in the bag by membership in the carried word list.
-def VB.take(+g: +List<Nat>, +kids: +List<Tree.Child>, bag: VB.Bag(g, kids),
+def VB.take(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>,
     +w: +List<Nat>, m: Grp.Grp.InWords(w, VB.words(g, kids, bag)))
     -> VB.Fact(g, kids, w) & VB.Bag(g, kids):
   match bag:
@@ -96,13 +97,15 @@ def VB.take(+g: +List<Nat>, +kids: +List<Tree.Child>, bag: VB.Bag(g, kids),
               VB.rebuild(g, kids, x, f, w, VB.take(g, kids, t, w, m2))
 
 # The append of two bags.
-def VB.app(+g: +List<Nat>, +kids: +List<Tree.Child>, xs: VB.Bag(g, kids),
-    ys: VB.Bag(g, kids)) -> VB.Bag(g, kids):
+def VB.app(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +xs: List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>,
+    +ys: List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>) -> VB.Bag(g, kids):
   List.append(&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>, xs, ys)
 
 # The words of an appended bag are the appended words.
 def VB.words_append(+g: +List<Nat>, +kids: +List<Tree.Child>,
-    xs: VB.Bag(g, kids), ys: VB.Bag(g, kids)) ->
+    +xs: List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>,
+    +ys: List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>) ->
   {VB.words(g, kids, VB.app(g, kids, xs, ys))
    == List.append(&2, +List<Nat>, VB.words(g, kids, xs), VB.words(g, kids, ys))
    : +List<+List<Nat>>}:
@@ -116,3 +119,11 @@ def VB.words_append(+g: +List<Nat>, +kids: +List<Tree.Child>,
             VB.words(g, kids, VB.app(g, kids, t, ys)),
             List.append(&2, +List<Nat>, VB.words(g, kids, t), VB.words(g, kids, ys)),
             VB.words_append(g, kids, t, ys))
+
+# A reusable name for a bag value.
+def VB.copy(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, w =>
+      {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>) ->
+  List<&2, Sigma<&2, &2, +List<Nat>, w =>
+      {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>>:
+  bag
