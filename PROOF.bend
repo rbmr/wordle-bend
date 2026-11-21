@@ -12,6 +12,7 @@ import ./proofs/feedback.bend as FbProof
 import ./proofs/depth.bend as DepthProof
 import ./proofs/groups.bend as Grp
 import ./proofs/best_nil.bend as BaseCase
+import ./proofs/nodecost.bend as NodeCost
 
 def Bool.disc(b: Bool) -> Type:
   match b:
