@@ -98,19 +98,32 @@ def FC.sumL_le(+inf: Nat, +cs: +List<Nat>, +acc: Nat) ->
         Nat.add(acc, CBN.CB.sum(Con{c, t})),
         NatProof.NatPrf.add_assoc(acc, c, CBN.CB.sum(t)), mid)
 
+# The two completeness facts at one fuel.
+def FC.Facts(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>) -> Type:
+  {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(fuel, SolveRef.mk_schedule(G, S),
+     G, S, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+     Eval.Eval.dummy_zero())), inf) == True{} : Bool}
+  & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(fuel, SolveRef.mk_schedule(G, S),
+       G, S, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+       Eval.Eval.dummy_zero())),
+      Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool}
+
+# The same facts after one step of the guess fold.
+def FC.GuessFacts(p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>) -> Type:
+  {Nat.is_lt(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+     Eval.Eval.dummy_inf(inf))), inf) == True{} : Bool}
+  & {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+       Eval.Eval.dummy_inf(inf))),
+      Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool}
+
 # The completeness obligation for one candidate list.
 def FC.FinJob(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>) -> Type:
   @hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
         == True{} : Bool}
-  -> @T: Tree.Tree -> Tree.Valid(T, G, S)
-  -> {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(fuel, SolveRef.mk_schedule(G, S),
-        G, S, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
-        Eval.Eval.dummy_zero())), inf) == True{} : Bool}
-     & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(fuel,
-          SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
-          Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
-        Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool}
+  -> @T: Tree.Tree -> Tree.Valid(T, G, S) -> FC.Facts(fuel, inf, G, S)
 
 # The conjunction of the obligations over a list of candidate lists.
 def FC.FinFlat(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
@@ -157,13 +170,7 @@ def FC.FinByGs(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
 def FC.fin_zero_empty(+inf: Nat, T: Tree.Tree, v: Tree.Valid(T, Nil{}, Nil{}),
     +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
           == True{} : Bool}) ->
-  {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}),
-      Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
-      Eval.Eval.dummy_zero())), inf) == True{} : Bool}
-  & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
-       SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n,
-       Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
-      Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))) == True{} : Bool}:
+  FC.Facts(0n, inf, Nil{}, Nil{}):
   match T:
     case Tree.Node{g, kids}:
       (ti, ad) = v
@@ -184,13 +191,7 @@ def FC.fin_zero_empty(+inf: Nat, T: Tree.Tree, v: Tree.Valid(T, Nil{}, Nil{}),
 def FC.fin_zero_cons(+inf: Nat, +g: +List<Nat>, +t: +List<+List<Nat>>,
     +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
           == True{} : Bool}) ->
-  {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n,
-      SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
-      Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), inf) == True{} : Bool}
-  & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
-       SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
-       Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
-      Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))) == True{} : Bool}:
+  FC.Facts(0n, inf, g <> t, Nil{}):
   +eb : {SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
             Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
           == Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
@@ -414,11 +415,7 @@ def FC.fin_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
           == True{} : Bool},
     +us: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{}
          : Bool}) ->
-  {Nat.is_lt(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
-      Eval.Eval.dummy_inf(inf))), inf) == True{} : Bool}
-  & {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
-       Eval.Eval.dummy_inf(inf))),
-      Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool}:
+  FC.GuessFacts(p, inf, G, S):
   ((wg0, kidsin), depths) = v
   +wg : {Tree.member_word(g, G) == True{} : Bool} = wg0
   +n : Nat = Groups.len_words(S)
@@ -513,3 +510,214 @@ def FC.fin_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
                     Eval.Eval.dummy_inf(inf))),
                   Nat.mul(n, n), inf, f2, hz)
               (f1, f2))))
+
+# The facts of one tree's search at the next fuel, uniformly over the list.
+def FC.FinBound(p: Nat, +inf: Nat, +G: +List<+List<Nat>>, T: Tree.Tree) -> Type:
+  @S: +List<+List<Nat>> -> FC.FinByGs(p, inf, G, S, G)
+  -> @hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+           == True{} : Bool}
+  -> Tree.Valid(T, G, S) -> FC.Facts(1n+p, inf, G, S)
+
+# The conjunction of the tree bounds over a child list.
+def FC.AllFinBound(p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +kids: +List<Tree.Child>) -> Type:
+  match kids:
+    case Nil{}:
+      Unit
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          FC.FinBound(p, inf, G, child) & FC.AllFinBound(p, inf, G, rest)
+
+# A tree bound moved along an equality of trees.
+def FC.finbound_transport(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +t1: Tree.Tree, +t2: Tree.Tree, e: {t1 == t2 : Tree.Tree},
+    b: FC.FinBound(p, inf, G, t1)) -> FC.FinBound(p, inf, G, t2):
+  %e : FC.FinBound(p, inf, G, _)
+  b
+
+# A job moved along an equality of candidate lists.
+def FC.finjob_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S1: +List<+List<Nat>>, +S2: +List<+List<Nat>>,
+    e: {S1 == S2 : +List<+List<Nat>>},
+    j: FC.FinJob(fuel, inf, G, S1)) -> FC.FinJob(fuel, inf, G, S2):
+  %e : FC.FinJob(fuel, inf, G, _)
+  j
+
+# The lookup decision at the head child, with the test as a parameter.
+def FC.fin_pick_head(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +child: Tree.Tree, +rest: +List<Tree.Child>,
+    head: FC.FinBound(p, inf, G, child), +T: Tree.Tree,
+    e: {Tree.lookup(fb, Tree.Child{f, child} <> rest) == Some{T} : Maybe<Tree.Tree>},
+    b: Bool, +eb: {b == Feedback.feedback_eq(fb, f) : Bool},
+    k: {Tree.lookup(fb, rest) == Some{T} : Maybe<Tree.Tree>}
+       -> FC.FinBound(p, inf, G, T)) -> FC.FinBound(p, inf, G, T):
+  match b:
+    case True{}:
+      +e1 : {Some{child} == Cover.Cover.lookup_of(fb, f, child, rest,
+                  Feedback.feedback_eq(fb, f)) : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.lk_true(fb, f, child, rest, eb)
+      +e2 : {Some{child} == Some{T} : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.mtrans(Some{child},
+          Cover.Cover.lookup_of(fb, f, child, rest, Feedback.feedback_eq(fb, f)),
+          Some{T}, e1, e)
+      +ec : {child == T : Tree.Tree} = KidPr.KidsProof.some_inj(child, T, e2)
+      FC.finbound_transport(p, inf, G, child, T, ec, head)
+    case False{}:
+      +e1 : {Tree.lookup(fb, rest) == Cover.Cover.lookup_of(fb, f, child, rest,
+                  Feedback.feedback_eq(fb, f)) : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.lk_false(fb, f, child, rest, eb)
+      +e2 : {Tree.lookup(fb, rest) == Some{T} : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.mtrans(Tree.lookup(fb, rest),
+          Cover.Cover.lookup_of(fb, f, child, rest, Feedback.feedback_eq(fb, f)),
+          Some{T}, e1, e)
+      k(e2)
+
+# Select the tree bound that the lookup equation points to.
+def FC.fin_pick(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +fb: +List<Feedback.Color>, +kids: +List<Tree.Child>,
+    all: FC.AllFinBound(p, inf, G, kids), +T: Tree.Tree,
+    e: {Tree.lookup(fb, kids) == Some{T} : Maybe<&1, Tree.Tree>}) ->
+  FC.FinBound(p, inf, G, T):
+  match kids:
+    case Nil{}:
+      Empty.absurd(FC.FinBound(p, inf, G, T),
+        KidPr.KidsProof.none_ne_some(T, e))
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          (head, tail) = all
+          FC.fin_pick_head(p, inf, G, fb, f, child, rest, head, T, e,
+            Feedback.feedback_eq(fb, f), {==},
+            e2 => FC.fin_pick(p, inf, G, fb, rest, tail, T, e2))
+
+# The guess-fold facts are the job facts after one step.
+def FC.facts_of_guesses(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, f: FC.GuessFacts(p, inf, G, S)) ->
+  FC.Facts(1n+p, inf, G, S):
+  +e : {SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
+       == Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf))
+       : SolveRef.Best} =
+    Eval.Eval.guesses_step(p, G, S, inf, G, Eval.Eval.dummy_inf(inf))
+  +ec : {Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+            inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+            Eval.Eval.dummy_zero()))
+          == Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+               Eval.Eval.dummy_inf(inf))) : Nat} =
+    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+      SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)), e)
+  FC.use_pair(FC.Facts(1n+p, inf, G, S),
+    {Nat.is_lt(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+       Eval.Eval.dummy_inf(inf))), inf) == True{} : Bool},
+    {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+       Eval.Eval.dummy_inf(inf))),
+       Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool},
+    f,
+    fl => fr =>
+      (CBN.CB.lt_eq_l(inf,
+         Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+           Eval.Eval.dummy_inf(inf))),
+         Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+           inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+           Eval.Eval.dummy_zero())),
+         Equal.sym(Nat,
+           Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+             inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+             Eval.Eval.dummy_zero())),
+           Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+             Eval.Eval.dummy_inf(inf))), ec), fl),
+       NatProof.Nat.is_le_eq_l(
+         Nat.mul(Groups.len_words(S), Groups.len_words(S)),
+         Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+           Eval.Eval.dummy_inf(inf))),
+         Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+           inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+           Eval.Eval.dummy_zero())),
+         Equal.sym(Nat,
+           Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+             inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+             Eval.Eval.dummy_zero())),
+           Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+             Eval.Eval.dummy_inf(inf))), ec), fr)))
+
+# The unusable root: the bad class's valid child carries the same job.
+def FC.fin_unusable(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, +kids: +List<Tree.Child>,
+    res: Ind.OQ.KidRes(G, S, g, kids),
+    flatS: FC.FinByGs(p, inf, G, S, G),
+    all: FC.AllFinBound(p, inf, G, kids),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+          == True{} : Bool}) -> FC.Facts(1n+p, inf, G, S):
+  match res:
+    case Tuple{T2, r}:
+      (valid_S, r2) = r
+      (le2, r3) = r2
+      (fb2, el2) = r3
+      FC.fin_pick(p, inf, G, fb2, kids, all, T2, el2)(S, flatS, hz, valid_S)
+
+# The node step of the completeness induction.
+def FC.fin_at(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, +kids: +List<Tree.Child>,
+    flatS: FC.FinByGs(p, inf, G, S, G),
+    v: Tree.Valid(Tree.Node{g, kids}, G, S), b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    all: FC.AllFinBound(p, inf, G, kids),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+          == True{} : Bool}) -> FC.Facts(1n+p, inf, G, S):
+  ((wg0, kidsin), depths) = v
+  match b:
+    case True{}:
+      +us : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{}
+             : Bool} =
+        Equal.sym(Bool, b, Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+          eb)
+      FC.facts_of_guesses(p, G, S, inf,
+        FC.fin_succ(p, inf, G, S, g, kids, flatS, v, hz, us))
+    case False{}:
+      +ef : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+             == False{} : Bool} =
+        Equal.sym(Bool, b, Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+          eb)
+      FC.fin_unusable(p, inf, G, S, g, kids,
+        Ind.OQ.unusable_kid(G, S, g, kids, Groups.groups_build(g, S, Nil{}), {==},
+          depths, kidsin, ef),
+        flatS, all, hz)
+
+# The bounds for every child of a list, by structural recursion.
+def FC.fin_bounds(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +kids: +List<Tree.Child>) -> FC.AllFinBound(p, inf, G, kids):
+  match kids:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          match child:
+            case Tree.Node{+g, +ckids}:
+              ((+S => flatS => hz => v =>
+                  FC.fin_at(p, inf, G, S, g, ckids, flatS, v,
+                    Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+                    {==}, FC.fin_bounds(p, inf, G, ckids), hz)),
+               FC.fin_bounds(p, inf, G, rest))
+
+# The job of one tree at the next fuel.
+def FC.fin_job_at(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, T: Tree.Tree, v: Tree.Valid(T, G, S),
+    flatS: FC.FinByGs(p, inf, G, S, G),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+          == True{} : Bool}) -> FC.Facts(1n+p, inf, G, S):
+  match T:
+    case Tree.Node{+g, +kids}:
+      FC.fin_at(p, inf, G, S, g, kids, flatS, v,
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==},
+        FC.fin_bounds(p, inf, G, kids), hz)
+
+# The completeness obligation at the next fuel, from the class conjunction.
+def FC.fin_job_wrap(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, flatS: FC.FinByGs(p, inf, G, S, G)) ->
+  FC.FinJob(1n+p, inf, G, S):
+  hz => T => v => FC.fin_job_at(p, inf, G, S, T, v, flatS, hz)
