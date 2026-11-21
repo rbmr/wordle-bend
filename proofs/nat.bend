@@ -275,3 +275,69 @@ def NatPrf.is_eq_sym(+a: Nat, +b: Nat,
   +ab = NatPrf.is_eq_true(a, b, e)
   %Equal.sym(Nat, a, b, ab) : {Nat.is_eq(b, _) == True{} : Bool}
   NatPrf.is_eq_refl(b)
+
+# 10. Addition on the left, for regrouping sums of costs.
+def NatPrf.add_succ(a: Nat, b: Nat) ->
+  {Nat.add(a, 1n+b) == 1n+Nat.add(a, b) : Nat}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      %NatPrf.add_succ(p, b) : {1n+Nat.add(p, 1n+b) == 1n+_ : Nat}
+      {==}
+
+def NatPrf.add_zero(a: Nat) -> {Nat.add(a, 0n) == a : Nat}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      %NatPrf.add_zero(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+
+def NatPrf.add_assoc(a: Nat, b: Nat, c: Nat) ->
+  {Nat.add(Nat.add(a, b), c) == Nat.add(a, Nat.add(b, c)) : Nat}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+                 Nat.add(Nat.add(p, b), c), Nat.add(p, Nat.add(b, c)),
+                 NatPrf.add_assoc(p, b, c))
+
+def NatPrf.add_comm(a: Nat, +b: Nat) -> {Nat.add(a, b) == Nat.add(b, a) : Nat}:
+  match a:
+    case 0n:
+      Equal.sym(Nat, Nat.add(b, 0n), b, NatPrf.add_zero(b))
+    case 1n++p:
+      e1 = Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+             Nat.add(p, b), Nat.add(b, p), NatPrf.add_comm(p, b))
+      e2 = Equal.sym(Nat, Nat.add(b, 1n+p), Nat.add(1n, Nat.add(b, p)),
+             NatPrf.add_succ(b, p))
+      Equal.trans(Nat, Nat.add(1n+p, b), Nat.add(1n, Nat.add(b, p)),
+                  Nat.add(b, 1n+p), e1, e2)
+
+# (a + b) + (c + d) = (a + c) + (b + d).
+def NatPrf.add4(+a: Nat, +b: Nat, +c: Nat, +d: Nat) ->
+  {Nat.add(Nat.add(a, b), Nat.add(c, d)) == Nat.add(Nat.add(a, c), Nat.add(b, d)) : Nat}:
+  e1 = NatPrf.add_assoc(a, b, Nat.add(c, d))
+  i1 = Equal.sym(Nat, Nat.add(Nat.add(b, c), d), Nat.add(b, Nat.add(c, d)),
+                 NatPrf.add_assoc(b, c, d))
+  i2 = Equal.cong(Nat, Nat, x => Nat.add(x, d),
+                  Nat.add(b, c), Nat.add(c, b), NatPrf.add_comm(b, c))
+  i3 = NatPrf.add_assoc(c, b, d)
+  inner = Equal.trans(Nat, Nat.add(b, Nat.add(c, d)), Nat.add(Nat.add(b, c), d),
+                      Nat.add(c, Nat.add(b, d)), i1,
+                      Equal.trans(Nat, Nat.add(Nat.add(b, c), d),
+                                  Nat.add(Nat.add(c, b), d),
+                                  Nat.add(c, Nat.add(b, d)), i2, i3))
+  e2 = Equal.cong(Nat, Nat, x => Nat.add(a, x),
+                  Nat.add(b, Nat.add(c, d)), Nat.add(c, Nat.add(b, d)), inner)
+  e3 = Equal.sym(Nat, Nat.add(Nat.add(a, c), Nat.add(b, d)),
+                 Nat.add(a, Nat.add(c, Nat.add(b, d))),
+                 NatPrf.add_assoc(a, c, Nat.add(b, d)))
+  Equal.trans(Nat, Nat.add(Nat.add(a, b), Nat.add(c, d)),
+              Nat.add(a, Nat.add(b, Nat.add(c, d))),
+              Nat.add(Nat.add(a, c), Nat.add(b, d)), e1,
+              Equal.trans(Nat, Nat.add(a, Nat.add(b, Nat.add(c, d))),
+                          Nat.add(a, Nat.add(c, Nat.add(b, d))),
+                          Nat.add(Nat.add(a, c), Nat.add(b, d)), e2, e3))
