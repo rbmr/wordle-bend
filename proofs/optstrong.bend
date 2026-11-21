@@ -182,14 +182,69 @@ def F2.strong_of_guess(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         fo),
       Comp.FC.facts_of_guesses(p, G, S, inf, ff)))
 
-# One class: its cost comparison and its size/cost bounds.
+# One tree's two facts at one fuel, uniformly over the candidate list.
+def F2.SF(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, T: Tree.Tree) -> Type:
+  {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(fuel, SolveRef.mk_schedule(G, S),
+     G, S, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+     Eval.Eval.dummy_zero())), Tree.cost(T, S)) == True{} : Bool}
+  & Comp.FC.Facts(fuel, inf, G, S)
+
+# The obligation for one candidate list.
+def F2.StrongJob(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>) -> Type:
+  @hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+        == True{} : Bool}
+  -> @T: Tree.Tree -> Tree.Valid(T, G, S) -> F2.SF(fuel, inf, G, S, T)
+
+# The conjunction of the obligations over a list of candidate lists.
+def F2.StrongFlat(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    jobs: +List<+List<+List<Nat>>>) -> Type:
+  match jobs:
+    case Nil{}:
+      Unit
+    case Con{S, t}:
+      F2.StrongJob(fuel, inf, G, S) & F2.StrongFlat(fuel, inf, G, t)
+
+# The obligations of one guess's classes.
+def F2.StrongClass(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          F2.StrongJob(fuel, inf, G, ws) & F2.StrongClass(fuel, inf, G, rest)
+
+# The class obligations of one guess, only when the guess is usable.
+def F2.StrongClassIf(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, b: Bool,
+    +groups: +List<Groups.Group>) -> Type:
+  match b:
+    case True{}:
+      F2.StrongClass(fuel, inf, G, groups)
+    case False{}:
+      Unit
+
+# The class obligations of every guess in a guess list.
+def F2.StrongByGs(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case Con{g, t}:
+      F2.StrongClassIf(fuel, inf, G,
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+        Groups.groups_build(g, S, Nil{}))
+      & F2.StrongByGs(fuel, inf, G, S, t)
+
+# One class: its cost comparison and its size/cost bounds from one application.
 def F2.kid_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +kids: +List<Tree.Child>,
     +fb: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
     +lt: {Nat.is_lt(Groups.len_words(ws), Groups.len_words(S)) == True{} : Bool},
     kid: Cora.Cover.GroupKid(G, kids, Groups.Group{fb, ws}),
-    job: Node.OQ.AJob(p, inf, G, ws),
-    fjn: Comp.FC.FinJob(p, inf, G, ws),
+    sjob: F2.StrongJob(p, inf, G, ws),
     +hzw: {Nat.is_lt(Nat.mul(Groups.len_words(ws), Groups.len_words(ws)), inf)
            == True{} : Bool}) ->
   {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
@@ -198,19 +253,11 @@ def F2.kid_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
      & {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
           Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{} : Bool}):
   match kid:
-    case Tuple{T, kp}:
+    case Tuple{+T, kp}:
       (e_look, valid) = kp
       +hc : {GC.GC.GroupCost(kids, Groups.Group{fb, ws})
              == Tree.cost(T, ws) : Nat} =
         Cover.Cover.group_cost_some(kids, fb, ws, T, e_look)
-      +o : {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
-              Tree.cost(T, ws)) == True{} : Bool} =
-        job(T, valid)
-      +le : {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
-                GC.GC.GroupCost(kids, Groups.Group{fb, ws})) == True{} : Bool} =
-        Fold.OQ.le_cong_r(Sat.SB.child_cost(p, G, ws, inf), Tree.cost(T, ws),
-          GC.GC.GroupCost(kids, Groups.Group{fb, ws}), Equal.sym(Nat,
-            GC.GC.GroupCost(kids, Groups.Group{fb, ws}), Tree.cost(T, ws), hc), o)
       Comp.FC.use_pair(
         {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
            GC.GC.GroupCost(kids, Groups.Group{fb, ws})) == True{} : Bool}
@@ -218,18 +265,37 @@ def F2.kid_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
            & {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
                 Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{}
               : Bool}),
-        {Nat.is_lt(Sat.SB.child_cost(p, G, ws, inf), inf) == True{} : Bool},
-        {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
-           Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{} : Bool},
-        fjn(hzw)(T)(valid),
-        fl => fr => (le, (lt, fr)))
+        {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf), Tree.cost(T, ws)) == True{}
+         : Bool},
+        Comp.FC.Facts(p, inf, G, ws),
+        sjob(hzw)(T)(valid),
+        o => facts =>
+          Comp.FC.use_pair(
+            {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
+               GC.GC.GroupCost(kids, Groups.Group{fb, ws})) == True{} : Bool}
+            & ({Nat.is_lt(Groups.len_words(ws), Groups.len_words(S)) == True{}
+                : Bool}
+               & {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
+                    Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{}
+                  : Bool}),
+            {Nat.is_lt(Sat.SB.child_cost(p, G, ws, inf), inf) == True{} : Bool},
+            {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
+               Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{}
+             : Bool},
+            facts,
+            fl => fr =>
+              (Fold.OQ.le_cong_r(Sat.SB.child_cost(p, G, ws, inf),
+                 Tree.cost(T, ws),
+                 GC.GC.GroupCost(kids, Groups.Group{fb, ws}),
+                 Equal.sym(Nat, GC.GC.GroupCost(kids, Groups.Group{fb, ws}),
+                   Tree.cost(T, ws), hc), o),
+               (lt, fr))))
 
 # Every class: the cost comparison and the class bounds, from one walk.
 def F2.class_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +kids: +List<Tree.Child>, +groups: +List<Groups.Group>,
     gk: Cora.Cover.GroupKids(G, kids, groups),
-    jobs: Node.OQ.AClass(p, inf, G, groups),
-    fj: Comp.FC.FinClass(p, inf, G, groups),
+    sjobs: F2.StrongClass(p, inf, G, groups),
     sm: GM.GM.GroupsSmaller(S, groups),
     +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
           == True{} : Bool}) ->
@@ -242,8 +308,7 @@ def F2.class_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
       match gp:
         case Groups.Group{f, ws}:
           (kid, gkt) = gk
-          (job, jt) = jobs
-          (fjn, fjt) = fj
+          (sjob, sjt) = sjobs
           (lt0, smt) = sm
           +lt : {Nat.is_lt(Groups.len_words(ws), Groups.len_words(S)) == True{}
                  : Bool} = lt0
@@ -260,12 +325,24 @@ def F2.class_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
              & {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
                   Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{}
                 : Bool}),
-            F2.kid_both(p, inf, G, S, kids, f, ws, lt, kid, job, fjn, hzw),
+            F2.kid_both(p, inf, G, S, kids, f, ws, lt, kid, sjob, hzw),
             lh => fh =>
               Comp.FC.use_pair(
                 Sums.OQ.ClassLe(p, G, inf, groups, kids)
                 & CBK.CBK.ClassFits(p, G, S, groups, inf, Groups.len_words(S)),
-                Sums.OQ.ClassLe(p, G, inf, rest, kids),
-                CBK.CBK.ClassFits(p, G, S, rest, inf, Groups.len_words(S)),
-                F2.class_both(p, inf, G, S, kids, rest, gkt, jt, fjt, smt, hz),
-                lr => fr => ((lh, lr), (fh, fr))))
+                {Nat.is_lt(Groups.len_words(ws), Groups.len_words(S)) == True{}
+                 : Bool},
+                {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
+                   Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{}
+                 : Bool},
+                fh,
+                lt2 => fr2 =>
+                  Comp.FC.use_pair(
+                    Sums.OQ.ClassLe(p, G, inf, groups, kids)
+                    & CBK.CBK.ClassFits(p, G, S, groups, inf,
+                        Groups.len_words(S)),
+                    Sums.OQ.ClassLe(p, G, inf, rest, kids),
+                    CBK.CBK.ClassFits(p, G, S, rest, inf, Groups.len_words(S)),
+                    F2.class_both(p, inf, G, S, kids, rest, gkt, sjt, smt, hz),
+                    lr => fr => ((lh, lr), (lt2, (fr2, fr))))))
+
