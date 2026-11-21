@@ -276,3 +276,95 @@ def OC.better_cost(+inf: Nat, +candCost: Nat, +candTree: Tree.Tree,
     case SolveRef.Best{+tree, +cost}:
       OC.better_go(inf, candCost, candTree, tree, cost, S,
         Nat.is_lt(candCost, cost), {==}, hc, hb)
+
+# The class results of one group list, with their cost/tree correspondence.
+def OC.CClass(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          OC.CostOK(inf, SolveRef.step(p, SolveRef.mk_schedule(G, ws), G, ws, inf,
+            Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()), ws)
+          & OC.CClass(p, inf, G, rest)
+
+# The stored cost field of a class result is the cost of its tree, one class at
+# a time.
+def OC.cost_eqs(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>, +inf: Nat,
+    cc: OC.CClass(p, inf, G, groups),
+    cl: CBS.CU.AllLt(inf, Sat.SB.child_costs(p, G, groups, inf))) ->
+  CBK.CBK.CostEqs(p, G, S, groups, inf):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (ch, ct) = cc
+          (lh, lt) = cl
+          +eq : {Tree.cost(Eval.Eval.tree_of(SolveRef.step(p, SolveRef.mk_schedule(G, ws),
+                     G, ws, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                     Eval.Eval.dummy_zero())), ws)
+                 == Sat.SB.child_cost(p, G, ws, inf) : Nat} = ch(lh)
+          (Equal.sym(Nat, Tree.cost(CBK.CBK.tree_of_class(p, G, ws, inf), ws),
+             Sat.SB.child_cost(p, G, ws, inf), eq),
+           OC.cost_eqs(p, G, S, rest, inf, ct, lt))
+
+# The cost of the node built from the class fold, with the stored class costs.
+def OC.node_tree_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat,
+    oks: SV.SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{})),
+    gin: Tree.WordIn(g, G),
+    costEq: CBK.CBK.CostEqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+    +lt: {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S),
+            Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+              Nil{}, 0n, inf))), inf) == True{} : Bool}) ->
+  {Tree.cost(Tree.Node{g, SolveRef.rev_kids(
+       CH.CH.kids_of(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+         Nil{}, 0n, inf)), Nil{})}, S)
+   == Nat.add(Groups.len_words(S),
+        CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
+   : Nat}:
+  +kids : +List<Tree.Child> =
+    CH.CH.kids_of(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+      Nil{}, 0n, inf))
+  +e1 : {CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))
+          == SolveRef.rev_kids(CH.CH.children(p, G, S,
+               Groups.groups_build(g, S, Nil{}), inf), Nil{}) : +List<Tree.Child>} =
+    CH.CH.items_kids(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)
+  +e2 : {SolveRef.rev_kids(kids, Nil{})
+          == SolveRef.rev_kids(SolveRef.rev_kids(CH.CH.children(p, G, S,
+               Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{})
+          : +List<Tree.Child>} =
+    Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
+      l => SolveRef.rev_kids(l, Nil{}), CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+      SolveRef.rev_kids(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+        Nil{}), e1)
+  +e3 : {SolveRef.rev_kids(SolveRef.rev_kids(CH.CH.children(p, G, S,
+            Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{})
+          == CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)
+          : +List<Tree.Child>} =
+    CH.CH.rev_rev(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf))
+  +kids_eq : {SolveRef.rev_kids(kids, Nil{})
+               == CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)
+               : +List<Tree.Child>} =
+    Equal.trans(+List<Tree.Child>, SolveRef.rev_kids(kids, Nil{}),
+      SolveRef.rev_kids(SolveRef.rev_kids(CH.CH.children(p, G, S,
+        Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+      CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), e2, e3)
+  SV.SV.use_valid(
+    {Tree.cost(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S)
+     == Nat.add(Groups.len_words(S),
+          CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
+     : Nat},
+    Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S,
+    SV.SV.end_valid(p, G, S, g, inf, kids,
+      Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+        Nil{}, 0n, inf)), lt, oks, {==}, e1, gin),
+    ti => ad =>
+      CBK.CBK.machine_cost(p, G, S, g, inf, kids, ad, kids_eq, costEq))
