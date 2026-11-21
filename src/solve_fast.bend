@@ -144,7 +144,13 @@ def class_words(+groups: +List<Groups.Group>) -> Nat:
 # A lower bound on the cost of any tree rooted at a guess with these classes:
 # the node costs one per candidate and each class costs at least `class_lb`.
 def lower_bound(+n: Nat, +groups: +List<Groups.Group>) -> Nat:
-  Nat.add(n, class_words(groups))
+  match groups:
+    case Nil{}:
+      n
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Nat.add(class_lb(ws), lower_bound(n, rest))
 
 def best_cost(+best: SolveRef.Best) -> Nat:
   match best:
@@ -173,20 +179,30 @@ def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
           Check{lower_bound(n, Groups.Group{f, ws} <> rest)}
           <> (ClassItem{f, ws} <> (Add{f} <> group_items(n, rest)))
 
-# Single-pass construction of `group_items(n, groups)` from `cw = class_words(groups)`,
-# peel-subtracting each class's lower bound instead of resumming `rest`.
-def group_items_go(+n: Nat, +groups: +List<Groups.Group>,
-                   +cw: Nat) -> +List<Item>:
+# Single-pass construction of a guess's lower bound and schedule items onto
+# `tail`, computing `class_lb(ws)` once per class without a separate
+# `class_words` or `List.append` pass.
+type ItemsBound is Data:
+  ItemsBound{lb: Nat, items: +List<Item>}
+
+def group_items_step(+f: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
+                     +clb: Nat, ib: ItemsBound) -> ItemsBound:
+  match ib:
+    case ItemsBound{+rem_lb, +rest_items}:
+      +lb = Nat.add(clb, rem_lb)
+      ItemsBound{lb,
+        Check{lb} <> (ClassItem{f, ws} <> (Add{f} <> rest_items))}
+
+def group_items_build(+n: Nat, +groups: +List<Groups.Group>,
+                      +tail: +List<Item>) -> ItemsBound:
   match groups:
     case Nil{}:
-      Nil{}
+      ItemsBound{n, tail}
     case Con{gp, rest}:
       match gp:
         case Groups.Group{+f, +ws}:
-          Check{Nat.add(n, cw)}
-          <> (ClassItem{f, ws}
-              <> (Add{f}
-                  <> group_items_go(n, rest, Nat.sub(cw, class_lb(ws)))))
+          group_items_step(f, ws, class_lb(ws),
+            group_items_build(n, rest, tail))
 
 # Linear feedback and group partitioning. In `src/feedback.bend` and
 # `src/groups.bend`, the recursive calls sit inside both branches of
@@ -321,13 +337,16 @@ def groups_smaller_fast(+n: Nat, +groups: +List<Groups.Group>) -> Bool:
 # The block of one guess, followed by the rest of the schedule. The usability
 # decision is a parameter so the recursive call builds the rest exactly once:
 # both branches of a strict `case` would build it twice.
+def schedule_guess_ib(+g: +List<Nat>, ib: ItemsBound) -> +List<Item>:
+  match ib:
+    case ItemsBound{+lb, +items}:
+      Begin{g, lb} <> items
+
 def schedule_guess(+g: +List<Nat>, +groups: +List<Groups.Group>, +n: Nat,
                    +rest: +List<Item>, usable: Bool) -> +List<Item>:
   match usable:
     case True{}:
-      +cw = class_words(groups)
-      Begin{g, Nat.add(n, cw)}
-      <> List.append(&2, Item, group_items_go(n, groups, cw), End{} <> rest)
+      schedule_guess_ib(g, group_items_build(n, groups, End{} <> rest))
     case False{}:
       rest
 

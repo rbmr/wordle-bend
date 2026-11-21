@@ -128,39 +128,28 @@ def FS.add_sub_cancel_l(c: Nat, +b: Nat) ->
     case 1n+cp:
       FS.add_sub_cancel_l(cp, b)
 
-# `group_items_go(n, groups, class_words(groups))` agrees with `group_items(n, groups)`.
-def FS.group_items_go_eq(+n: Nat, +groups: +List<Groups.Group>) ->
-  {SolveFast.group_items_go(n, groups, SolveFast.class_words(groups))
-   == SolveFast.group_items(n, groups) : +List<SolveFast.Item>}:
+# `group_items_build(n, groups, tail)` builds `lower_bound(n, groups)` and
+# `List.append(group_items(n, groups), tail)` in one pass.
+def FS.group_items_build_eq(+n: Nat, +groups: +List<Groups.Group>,
+    +tail: +List<SolveFast.Item>) ->
+  {SolveFast.group_items_build(n, groups, tail)
+   == SolveFast.ItemsBound{SolveFast.lower_bound(n, groups),
+        List.append(&2, SolveFast.Item,
+          SolveFast.group_items(n, groups), tail)}
+   : SolveFast.ItemsBound}:
   match groups:
     case Nil{}:
       {==}
     case Con{gp, rest}:
       match gp:
         case Groups.Group{+f, +ws}:
-          +clb : Nat = SolveFast.class_lb(ws)
-          +cwr : Nat = SolveFast.class_words(rest)
-          +e1 : {SolveFast.group_items_go(n, rest, Nat.sub(Nat.add(clb, cwr), clb))
-                 == SolveFast.group_items_go(n, rest, cwr)
-                 : +List<SolveFast.Item>} =
-            Equal.cong(Nat, +List<SolveFast.Item>,
-              c => SolveFast.group_items_go(n, rest, c),
-              Nat.sub(Nat.add(clb, cwr), clb), cwr,
-              FS.add_sub_cancel_l(clb, cwr))
-          +e2 : {SolveFast.group_items_go(n, rest, cwr)
-                 == SolveFast.group_items(n, rest)
-                 : +List<SolveFast.Item>} =
-            FS.group_items_go_eq(n, rest)
-          Equal.cong(+List<SolveFast.Item>, +List<SolveFast.Item>,
-            tl => SolveFast.Check{SolveFast.lower_bound(n, Groups.Group{f, ws} <> rest)}
-                  <> (SolveFast.ClassItem{f, ws} <> (SolveFast.Add{f} <> tl)),
-            SolveFast.group_items_go(n, rest, Nat.sub(Nat.add(clb, cwr), clb)),
-            SolveFast.group_items(n, rest),
-            Equal.trans(+List<SolveFast.Item>,
-              SolveFast.group_items_go(n, rest, Nat.sub(Nat.add(clb, cwr), clb)),
-              SolveFast.group_items_go(n, rest, cwr),
-              SolveFast.group_items(n, rest),
-              e1, e2))
+          Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+            ib => SolveFast.group_items_step(f, ws, SolveFast.class_lb(ws), ib),
+            SolveFast.group_items_build(n, rest, tail),
+            SolveFast.ItemsBound{SolveFast.lower_bound(n, rest),
+              List.append(&2, SolveFast.Item,
+                SolveFast.group_items(n, rest), tail)},
+            FS.group_items_build_eq(n, rest, tail))
 
 # `(b + c) - c = b`.
 def FS.add_sub_cancel(+b: Nat, +c: Nat) ->
@@ -294,6 +283,33 @@ def FS.add_swap_l(+a: Nat, +b: Nat, +c: Nat) ->
       Nat.add(b, Nat.add(a, c)),
       e2, e3))
 
+# `lower_bound(n, groups)` equals `n + class_words(groups)`.
+def FS.lower_bound_eq(+n: Nat, +groups: +List<Groups.Group>) ->
+  {SolveFast.lower_bound(n, groups)
+   == Nat.add(n, SolveFast.class_words(groups)) : Nat}:
+  match groups:
+    case Nil{}:
+      Equal.sym(Nat, Nat.add(n, 0n), n, NatProof.NatPrf.add_zero(n))
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          +e1 : {Nat.add(SolveFast.class_lb(ws), SolveFast.lower_bound(n, rest))
+                 == Nat.add(SolveFast.class_lb(ws),
+                      Nat.add(n, SolveFast.class_words(rest))) : Nat} =
+            Equal.cong(Nat, Nat, x => Nat.add(SolveFast.class_lb(ws), x),
+              SolveFast.lower_bound(n, rest),
+              Nat.add(n, SolveFast.class_words(rest)),
+              FS.lower_bound_eq(n, rest))
+          Equal.trans(Nat,
+            Nat.add(SolveFast.class_lb(ws), SolveFast.lower_bound(n, rest)),
+            Nat.add(SolveFast.class_lb(ws),
+              Nat.add(n, SolveFast.class_words(rest))),
+            Nat.add(n,
+              Nat.add(SolveFast.class_lb(ws), SolveFast.class_words(rest))),
+            e1,
+            FS.add_swap_l(SolveFast.class_lb(ws), n,
+              SolveFast.class_words(rest)))
+
 # Finish the lower-bound comparison once the finite saturating fold is unpacked.
 def FS.lb_le_ks_finish(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +g: +List<Nat>, +groups: +List<Groups.Group>,
@@ -342,11 +358,20 @@ def FS.lb_le_ks_finish(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
   +cw_le : {Nat.is_le(SolveFast.class_words(groups), CBN.CB.sum(cs))
             == True{} : Bool} =
     FS.classes_size_le(p, inf, G, groups, bounds, all, hz)
+  +lb_raw : {Nat.is_le(Nat.add(Groups.len_words(S), SolveFast.class_words(groups)),
+                       Nat.add(Groups.len_words(S), CBN.CB.sum(cs)))
+             == True{} : Bool} =
+    NatProof.Nat.is_le_add_l(SolveFast.class_words(groups),
+      CBN.CB.sum(cs), Groups.len_words(S), cw_le)
   +lb_le : {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups),
                       Nat.add(Groups.len_words(S), CBN.CB.sum(cs)))
             == True{} : Bool} =
-    NatProof.Nat.is_le_add_l(SolveFast.class_words(groups),
-      CBN.CB.sum(cs), Groups.len_words(S), cw_le)
+    Fold.OQ.le_cong_l(
+      SolveFast.lower_bound(Groups.len_words(S), groups),
+      Nat.add(Groups.len_words(S), SolveFast.class_words(groups)),
+      Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+      FS.lower_bound_eq(Groups.len_words(S), groups),
+      lb_raw)
   +slb_le : {Nat.is_le(
                Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
                Nat.add(sum, Nat.add(Groups.len_words(S), CBN.CB.sum(cs))))

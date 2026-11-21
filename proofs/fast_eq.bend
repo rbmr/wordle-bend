@@ -589,31 +589,26 @@ def FE.schedule_guess_step(+p: Nat, +G: +List<+List<Nat>>,
       +n : Nat = Groups.len_words(S)
       +lb : Nat = SolveFast.lower_bound(n, groups)
       +skip : Bool = SolveFast.skippable(best, lb)
-      +body_go : +List<SolveFast.Item> =
-        List.append(&2, SolveFast.Item,
-          SolveFast.group_items_go(n, groups, SolveFast.class_words(groups)),
-          SolveFast.End{} <> rest)
       +body : +List<SolveFast.Item> =
         List.append(&2, SolveFast.Item,
           SolveFast.group_items(n, groups),
           SolveFast.End{} <> rest)
       +us : {Groups.groups_smaller(S, groups) == True{} : Bool} =
         Equal.sym(Bool, True{}, Groups.groups_smaller(S, groups), eus)
-      +e0 : {SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body_go, G, S, inf,
-               Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
+      +e0 : {SolveFast.step(1n+p,
+               SolveFast.schedule_guess_ib(g,
+                 SolveFast.group_items_build(n, groups, SolveFast.End{} <> rest)),
+               G, S, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
              == SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
                   Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
-        Equal.cong(+List<SolveFast.Item>, SolveRef.Best,
-          gi => SolveFast.step(1n+p,
-                  SolveFast.Begin{g, lb}
-                  <> List.append(&2, SolveFast.Item, gi,
-                       SolveFast.End{} <> rest),
+        Equal.cong(SolveFast.ItemsBound, SolveRef.Best,
+          ib => SolveFast.step(1n+p, SolveFast.schedule_guess_ib(g, ib),
                   G, S, inf, Nil{}, Nil{}, 0n, best,
                   SolveFast.dummy_zero(), False{}),
-          SolveFast.group_items_go(n, groups, SolveFast.class_words(groups)),
-          SolveFast.group_items(n, groups),
-          FLB.FS.group_items_go_eq(n, groups))
+          SolveFast.group_items_build(n, groups, SolveFast.End{} <> rest),
+          SolveFast.ItemsBound{lb, body},
+          FLB.FS.group_items_build_eq(n, groups, SolveFast.End{} <> rest))
       +e1 : {SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
                Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
              == FS.FS.after_begin(1n+p, G, S, inf, g, body, best, skip)
@@ -628,8 +623,10 @@ def FE.schedule_guess_step(+p: Nat, +G: +List<+List<Nat>>,
         FE.block_step_eq(p, G, S, inf, g, groups, rest, best, skip, {==},
           us, ele, hz, hbest, ecif)
       Equal.trans(SolveRef.Best,
-        SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body_go, G, S, inf,
-          Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
+        SolveFast.step(1n+p,
+          SolveFast.schedule_guess_ib(g,
+            SolveFast.group_items_build(n, groups, SolveFast.End{} <> rest)),
+          G, S, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
         SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
           Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
         SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
