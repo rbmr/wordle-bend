@@ -25,19 +25,58 @@ rather than a claim about a run.
 | `feedback_all_green_when_equal` | proved |
 | `feedback_all_green_only_if_equal` | proved |
 | `feedback_length` | proved |
-| `solve_valid` | open: the solver is a placeholder |
-| `solve_optimal` | open: the solver is a placeholder |
-| `tree_roundtrip` | open: the JSON parser is not implemented |
+| `solve_valid` | pending: the solver is a placeholder |
+| `solve_optimal` | pending: the solver is a placeholder |
+| `tree_roundtrip` | pending: the JSON parser is not implemented |
 
-The checks are:
+The three proved laws have a `def Laws.<name>` in `PROOF.bend`. The other three are listed in
+`PENDING_LAWS`, which allows them to stay open until their implementation exists.
+
+## The proof gate
+
+`scripts/check-proofs.sh` is the proof gate. CI runs it on every pull request, and contributors run
+the same script locally, so a green run means the same thing in both places:
 
 ```sh
-bend LAWS.bend --check-only   # type-checks the statements; open laws appear as TODOs
-bend PROOF.bend               # prints SOME PROOFS FAIL while any law is open
+scripts/check-proofs.sh
 ```
 
-`SOME PROOFS FAIL` is expected while laws 4 to 6 are open. Once all six hold, the check prints
-`ALL PROOFS CHECK`.
+The script fails unless `LAWS.bend` and `PROOF.bend` exist, then checks the lists before running
+`bend`:
+
+- It reads the law names from the `law <name>:` lines in `LAWS.bend` and the proved names from the
+  `def Laws.<name>(` lines in `PROOF.bend`.
+- Every law that is not listed in `PENDING_LAWS` must have a proof def.
+- Every name in `PENDING_LAWS` must be a law in `LAWS.bend` and must not have a proof def. Listing a
+  law that is already proved fails with `remove it from PENDING_LAWS`.
+
+`PENDING_LAWS` is a plain text file at the repository root, one law name per line. Blank lines and
+`#` comments are ignored.
+
+When `PENDING_LAWS` is empty, the gate requires `bend PROOF.bend` to exit 0 with `ALL PROOFS CHECK`,
+then runs `bend PROOF.bend --verdict` and requires the same. The verdict kernel checks the laws
+against Lean, and it needs every proof to be present.
+
+While `PENDING_LAWS` is non-empty, the gate requires `bend PROOF.bend` to exit 1 with
+`SOME PROOFS FAIL` and exactly one error, `Error: N TODOs found.`, where `N` is the number of
+pending laws. Any other error output fails the gate: pending means "not attempted", not "broken".
+A type error in a proof therefore fails the gate even though some laws are allowed to be open. The
+script prints the pending laws, notes that `--verdict` was skipped, and ends with a one-line summary
+of the proved and pending counts.
+
+## PENDING_LAWS
+
+`PENDING_LAWS` exists so that a law can be stated before its implementation and still pass the
+gate. It is not a place for broken proofs.
+
+- Adding a law to `PENDING_LAWS` needs an explicit explanation in the pull request description:
+  which law, why it cannot be proved yet, and what will make it provable.
+- The list should only shrink over time. Remove a name in the same pull request that adds its proof.
+- The target is an empty list. When it is empty, the gate also runs the Lean verdict kernel and
+  every law must be proved with no error output.
+
+To type-check the law statements alone, without proving them, run `bend LAWS.bend --check-only`;
+open laws appear there as TODOs.
 
 ## No example or unit tests
 
@@ -53,6 +92,9 @@ solver that is slow is still correct. The benchmark harness is not in this tree 
 
 ## Current checks in CI
 
-CI currently checks pull request conventions only: the PR title and every commit subject are
-conventional commits, and the head branch name matches the branch naming rule. See
-[contributing.md](contributing.md). The law check is not wired into CI yet.
+CI runs two jobs on every pull request:
+
+- `conventions`: the pull request title, every commit subject, and the head branch name follow the
+  rules in [contributing.md](contributing.md).
+- `proofs`: `scripts/check-proofs.sh`, the proof gate described above, using the pinned Bend and
+  Lean toolchain. The job is skipped when the tree has no `PROOF.bend`.

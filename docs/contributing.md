@@ -68,11 +68,35 @@ git config core.hooksPath .githooks
 The hooks are a convenience. CI enforces the same rules on the pull request, so a bypassed hook
 does not get a non-conforming change merged.
 
+## Laws and proofs
+
+Laws are stated in `LAWS.bend` and proved in `PROOF.bend`. Run the proof gate before pushing:
+
+```sh
+scripts/check-proofs.sh
+```
+
+CI runs the same script, so a local pass and a green `proofs` check mean the same thing. The gate
+requires a proof for every law, except the laws named in `PENDING_LAWS` at the repository root.
+
+`PENDING_LAWS` lists laws that are stated but intentionally unproved, one name per line. Blank
+lines and `#` comments are ignored.
+
+- Adding a name to `PENDING_LAWS` needs an explicit explanation in the pull request description:
+  which law, why it cannot be proved yet, and what will make it provable.
+- The name must be a law in `LAWS.bend` and must not have a proof in `PROOF.bend`. A typo, or a law
+  that has already been proved, fails the gate.
+- The list should only shrink over time. Remove a name in the same pull request that adds its proof.
+- The target is an empty list.
+
+See [testing.md](testing.md) for what the gate checks and how the two modes differ.
+
 ## Pull requests
 
 1. Push the branch and open a pull request into `main` with `gh pr create`.
 2. The PR title is itself a conventional commit, in the same format as a commit subject.
-3. CI checks the PR title, every commit subject in the branch, and the head branch name.
+3. CI checks the PR title, every commit subject in the branch, the head branch name, and the proof
+   gate.
 4. Merge with a merge commit only:
 
    ```sh
