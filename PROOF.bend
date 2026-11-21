@@ -1519,18 +1519,40 @@ def Laws.solve_valid(G, C, T, e):
 
 # The law: the tree returned by the solver is optimal.
 def Laws.solve_optimal(G, C, T2, v):
-  +inf : Nat = SolveRef.inf_of(Groups.len_words(C))
-  +fin : {Nat.is_lt(EvalProof.Eval.cost_of(MVProof.MV.solve_best(G, C)), inf)
-          == True{} : Bool} =
-    OQCompleteProof.FC.complete(G, C, T2, v)
-  +es : {SolveRef.solve(G, C) == Some{EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C))}
-         : Maybe<Tree.Tree>} =
-    OQCostProof.OC.best_to_maybe_fin(inf, MVProof.MV.solve_best(G, C), fin)
-  +hcost : {Nat.is_le(Tree.cost(EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), C),
-                EvalProof.Eval.cost_of(MVProof.MV.solve_best(G, C))) == True{} : Bool} =
-    OQCostProof.OC.machine_cost(G, C)(fin)
-  +le : {Nat.is_le(Tree.cost(EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), C),
-             Tree.cost(T2, C)) == True{} : Bool} =
-    OQIndProof.OQ.optimal_of(G, C, T2,
-      EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), v, hcost)
-  (EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), (es, le))
+  +guesses : +List<+List<Nat>> = G
+  +cands : +List<+List<Nat>> = C
+  +t2 : Tree.Tree = T2
+  +inf : Nat = SolveRef.inf_of(Groups.len_words(cands))
+  OQStrongProof.F2.use_pair(
+    Exists(Tree.Tree, T =>
+      {SolveRef.solve(guesses, cands) == Some{T} : Maybe<Tree.Tree>}
+      & {Nat.is_le(Tree.cost(T, cands), Tree.cost(t2, cands)) == True{} : Bool}),
+    {Nat.is_le(EvalProof.Eval.cost_of(MVProof.MV.solve_best(guesses, cands)),
+       Tree.cost(t2, cands)) == True{} : Bool},
+    {Nat.is_lt(EvalProof.Eval.cost_of(MVProof.MV.solve_best(guesses, cands)), inf)
+     == True{} : Bool},
+    OQStrongProof.F2.optimal_and_finite(guesses, cands, t2, v),
+    opt => fin =>
+      +fin2 : {Nat.is_lt(EvalProof.Eval.cost_of(MVProof.MV.solve_best(guesses, cands)),
+                inf) == True{} : Bool} = fin
+      +es : {SolveRef.solve(guesses, cands)
+             == Some{EvalProof.Eval.tree_of(MVProof.MV.solve_best(guesses, cands))}
+             : Maybe<Tree.Tree>} =
+        OQCostProof.OC.best_to_maybe_fin(inf,
+          MVProof.MV.solve_best(guesses, cands), fin2)
+      +hcost : {Nat.is_le(
+                  Tree.cost(EvalProof.Eval.tree_of(
+                    MVProof.MV.solve_best(guesses, cands)), cands),
+                  EvalProof.Eval.cost_of(MVProof.MV.solve_best(guesses, cands)))
+                == True{} : Bool} =
+        OQCostProof.OC.machine_cost(guesses, cands)(fin2)
+      +le : {Nat.is_le(
+               Tree.cost(EvalProof.Eval.tree_of(
+                 MVProof.MV.solve_best(guesses, cands)), cands),
+               Tree.cost(t2, cands)) == True{} : Bool} =
+        NatProof.Nat.is_le_trans(
+          Tree.cost(EvalProof.Eval.tree_of(MVProof.MV.solve_best(guesses, cands)),
+            cands),
+          EvalProof.Eval.cost_of(MVProof.MV.solve_best(guesses, cands)),
+          Tree.cost(t2, cands), hcost, opt)
+      (EvalProof.Eval.tree_of(MVProof.MV.solve_best(guesses, cands)), (es, le)))

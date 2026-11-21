@@ -599,6 +599,14 @@ def F2.finish_pack(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
           Eval.Eval.dummy_inf(inf))), ec), fr)))
 
+# A job moved along an equality of candidate lists.
+def F2.strongjob_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S1: +List<+List<Nat>>, +S2: +List<+List<Nat>>,
+    e: {S1 == S2 : +List<+List<Nat>>},
+    j: F2.StrongJob(fuel, inf, G, S1)) -> F2.StrongJob(fuel, inf, G, S2):
+  %e : F2.StrongJob(fuel, inf, G, _)
+  j
+
 # The node step of the merged induction.
 def F2.strong_at(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +g: +List<Nat>, +kids: +List<Tree.Child>,
@@ -709,3 +717,313 @@ def F2.strong_at(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
         Ind.OQ.unusable_kid(G, S, g, kids, Groups.groups_build(g, S, Nil{})
           , {==}, depths, kidsin, ef),
         flatS, all, hz)
+
+# The bounds for every child of a list, by structural recursion.
+def F2.strong_bounds(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +kids: +List<Tree.Child>) -> F2.AllStrongBound(p, inf, G, kids):
+  match kids:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          match child:
+            case Tree.Node{+g, +ckids}:
+              ((+S => flatS => hz => v =>
+                  F2.strong_at(p, inf, G, S, g, ckids, flatS, v,
+                    Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+                    {==}, F2.strong_bounds(p, inf, G, ckids), hz)),
+               F2.strong_bounds(p, inf, G, rest))
+
+# Split the strong conjunction at an append.
+def F2.strongflat_append(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +xs: +List<+List<+List<Nat>>>, +ys: +List<+List<+List<Nat>>>,
+    f: F2.StrongFlat(fuel, inf, G,
+        List.append(&2, +List<+List<Nat>>, xs, ys))) ->
+  F2.StrongFlat(fuel, inf, G, xs) & F2.StrongFlat(fuel, inf, G, ys):
+  match xs:
+    case Nil{}:
+      Tuple{Unit{}, f}
+    case Con{S, t}:
+      (j, fr) = f
+      Comp.FC.use_pair(
+        F2.StrongFlat(fuel, inf, G, S <> t) & F2.StrongFlat(fuel, inf, G, ys),
+        F2.StrongFlat(fuel, inf, G, t), F2.StrongFlat(fuel, inf, G, ys),
+        F2.strongflat_append(fuel, inf, G, t, ys, fr),
+        ft => fys => Tuple{Tuple{j, ft}, fys})
+
+# The strong class conjunction read from a flat conjunction.
+def F2.strongclass_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    f: F2.StrongFlat(fuel, inf, G, MV.MV.next_groups(groups))) ->
+  F2.StrongClass(fuel, inf, G, groups):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          (fh, ft) = f
+          (fh, F2.strongclass_of_flat(fuel, inf, G, rest, ft))
+
+# A filtered strong conjunction is a strong conjunction when the test is true.
+def F2.strongclassif_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    f: F2.StrongFlat(fuel, inf, G,
+         MV.MV.classes_b(b, Groups.groups_build(g, S, Nil{})))) ->
+  F2.StrongClassIf(fuel, inf, G, b, Groups.groups_build(g, S, Nil{})):
+  match b:
+    case True{}:
+      F2.strongclass_of_flat(fuel, inf, G, Groups.groups_build(g, S, Nil{}), f)
+    case False{}:
+      Unit{}
+
+# The per-guess class conjunction of a job, from the flat conjunction.
+def F2.strongbygs_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>,
+    f: F2.StrongFlat(fuel, inf, G, MV.MV.next_guess(gs, S))) ->
+  F2.StrongByGs(fuel, inf, G, S, gs):
+  match gs:
+    case Nil{}:
+      Unit{}
+    case Con{g, t}:
+      Comp.FC.use_pair(
+        F2.StrongByGs(fuel, inf, G, S, g <> t),
+        F2.StrongFlat(fuel, inf, G, MV.MV.classes(g, S)),
+        F2.StrongFlat(fuel, inf, G, MV.MV.next_guess(t, S)),
+        F2.strongflat_append(fuel, inf, G, MV.MV.classes(g, S),
+          MV.MV.next_guess(t, S), f),
+        fg => ft =>
+          (F2.strongclassif_of_flat(fuel, inf, G, S, g,
+             Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, fg),
+           F2.strongbygs_of_flat(fuel, inf, G, S, t, ft)))
+
+# The zero-fuel cost of a nonempty guess list is zero.
+def F2.zero_cost_cons(+inf: Nat, +g: +List<Nat>, +t: +List<+List<Nat>>,
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
+          == True{} : Bool}) ->
+  {Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+     g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+     Eval.Eval.dummy_zero())) == 0n : Nat}:
+  +eb : {SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+            Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
+          == Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+               Eval.Eval.dummy_inf(inf)) : SolveRef.Best} =
+    Eval.Eval.guesses_zero(g <> t, inf, g <> t, Eval.Eval.dummy_inf(inf))
+  +ec : {Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+              g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+              Eval.Eval.dummy_zero()))
+          == Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+               Eval.Eval.dummy_inf(inf))) : Nat} =
+    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+      SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+        Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t, Eval.Eval.dummy_inf(inf)), eb)
+  Equal.trans(Nat,
+    Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+      g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+      Eval.Eval.dummy_zero())),
+    Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+      Eval.Eval.dummy_inf(inf))),
+    0n, ec, Cost.OC.zero_first_cost(g <> t, inf, g, t, hz))
+
+# Zero fuel with no guesses cannot have a valid tree.
+def F2.strong_zero_empty(+inf: Nat, T: Tree.Tree, v: Tree.Valid(T, Nil{}, Nil{}),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
+          == True{} : Bool}) -> F2.SF(0n, inf, Nil{}, Nil{}, T):
+  match T:
+    case Tree.Node{g, kids}:
+      (ti, ad) = v
+      (wg, kidsin) = ti
+      Empty.absurd(F2.SF(0n, inf, Nil{}, Nil{}, Tree.Node{g, kids}),
+        Logic.Proof.false_ne_true(wg))
+
+# Zero fuel with a nonempty guess list: cost zero for an empty candidate list.
+def F2.strong_zero_cons(+inf: Nat, +g: +List<Nat>, +t: +List<+List<Nat>>,
+    +T: Tree.Tree,
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
+          == True{} : Bool}) -> F2.SF(0n, inf, g <> t, Nil{}, T):
+  +ec : {Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+             g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+             Eval.Eval.dummy_zero())) == 0n : Nat} =
+    F2.zero_cost_cons(inf, g, t, hz)
+  (NatProof.Nat.is_le_eq_l(0n, 0n,
+     Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+       g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+       Eval.Eval.dummy_zero())),
+     Equal.sym(Nat, Eval.Eval.cost_of(SolveRef.step(0n,
+       SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
+       Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), 0n, ec),
+     NatProof.Nat.is_le_refl(0n)),
+   Comp.FC.fin_zero_cons(inf, g, t, hz))
+
+# Zero fuel: every job is empty.
+def F2.strong_zero(+inf: Nat, +G: +List<+List<Nat>>) ->
+  F2.StrongJob(0n, inf, G, Nil{}):
+  match G:
+    case Nil{}:
+      hz => T => v => F2.strong_zero_empty(inf, T, v, hz)
+    case Con{g, t}:
+      hz => T => v => F2.strong_zero_cons(inf, g, t, T, hz)
+
+# One step of the fuel: every job at the next level gets its obligation.
+def F2.strong_job_at(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, T: Tree.Tree, v: Tree.Valid(T, G, S),
+    flatS: F2.StrongByGs(p, inf, G, S, G),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+          == True{} : Bool}) -> F2.SF(1n+p, inf, G, S, T):
+  match T:
+    case Tree.Node{+g, +kids}:
+      F2.strong_at(p, inf, G, S, g, kids, flatS, v,
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==},
+        F2.strong_bounds(p, inf, G, kids), hz)
+
+def F2.strong_job_wrap(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, flatS: F2.StrongByGs(p, inf, G, S, G)) ->
+  F2.StrongJob(1n+p, inf, G, S):
+  hz => T => v => F2.strong_job_at(p, inf, G, S, T, v, flatS, hz)
+
+# One step of the fuel on the flat conjunction.
+def F2.strong_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    ff: F2.StrongFlat(p, inf, G, MV.MV.next_jobs(G, jobs))) ->
+  F2.StrongFlat(1n+p, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      Comp.FC.use_pair(
+        F2.StrongFlat(1n+p, inf, G, S <> t),
+        F2.StrongFlat(p, inf, G, MV.MV.next_guess(G, S)),
+        F2.StrongFlat(p, inf, G, MV.MV.next_jobs(G, t)),
+        F2.strongflat_append(p, inf, G, MV.MV.next_guess(G, S),
+          MV.MV.next_jobs(G, t), ff),
+        fS => ft =>
+          Tuple{F2.strong_job_wrap(p, inf, G, S,
+                  F2.strongbygs_of_flat(p, inf, G, S, G, fS)),
+                F2.strong_step(inf, p, G, t, ft)})
+
+# Zero fuel: every job is the empty candidate list.
+def F2.strong_flat_zero(+inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(0n, jobs)) ->
+  F2.StrongFlat(0n, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      (ble, bt) = bounds
+      +eS : {S == Nil{} : +List<+List<Nat>>} =
+        MV.MV.nil_of_len_zero(S,
+          NatProof.Nat.eq_zero_of_le_zero(Groups.len_words(S), ble))
+      Tuple{F2.strongjob_transport(0n, inf, G, Nil{}, S,
+               Equal.sym(+List<+List<Nat>>, S, Nil{}, eS), F2.strong_zero(inf, G)),
+            F2.strong_flat_zero(inf, G, t, bt)}
+
+# The fuel induction on the flat conjunction of jobs.
+def F2.strong_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(fuel, jobs)) ->
+  F2.StrongFlat(fuel, inf, G, jobs):
+  match fuel:
+    case 0n:
+      F2.strong_flat_zero(inf, G, jobs, bounds)
+    case 1n+p:
+      F2.strong_step(inf, p, G, jobs,
+        F2.strong_flat(p, inf, G, MV.MV.next_jobs(G, jobs),
+          MV.MV.next_bounds(p, G, jobs, bounds)))
+
+
+# Optimality and finiteness from one traversal of the given valid tree.
+def F2.optimal_and_finite(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +T2: Tree.Tree, v: Tree.Valid(T2, G, C)) ->
+  {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), Tree.cost(T2, C))
+   == True{} : Bool}
+  & {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, C)),
+      SolveRef.inf_of(Groups.len_words(C))) == True{} : Bool}:
+  match C:
+    case Nil{}:
+      Comp.FC.use_pair(
+        {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, Nil{})),
+           Tree.cost(T2, Nil{})) == True{} : Bool}
+        & {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, Nil{})),
+            SolveRef.inf_of(Groups.len_words(Nil{}))) == True{} : Bool},
+        {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(G, Nil{}),
+           G, Nil{}, SolveRef.inf_of(Groups.len_words(Nil{})), Nil{}, Nil{}, 0n,
+           Eval.Eval.dummy_inf(SolveRef.inf_of(Groups.len_words(Nil{}))),
+           Eval.Eval.dummy_zero())), Tree.cost(T2, Nil{})) == True{} : Bool},
+        Comp.FC.Facts(0n, SolveRef.inf_of(Groups.len_words(Nil{})), G, Nil{}),
+        F2.strong_zero(SolveRef.inf_of(Groups.len_words(Nil{})), G)(CBN.CB.lt_add_one(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))))(T2)(v),
+        o => far =>
+          Comp.FC.use_pair(
+            {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, Nil{})),
+               Tree.cost(T2, Nil{})) == True{} : Bool}
+            & {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, Nil{})),
+                SolveRef.inf_of(Groups.len_words(Nil{}))) == True{} : Bool},
+            {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n,
+               SolveRef.mk_schedule(G, Nil{}), G, Nil{},
+               SolveRef.inf_of(Groups.len_words(Nil{})), Nil{}, Nil{}, 0n,
+               Eval.Eval.dummy_inf(SolveRef.inf_of(Groups.len_words(Nil{}))),
+               Eval.Eval.dummy_zero())),
+               SolveRef.inf_of(Groups.len_words(Nil{}))) == True{} : Bool},
+            {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
+               SolveRef.mk_schedule(G, Nil{}), G, Nil{},
+               SolveRef.inf_of(Groups.len_words(Nil{})), Nil{}, Nil{}, 0n,
+               Eval.Eval.dummy_inf(SolveRef.inf_of(Groups.len_words(Nil{}))),
+               Eval.Eval.dummy_zero())),
+               Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))) == True{}
+             : Bool},
+            far,
+            fl => fr => (o, fl)))
+    case Con{g0, t0}:
+      +p : Nat = Groups.len_words(t0)
+      +n : Nat = Groups.len_words(g0 <> t0)
+      +inf : Nat = SolveRef.inf_of(n)
+      bounds : MV.MV.Bounds(1n+p, (g0 <> t0) <> Nil{}) =
+        Tuple{NatProof.Nat.is_le_refl(n), Unit{}}
+      nb : MV.MV.Bounds(p, MV.MV.next_jobs(G, (g0 <> t0) <> Nil{})) =
+        MV.MV.next_bounds(p, G, (g0 <> t0) <> Nil{}, bounds)
+      ff : F2.StrongFlat(p, inf, G, MV.MV.next_jobs(G, (g0 <> t0) <> Nil{})) =
+        F2.strong_flat(p, inf, G, MV.MV.next_jobs(G, (g0 <> t0) <> Nil{}), nb)
+      +hz : {Nat.is_lt(Nat.mul(n, n), inf) == True{} : Bool} =
+        CBN.CB.lt_add_one(Nat.mul(n, n))
+      Comp.FC.use_pair(
+        {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, g0 <> t0)),
+           Tree.cost(T2, g0 <> t0)) == True{} : Bool}
+        & {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, g0 <> t0)),
+            SolveRef.inf_of(Groups.len_words(g0 <> t0))) == True{} : Bool},
+        F2.StrongFlat(p, inf, G, MV.MV.next_guess(G, g0 <> t0)),
+        F2.StrongFlat(p, inf, G, MV.MV.next_jobs(G, Nil{})),
+        F2.strongflat_append(p, inf, G, MV.MV.next_guess(G, g0 <> t0),
+          MV.MV.next_jobs(G, Nil{}), ff),
+        fS => ft =>
+          sb0 : F2.StrongByGs(p, inf, G, g0 <> t0, G) =
+            F2.strongbygs_of_flat(p, inf, G, g0 <> t0, G, fS)
+          Comp.FC.use_pair(
+            {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, g0 <> t0)),
+               Tree.cost(T2, g0 <> t0)) == True{} : Bool}
+            & {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, g0 <> t0)),
+                SolveRef.inf_of(Groups.len_words(g0 <> t0))) == True{} : Bool},
+            {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(1n+p,
+               SolveRef.mk_schedule(G, g0 <> t0), G, g0 <> t0, inf, Nil{},
+               Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+               Tree.cost(T2, g0 <> t0)) == True{} : Bool},
+            Comp.FC.Facts(1n+p, inf, G, g0 <> t0),
+            F2.strong_job_at(p, inf, G, g0 <> t0, T2, v, sb0, hz),
+            o => far =>
+              Comp.FC.use_pair(
+                {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, g0 <> t0)),
+                   Tree.cost(T2, g0 <> t0)) == True{} : Bool}
+                & {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, g0 <> t0)),
+                    SolveRef.inf_of(Groups.len_words(g0 <> t0))) == True{} : Bool},
+                {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(1n+p,
+                   SolveRef.mk_schedule(G, g0 <> t0), G, g0 <> t0, inf, Nil{},
+                   Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+                   inf) == True{} : Bool},
+                {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(1n+p,
+                   SolveRef.mk_schedule(G, g0 <> t0), G, g0 <> t0, inf, Nil{},
+                   Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+                   Nat.mul(Groups.len_words(g0 <> t0),
+                     Groups.len_words(g0 <> t0))) == True{} : Bool},
+                far,
+                fl => fr => (o, fl))))
+
