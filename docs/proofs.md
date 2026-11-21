@@ -103,6 +103,9 @@ They are what a pruning rule needs to discard a guess or a class before searchin
 | --- | --- |
 | `lb_size.bend` | Every depth the tree produces is absent or at least one, so a valid tree costs at least the number of candidates: `cost(T, S) >= |S|`. |
 | `lb_twice.bend` | Only the root guess can end a candidate at depth one, so `2|S| <= cost(T, S) + mult(root, S)`, with `mult` the number of candidates equal to the root guess. This is exact with duplicates; `mult <= maxMult(S)` and the duplicate-free `2|S| - 1` bound follow. |
+| `lb_capacity.bend` | The capacity bound function `capbound(n, k) = n + sum over j of (n - (1 + k + ... + k^(j-1)))+`, with the facts a pruning rule needs about the bound itself: it is monotone in `n`, its capacity sequence grows by at least one per level, and it is at least the depth bound `2n - 1`. |
+
+The soundness statement for the capacity bound, that a valid tree with no duplicate candidates whose nodes have at most `k` children costs at least `capbound(|S|, k)`, is not proved yet. It needs the feedback classes of every node together with the number of candidates each level of the tree can hold, because a tree-derived capacity is only an upper bound on the class sizes when the candidates of a node are distinct. `cost(T, S) >= capbound(|S|, k)` is therefore the next step, not a claim the development makes today.
 
 ## How the gate works
 
