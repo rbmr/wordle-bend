@@ -21,6 +21,11 @@
 # words/guesses.txt: a fixed, small guess pool that keeps runs comparable.
 #
 # Paths are relative to the repository root. Exits non-zero if any run failed.
+#
+# run.sh writes only the file given by --out (and a temporary build directory
+# that it removes on exit). For anything that is not tiny, run it through
+# bench/start.sh instead: that detaches the run, caps it at two hours and
+# keeps its console output and rows under bench/runs/.
 
 set -u -o pipefail
 
