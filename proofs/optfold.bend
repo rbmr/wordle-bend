@@ -243,3 +243,38 @@ def OQ.guesses_cost_le_acc(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>
         Eval.Eval.cost_of(Eval.Eval.guess(p, G, S, g, inf, best)),
         Eval.Eval.cost_of(best), ih,
         OQ.guess_cost_le_acc(p, G, S, g, inf, best))
+
+# A true `is_ge` gives the swapped `is_le`.
+def OQ.ge_swap_le_go(c: Cmp, +e: {Cmp.is_ge(c) == True{} : Bool}) ->
+  {Cmp.is_le(CoverGroups.Cover.cmp_swap(c)) == True{} : Bool}:
+  match c:
+    case LT{}:
+      Empty.absurd({Cmp.is_le(CoverGroups.Cover.cmp_swap(LT{})) == True{} : Bool},
+        Logic.Proof.false_ne_true(e))
+    case EQ{}:
+      {==}
+    case GT{}:
+      {==}
+
+def OQ.is_le_of_ge(+a: Nat, +b: Nat,
+    +e: {Nat.is_ge(a, b) == True{} : Bool}) ->
+  {Nat.is_le(b, a) == True{} : Bool}:
+  +c : Cmp = Nat.cmp(a, b)
+  +h : {Nat.cmp(b, a) == CoverGroups.Cover.cmp_swap(c) : Cmp} =
+    CoverGroups.Cover.cmp_swap_cmp(a, b)
+  +eg : {Cmp.is_le(Nat.cmp(b, a)) == Cmp.is_le(CoverGroups.Cover.cmp_swap(c))
+        : Bool} =
+    Equal.cong(Cmp, Bool, Cmp.is_le, Nat.cmp(b, a),
+      CoverGroups.Cover.cmp_swap(c), h)
+  Equal.trans(Bool, Cmp.is_le(Nat.cmp(b, a)),
+    Cmp.is_le(CoverGroups.Cover.cmp_swap(c)), True{}, eg,
+    OQ.ge_swap_le_go(c, e))
+
+# `a <= a + b`.
+def OQ.is_le_add_self_r(+a: Nat, +b: Nat) ->
+  {Nat.is_le(a, Nat.add(a, b)) == True{} : Bool}:
+  +le : {Nat.is_le(a, Nat.add(b, a)) == True{} : Bool} =
+    NatProof.Nat.is_le_add_self_l(b, a)
+  OQ.le_cong_r(a, Nat.add(b, a), Nat.add(a, b),
+    Equal.sym(Nat, Nat.add(a, b), Nat.add(b, a),
+      NatProof.NatPrf.add_comm(a, b)), le)

@@ -23,6 +23,8 @@ import ./proofs/solvevalid.bend as SVProof
 import ./proofs/mainvalid.bend as MVProof
 import ./proofs/optimalvalue.bend as OVProof
 import ./proofs/optfold.bend as OQProof
+import ./proofs/optsum.bend as OQSumProof
+import ./proofs/optguess.bend as OQGuessProof
 
 def Bool.disc(b: Bool) -> Type:
   match b:
