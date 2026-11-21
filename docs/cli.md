@@ -41,11 +41,13 @@ Each file holds one word per line. A line is read as follows:
 - The rest of the line is the word. A word is any non-empty text without whitespace, over any
   alphabet.
 
-A letter is the Unicode code point of one character, with nothing added or removed. Case is
-not folded: the bundled lists are lower case, so the trees they produce contain lower-case
-code points, and a list in another alphabet or another case works without being changed.
-Folding ASCII lower case to upper case, which earlier versions of the CLI did, would alter the
-input words instead of reading them, and would break words that use letters outside ASCII.
+A letter is the exact code point of one character, with nothing added, removed or changed in
+case. Case is not folded, so a guess and a candidate compare equal only when every code point
+is equal: both lists must use the same case. The bundled lists are upper case, so the trees
+they produce contain upper-case code points. A list in another alphabet or another case works
+without being changed, as long as the guesses and the candidates agree with each other.
+Folding case, which earlier versions of the CLI did, would alter the input words instead of
+reading them, and would break words that use letters outside ASCII.
 
 Both files are read to the end. The reader asks `File.read` for one megabyte at a time and
 repeats until a read returns no bytes, so no list is truncated at a fixed size. The loop is

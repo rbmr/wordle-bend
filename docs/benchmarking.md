@@ -49,6 +49,14 @@ subset plus the fixed prefix keeps the inputs small and comparable across commit
 part of the protocol; changing it changes the benchmark and requires new rows rather than edits to
 old ones.
 
+The extra-guess prefix used to be lower case while the candidate lines were upper case. Letters are
+exact code points in the CLI, so those prefix guesses could never coincide with a candidate and
+their feedback was all gray; the earlier smoke timings in [performance.md](performance.md) were
+measured that way. The prefix is now upper case like the candidates, so the same protocol gives a
+guess pool whose entries can match candidates. A sampled candidate that also falls in the first 200
+guess lines now appears twice in the guesses file; this is harmless and the protocol, including the
+sampled-guess construction, is unchanged.
+
 ## Repeats and consistency
 
 Each `(size, seed)` group is run `--repeats` times. Every run's stdout is hashed with sha256, and
