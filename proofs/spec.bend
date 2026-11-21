@@ -2,6 +2,7 @@
 import Base
 import ../src/tree.bend as Tree
 import ./eval.bend as Eval
+import ./groupsdistinct.bend as GroupsDistinct
 
 # Optimality: no valid tree for the same input costs less.
 def Optimal(T: Tree.Tree, G: +List<+List<Nat>>, S: +List<+List<Nat>>) -> Type:
