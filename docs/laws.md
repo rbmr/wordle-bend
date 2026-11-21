@@ -151,3 +151,38 @@ feedback traces prove that each decimal letter and each colour is consumed
 correctly. The top-level `TreeProof.parsed` chains those traces from `MStart`
 and `Laws.tree_roundtrip` applies `finish`, which keeps the tree only when no
 text remains.
+
+## 7. tree_json_wellformed
+
+Plain English: the text `Json.print` produces is a well-formed string in the
+documented JSON subset.
+
+```python
+law tree_json_wellformed:
+  for t: Tree.Tree
+  {Spec.well_formed(Json.print(t)) == True{} : Bool}
+```
+
+Open. `src/spec_json.bend` defines `Spec.well_formed`, an independent
+recogniser for the subset `array | number` with no whitespace, no sign, no
+leading zero and no trailing text. The law needs a proof that the recogniser
+accepts the printer's output. A roundtrip law cannot replace it: a printer that
+emits invalid JSON could still parse back through a matching parser.
+
+## 8. print_matches_render
+
+Plain English: the printer and the reference renderer `Spec.render` agree byte
+for byte on every tree.
+
+```python
+law print_matches_render:
+  for t: Tree.Tree
+  {Json.print(t) == Spec.render(t) : String}
+```
+
+Open. `Spec.render` is the plain concatenation of the documented format and
+writes letters with Base's `Nat.show`; `Json.print` writes them with
+`digits_lsb` and `digits_show`. The law therefore contains the equality of the
+two decimal renderers. A roundtrip law cannot replace it: a printer that emits
+letters in unary, or any other parseable number, could still round-trip.
+
