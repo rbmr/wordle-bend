@@ -7,11 +7,11 @@ is verified correct for every input, including optimality, but it is not fast: f
 list it tries every usable guess, partitions the candidates by feedback, and solves every class
 recursively. The work grows exponentially with the number of candidates.
 
-The command line uses `src/solve_par.bend`, which evaluates the root guess list in parallel and is
-proved to return exactly the reference tree (`Par.solve_eq` in `PROOF.bend`). The reference solver
-stays in the tree as the specification. The search is still exponential in the candidate count, so
-the full bundled lists in `words/` are not practical yet. Speed is the remaining work; correctness
-is not.
+The command line uses `src/solve_fast.bend`, which skips any guess whose lower bound cannot beat the
+best cost found so far and is proved to return the exact reference tree (`Fast.solve_eq` in
+`PROOF.bend`). The parallel root solver in `src/solve_par.bend` (`Par.solve_eq`) and the reference
+solver stay in the tree. The search is still exponential in the candidate count, so the full bundled
+lists in `words/` are not practical yet. Speed is the remaining work; correctness is not.
 
 ## Smoke baseline
 
