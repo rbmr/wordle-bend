@@ -5,6 +5,8 @@ import ./src/tree.bend as Tree
 import ./src/groups.bend as Groups
 import ./src/solve_ref.bend as SolveRef
 import ./src/json.bend as Json
+import ./src/spec_json.bend as JsonSpec
+import ./proofs/json_spec.bend as JsonProof
 import ./proofs/spec.bend as Spec
 import ./proofs/logic.bend as Logic
 import ./proofs/nat.bend as NatProof
@@ -1113,6 +1115,10 @@ def Laws.tree_roundtrip(t):
   Equal.cong(Maybe<&1, Tree.Tree & String>, Maybe<Tree.Tree>,
              Json.finish, Json.parse.go(Json.print(t), Json.MStart{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}),
              Some{(t, SNil{})}, e)
+
+
+def Laws.print_matches_render(t):
+  JsonProof.RenderProof.print(t)
 
 
 def Color.eq_refl(c: Feedback.Color) -> {Feedback.Color.eq(c, c) == True{} : Bool}:

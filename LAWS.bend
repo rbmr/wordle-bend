@@ -6,6 +6,7 @@ import ./src/feedback.bend as Feedback
 import ./src/tree.bend as Tree
 import ./src/solve.bend as Solve
 import ./src/json.bend as Json
+import ./src/spec_json.bend as Spec
 
 # 1. A word against itself is all Green.
 law feedback_all_green_when_equal:
@@ -48,3 +49,13 @@ law solve_optimal:
 law tree_roundtrip:
   for t: Tree.Tree
   {Json.parse(Json.print(t)) == Some{t} : Maybe<Tree.Tree>}
+
+# 7. The printed text is well-formed JSON for the documented subset.
+law tree_json_wellformed:
+  for t: Tree.Tree
+  {Spec.well_formed(Json.print(t)) == True{} : Bool}
+
+# 8. The printer agrees with the reference renderer, byte for byte.
+law print_matches_render:
+  for t: Tree.Tree
+  {Json.print(t) == Spec.render(t) : String}
