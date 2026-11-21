@@ -48,6 +48,7 @@ currently rejects every input, and law 6 is open for that reason.
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) — the components and how data flows between them.
+- [docs/cli.md](docs/cli.md) — the command line: flags, input and output formats, exit codes, examples.
 - [docs/laws.md](docs/laws.md) — each law in plain English, with its Bend definition and status.
 - [docs/contributing.md](docs/contributing.md) — branch names, commit format, pull request workflow,
   and repository hygiene rules.
