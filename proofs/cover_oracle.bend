@@ -13,6 +13,7 @@ import ../src/feedback.bend as Feedback
 import ./logic.bend as Logic
 import ./nat.bend as NatProof
 import ./cover_maybe.bend as CoverMaybe
+import ./cover_list.bend as CoverList
 import ./nodecost.bend as NodeCost
 import ./groupcost.bend as GC
 
@@ -57,9 +58,9 @@ def Cover.GuessOK(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
   Cover.EntryOK(G, S, os, Groups.groups_build(g, S, Nil{}))
 
 # One entry per guess, aligned with the guess list.
-def Cover.Oracle(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +entries: +List<+List<Maybe<&2, Nat>>>) -> Type:
-  match G:
+def Cover.Oracle(+G0: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +Gcur: +List<+List<Nat>>, +entries: +List<+List<Maybe<&2, Nat>>>) -> Type:
+  match Gcur:
     case Nil{}:
       match entries:
         case Nil{}:
@@ -71,7 +72,7 @@ def Cover.Oracle(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         case Nil{}:
           Empty
         case Con{es, erest}:
-          Cover.GuessOK(G, S, g, es) & Cover.Oracle(rest, S, erest)
+          Cover.GuessOK(G0, S, g, es) & Cover.Oracle(G0, S, rest, erest)
 
 # Classes that are all strictly shorter than the candidate list.
 def Cover.EntrySmall(+S: +List<+List<Nat>>,
@@ -190,20 +191,22 @@ def Cover.BestValue(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
 def Cover.EntryOf(+S: +List<+List<Nat>>, +g: +List<Nat>,
     +G: +List<+List<Nat>>, +entries: +List<+List<Maybe<&2, Nat>>>,
     +es: +List<Maybe<&2, Nat>>) -> Type:
-  match G entries:
-    case Nil{} Nil{}:
+  match G:
+    case Nil{}:
       Empty
-    case Con{h, rest} Con{es2, erest}:
-      ({g == h : +List<Nat>} & {es == es2 : +List<Maybe<&2, Nat>>})
-      | Cover.EntryOf(S, g, rest, erest, es)
-    case _ _:
-      Empty
+    case Con{h, rest}:
+      match entries:
+        case Nil{}:
+          Empty
+        case Con{es2, erest}:
+          ({g == h : +List<Nat>} & {es == es2 : +List<Maybe<&2, Nat>>})
+          | Cover.EntryOf(S, g, rest, erest, es)
 
 # A found entry together with its oracle proof.
-def Cover.Find(+S: +List<+List<Nat>>, +g: +List<Nat>,
-    +G: +List<+List<Nat>>, +entries: +List<+List<Maybe<&2, Nat>>>) -> Type:
+def Cover.Find(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>, +g: +List<Nat>,
+    +search: +List<+List<Nat>>, +entries: +List<+List<Maybe<&2, Nat>>>) -> Type:
   Sigma<&1, &1, +List<Maybe<&2, Nat>>, es =>
-    Cover.EntryOf(S, g, G, entries, es) & Cover.GuessOK(G, S, g, es)>
+    Cover.EntryOf(S, g, search, entries, es) & Cover.GuessOK(G, S, g, es)>
 
 # A boolean case at a known value.
 def Cover.bool_case_true(~A: Type, b: Bool, t: A, f: A,
@@ -343,3 +346,200 @@ def Cover.total_opts_le(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
               CoverMaybe.Cover.MAdd_le_some(o, Cover.TotalOpts(os2, gs2),
                 GC.GC.GroupCost(kids, Groups.Group{fb, ws}), GC.GC.Total(kids, gs2),
                 head, tail)
+
+# The guess value is below the cost of the node the guess builds.
+def Cover.guess_value_le(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +os: +List<Maybe<&2, Nat>>, +kids: +List<Tree.Child>,
+    v: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
+    +us: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{} : Bool},
+    ok: Cover.GuessOK(G, S, g, os),
+    small: Cover.GuessSmall(S, g, os),
+    kidsok: Cover.GroupKids(G, kids, Groups.groups_build(g, S, Nil{}))) ->
+  CoverMaybe.Cover.MLe(Cover.GuessValue(S, g, os),
+    Some{Tree.cost(Tree.Node{g, kids}, S)}):
+  +groups : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+  +n : Nat = Groups.len_words(S)
+  tot : CoverMaybe.Cover.MLe(Cover.TotalOpts(os, groups),
+            Some{GC.GC.Total(kids, groups)}) =
+    Cover.total_opts_le(G, S, os, groups, kids, ok, small, kidsok)
+  madd : CoverMaybe.Cover.MLe(
+            CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups)),
+            Some{Nat.add(n, GC.GC.Total(kids, groups))}) =
+    CoverMaybe.Cover.MAdd_le_some(Some{n}, Cover.TotalOpts(os, groups),
+      n, GC.GC.Total(kids, groups), CoverMaybe.Cover.MLe_refl(Some{n}), tot)
+  gv : {Cover.GuessValue(S, g, os)
+         == CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups))
+         : Maybe<&2, Nat>} =
+    Cover.guess_value_usable(S, g, os, us)
+  cn : {Tree.cost(Tree.Node{g, kids}, S)
+         == Nat.add(Groups.len_words(S), NodeCost.NodeCost.kid_sum(g, kids, S)) : Nat} =
+    NodeCost.NodeCost.cost_node(g, kids, S, v)
+  gt : {GC.GC.Total(kids, groups) == NodeCost.NodeCost.kid_sum(g, kids, S) : Nat} =
+    GC.GC.groups_build_total(g, kids, S)
+  e_cost : {Nat.add(n, GC.GC.Total(kids, groups))
+             == Tree.cost(Tree.Node{g, kids}, S) : Nat} =
+    Equal.trans(Nat, Nat.add(n, GC.GC.Total(kids, groups)),
+      Nat.add(n, NodeCost.NodeCost.kid_sum(g, kids, S)),
+      Tree.cost(Tree.Node{g, kids}, S),
+      Equal.cong(Nat, Nat, x => Nat.add(n, x),
+        GC.GC.Total(kids, groups), NodeCost.NodeCost.kid_sum(g, kids, S), gt),
+      Equal.sym(Nat, Tree.cost(Tree.Node{g, kids}, S),
+        Nat.add(n, NodeCost.NodeCost.kid_sum(g, kids, S)), cn))
+  e1 : CoverMaybe.Cover.MLe(Cover.GuessValue(S, g, os),
+          Some{Nat.add(n, GC.GC.Total(kids, groups))}) =
+    Cover.mle_eq_l(Cover.GuessValue(S, g, os),
+      CoverMaybe.Cover.MAdd(Some{n}, Cover.TotalOpts(os, groups)),
+      Some{Nat.add(n, GC.GC.Total(kids, groups))}, gv, madd)
+  Cover.mle_eq_r(Cover.GuessValue(S, g, os),
+    Some{Nat.add(n, GC.GC.Total(kids, groups))},
+    Some{Tree.cost(Tree.Node{g, kids}, S)},
+    Cover.some_eq(Nat.add(n, GC.GC.Total(kids, groups)),
+      Tree.cost(Tree.Node{g, kids}, S), e_cost), e1)
+
+# The minimum over the guesses is below the value at any matching entry.
+def Cover.best_value_le_entry(+S: +List<+List<Nat>>, +g: +List<Nat>,
+    +G: +List<+List<Nat>>, +entries: +List<+List<Maybe<&2, Nat>>>,
+    +es: +List<Maybe<&2, Nat>>,
+    of: Cover.EntryOf(S, g, G, entries, es)) ->
+  CoverMaybe.Cover.MLe(Cover.BestValue(G, S, entries),
+    Cover.GuessValue(S, g, es)):
+  match G:
+    case Nil{}:
+      Empty.absurd(CoverMaybe.Cover.MLe(Cover.BestValue(Nil{}, S, entries),
+        Cover.GuessValue(S, g, es)), of)
+    case Con{h, rest}:
+      match entries:
+        case Nil{}:
+          Empty.absurd(CoverMaybe.Cover.MLe(Cover.BestValue(h <> rest, S, Nil{}),
+            Cover.GuessValue(S, g, es)), of)
+        case Con{es2, erest}:
+          match of:
+            case Inl{p}:
+              (eg, ees) = p
+              head : CoverMaybe.Cover.MLe(
+                CoverMaybe.Cover.MMin(Cover.GuessValue(S, h, es2),
+                  Cover.BestValue(rest, S, erest)),
+                Cover.GuessValue(S, h, es2)) =
+                CoverMaybe.Cover.MMin_le_l(Cover.GuessValue(S, h, es2),
+                  Cover.BestValue(rest, S, erest))
+              +egv : {Cover.GuessValue(S, g, es)
+                      == Cover.GuessValue(S, h, es2) : Maybe<&2, Nat>} =
+                Equal.trans(Maybe<&2, Nat>,
+                  Cover.GuessValue(S, g, es), Cover.GuessValue(S, h, es),
+                  Cover.GuessValue(S, h, es2),
+                  Equal.cong(+List<Nat>, Maybe<&2, Nat>,
+                    x => Cover.GuessValue(S, x, es), g, h, eg),
+                  Equal.cong(+List<Maybe<&2, Nat>>, Maybe<&2, Nat>,
+                    x => Cover.GuessValue(S, h, x), es, es2, ees))
+              Cover.mle_eq_r(Cover.BestValue(G, S, entries),
+                Cover.GuessValue(S, h, es2), Cover.GuessValue(S, g, es),
+                Equal.sym(Maybe<&2, Nat>, Cover.GuessValue(S, g, es),
+                  Cover.GuessValue(S, h, es2), egv), head)
+            case Inr{of2}:
+              tail : CoverMaybe.Cover.MLe(Cover.BestValue(rest, S, erest),
+                Cover.GuessValue(S, g, es)) =
+                Cover.best_value_le_entry(S, g, rest, erest, es, of2)
+              CoverMaybe.Cover.MLe_trans(Cover.BestValue(G, S, entries),
+                Cover.BestValue(rest, S, erest), Cover.GuessValue(S, g, es),
+                CoverMaybe.Cover.MMin_le_r(Cover.GuessValue(S, h, es2),
+                  Cover.BestValue(rest, S, erest)), tail)
+
+# The guess is the head of the list, so the entry is its own.
+def Cover.guessok_eq(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +h: +List<Nat>, +os: +List<Maybe<&2, Nat>>,
+    e: {g == h : +List<Nat>}, ok: Cover.GuessOK(G, S, h, os)) ->
+  Cover.GuessOK(G, S, g, os):
+  %Equal.sym(+List<Nat>, g, h, e) : Cover.GuessOK(G, S, _, os)
+  ok
+
+# A boolean case that is known to be `False`.
+def Cover.bool_case_val_false(b: Bool, t: Bool, f: Bool,
+    +e: {b == False{} : Bool}) ->
+  {Feedback.Bool.case(Bool, b, t, f) == f : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({Feedback.Bool.case(Bool, True{}, t, f) == f : Bool},
+        Logic.Proof.true_ne_false(e))
+    case False{}:
+      {==}
+
+# A non-matching head leaves the tail's membership.
+def Cover.member_tail(+g: +List<Nat>, +h: +List<Nat>, +rest: +List<+List<Nat>>,
+    +b: Bool, +eb: {b == Feedback.word_eq(g, h) : Bool},
+    +ef: {b == False{} : Bool},
+    mem: {Tree.member_word(g, h <> rest) == True{} : Bool}) ->
+  {Tree.member_word(g, rest) == True{} : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({Tree.member_word(g, rest) == True{} : Bool},
+        Logic.Proof.true_ne_false(ef))
+    case False{}:
+      +ec : {Feedback.Bool.case(Bool, Feedback.word_eq(g, h), True{},
+                Tree.member_word(g, rest)) == Tree.member_word(g, rest) : Bool} =
+        Cover.bool_case_val_false(Feedback.word_eq(g, h), True{},
+          Tree.member_word(g, rest),
+          Equal.sym(Bool, False{}, Feedback.word_eq(g, h), eb))
+      Equal.trans(Bool, Tree.member_word(g, rest),
+        Feedback.Bool.case(Bool, Feedback.word_eq(g, h), True{},
+          Tree.member_word(g, rest)),
+        True{}, Equal.sym(Bool,
+          Feedback.Bool.case(Bool, Feedback.word_eq(g, h), True{},
+            Tree.member_word(g, rest)),
+          Tree.member_word(g, rest), ec), mem)
+
+# Lift a tail entry to the full guess list.
+def Cover.wrap_tail(+G0: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +h: +List<Nat>, +rest: +List<+List<Nat>>,
+    +es: +List<Maybe<&2, Nat>>, +erest: +List<+List<Maybe<&2, Nat>>>,
+    r: Cover.Find(G0, S, g, rest, erest)) ->
+  Cover.Find(G0, S, g, h <> rest, es <> erest):
+  match r:
+    case Tuple{+es2, rp}:
+      (of2, ok2) = rp
+      (es2, (Inr{of2}, ok2))
+
+# One guess of the entry search.
+def Cover.find_head(+G0: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +h: +List<Nat>, +rest: +List<+List<Nat>>,
+    +es: +List<Maybe<&2, Nat>>, +erest: +List<+List<Maybe<&2, Nat>>>,
+    okh: Cover.GuessOK(G0, S, h, es),
+    okrest: Cover.Oracle(G0, S, rest, erest),
+    +b: Bool, +eb: {b == Feedback.word_eq(g, h) : Bool},
+    mem: {Tree.member_word(g, h <> rest) == True{} : Bool},
+    k: Cover.Oracle(G0, S, rest, erest)
+       -> {Tree.member_word(g, rest) == True{} : Bool}
+       -> Cover.Find(G0, S, g, rest, erest)) ->
+  Cover.Find(G0, S, g, h <> rest, es <> erest):
+  match b:
+    case True{}:
+      +egh : {g == h : +List<Nat>} =
+        CoverList.Cover.word_eq_true(g, h, Equal.sym(Bool, True{}, Feedback.word_eq(g, h), eb))
+      (es, (Inl{(egh, {==})}, Cover.guessok_eq(G0, S, g, h, es, egh, okh)))
+    case False{}:
+      +mt : {Tree.member_word(g, rest) == True{} : Bool} =
+        Cover.member_tail(g, h, rest, False{}, eb, {==}, mem)
+      Cover.wrap_tail(G0, S, g, h, rest, es, erest, k(okrest, mt))
+
+# Find the oracle entry that belongs to a guess in the list.
+def Cover.find(+G0: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +Gcur: +List<+List<Nat>>, +entries: +List<+List<Maybe<&2, Nat>>>,
+    oracle: Cover.Oracle(G0, S, Gcur, entries), +g: +List<Nat>,
+    mem: {Tree.member_word(g, Gcur) == True{} : Bool}) ->
+  Cover.Find(G0, S, g, Gcur, entries):
+  match Gcur:
+    case Nil{}:
+      match entries:
+        case Nil{}:
+          Empty.absurd(Cover.Find(G0, S, g, Nil{}, Nil{}),
+            Logic.Proof.false_ne_true(mem))
+        case Con{es, erest}:
+          Empty.absurd(Cover.Find(G0, S, g, Nil{}, es <> erest), oracle)
+    case Con{h, rest}:
+      match entries:
+        case Nil{}:
+          Empty.absurd(Cover.Find(G0, S, g, h <> rest, Nil{}), oracle)
+        case Con{es, erest}:
+          (okh, okrest) = oracle
+          Cover.find_head(G0, S, g, h, rest, es, erest, okh, okrest,
+            Feedback.word_eq(g, h), {==}, mem,
+            or2 => m2 => Cover.find(G0, S, rest, erest, or2, g, m2))
