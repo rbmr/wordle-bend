@@ -26,6 +26,7 @@ import ./groupcost.bend as GC
 import ./nodecost.bend as NodeCost
 import ./classbound_nat.bend as CBN
 import ./sat.bend as Sat
+import ./classbound.bend as CBProof
 
 # Every group feedback differs from `fb`.
 def CBK.allNe(+fb: +List<Feedback.Color>, +gs: +List<Groups.Group>) -> Bool:
@@ -467,3 +468,64 @@ def CBK.machine_cost(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         CBN.CB.sum(CBK.class_costs(p, G, S, groups, inf))),
       Nat.add(Groups.len_words(S),
         CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf))), nc, e_add))
+
+# The per-class facts that bound a node: the class is strictly smaller than the
+# candidate list, and its stored cost fits its own square.
+def CBK.ClassFits(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>, +inf: Nat, +n: Nat) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          {Nat.is_lt(Groups.len_words(ws), n) == True{} : Bool}
+          & {Nat.is_le(Sat.SB.child_cost(p, G, ws, inf),
+                Nat.mul(Groups.len_words(ws), Groups.len_words(ws))) == True{} : Bool}
+          & CBK.ClassFits(p, G, S, t, inf, n)
+
+# Turn the per-class facts into the arithmetic bound of `classbound.bend`.
+def CBK.bounds_of(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>, +inf: Nat, +n: Nat,
+    f: CBK.ClassFits(p, G, S, groups, inf, n)) ->
+  CBProof.CB.Bounds(n, groups, Sat.SB.child_costs(p, G, groups, inf)):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{+f2, +ws}:
+          (fh, fr) = f
+          (fl, ft) = fr
+          (fh, (fl, CBK.bounds_of(p, G, S, t, inf, n, ft)))
+
+# The finished guess's node cost stays below the solver's infinity, from the
+# per-class size and cost bounds.
+def CBK.node_bound(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +N: Nat,
+    f: CBK.ClassFits(p, G, S, Groups.groups_build(g, S, Nil{}), inf,
+      Groups.len_words(S)),
+    +leN: {Nat.is_le(Groups.len_words(S), N) == True{} : Bool}) ->
+  {Nat.is_lt(Nat.add(Groups.len_words(S),
+      CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+     Nat.add(Nat.mul(N, N), 1n)) == True{} : Bool}:
+  CBProof.CB.fits_inf_classes(N, S, g,
+    Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf),
+    CBK.bounds_of(p, G, S, Groups.groups_build(g, S, Nil{}), inf,
+      Groups.len_words(S), f),
+    leN)
+
+# The same node cost fits the square of the candidate count.
+def CBK.node_bound_sq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat,
+    f: CBK.ClassFits(p, G, S, Groups.groups_build(g, S, Nil{}), inf,
+      Groups.len_words(S))) ->
+  {Nat.is_le(Nat.add(Groups.len_words(S),
+      CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf))),
+     Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool}:
+  CBProof.CB.bound_groups(Groups.len_words(S),
+    Groups.groups_build(g, S, Nil{}),
+    Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf),
+    CBK.bounds_of(p, G, S, Groups.groups_build(g, S, Nil{}), inf,
+      Groups.len_words(S), f),
+    CBProof.CB.partition_le(g, S))
