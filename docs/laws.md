@@ -141,9 +141,13 @@ law tree_roundtrip:
 ```
 
 Proved in `PROOF.bend`. The printer writes the tree as a right-nested JSON array
-and the parser is a state machine over its characters. The proof is an
-induction on the tree: `KidsProof.body` proves that the body of a kids array
-parses back to exactly the same children, and the number and feedback traces
-prove that each unary letter and colour is consumed with its terminator. The
-top-level `TreeProof.parsed` chains those traces from `MStart` and `Laws.tree_roundtrip`
-applies `finish`, which keeps the tree only when no text remains.
+and the parser is a state machine over its characters. A letter's digits are
+built least significant first by adding one (`digits_lsb`), printed most
+significant first, and the parser pushes each digit back onto the accumulator,
+so `Digits.value_digits` shows that the parsed value is the original number.
+The proof is an induction on the tree: `KidsProof.body` proves that the body of
+a kids array parses back to exactly the same children, and the digit and
+feedback traces prove that each decimal letter and each colour is consumed
+correctly. The top-level `TreeProof.parsed` chains those traces from `MStart`
+and `Laws.tree_roundtrip` applies `finish`, which keeps the tree only when no
+text remains.

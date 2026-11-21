@@ -63,11 +63,10 @@ child    = [ feedback, tree ]
 feedback = [ colour, ... ]
 ```
 
-A colour is `0` (Gray), `1` (Yellow) or `2` (Green). A letter is a `Nat` written in unary as a
-JSON number: `n` ones followed by a zero, so `0` is `0`, `1` is `10`, `2` is `110`. The trailing
-zero terminates each number, which is what makes the parser easy to invert: every printed token
-is a prefix that ends at a known character. `Json.parse` accepts exactly this grammar and rejects
-anything else, including trailing text.
+A colour is `0` (Gray), `1` (Yellow) or `2` (Green). A letter is its decimal code point, printed
+as an ordinary decimal numeral: `97` for `a`, `0` for code point zero, and no leading zeros.
+`Json.parse` reads each run of digits back to its value and accepts exactly this grammar,
+rejecting anything else, including trailing text.
 
 ### `LAWS.bend` and `PROOF.bend`
 
