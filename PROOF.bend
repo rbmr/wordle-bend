@@ -169,3 +169,49 @@ def FeedbackProof.all_green_equal_go(g: +List<Nat>, a: +List<Nat>, +pool: +List<
 
 def Laws.feedback_all_green_only_if_equal(g, a, p, e):
   FeedbackProof.all_green_equal_go(g, a, Feedback.non_green(g, a), Feedback.next_same(g, a), {==}, p, e)
+
+# Generic list algebra for the parser traces.
+def ListProof.append_nil(a, -A: Kind(a), xs: List<a, A>) ->
+  {List.append(a, A, xs, Nil{}) == xs : List<a, A>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{h, t}:
+      Equal.cong(List<a, A>, List<a, A>, l => h <> l,
+                 List.append(a, A, t, Nil{}), t,
+                 ListProof.append_nil(a, A, t))
+
+def ListProof.append_assoc(a, -A: Kind(a), xs: List<a, A>, ys: List<a, A>, zs: List<a, A>) ->
+  {List.append(a, A, List.append(a, A, xs, ys), zs)
+    == List.append(a, A, xs, List.append(a, A, ys, zs)) : List<a, A>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{h, t}:
+      Equal.cong(List<a, A>, List<a, A>, l => h <> l,
+                 List.append(a, A, List.append(a, A, t, ys), zs),
+                 List.append(a, A, t, List.append(a, A, ys, zs)),
+                 ListProof.append_assoc(a, A, t, ys, zs))
+
+# Arithmetic on the unary digit counter.
+def NatProof.add_succ(a: Nat, b: Nat) ->
+  {Nat.add(a, 1n+b) == 1n+Nat.add(a, b) : Nat}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      %NatProof.add_succ(p, b) : {1n+Nat.add(p, 1n+b) == 1n+_ : Nat}
+      {==}
+
+def NatProof.add_zero(a: Nat) -> {Nat.add(a, 0n) == a : Nat}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      %NatProof.add_zero(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+
+def NatProof.add_one(+a: Nat) -> {Nat.add(a, 1n) == 1n+a : Nat}:
+  e1 = NatProof.add_succ(a, 0n)
+  e2 = Equal.cong(Nat, Nat, m => 1n+m, Nat.add(a, 0n), a, NatProof.add_zero(a))
+  Equal.trans(Nat, Nat.add(a, 1n), 1n+Nat.add(a, 0n), 1n+a, e1, e2)
