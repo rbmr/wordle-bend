@@ -18,20 +18,18 @@ Word lists are data with their own origin and their own terms, and those terms a
 MIT, and sometimes not permissive at all. The MIT licence on the code does not extend to data
 bundled in `words/`.
 
-Every bundled word list must have its provenance recorded alongside it, covering:
+The lists in `words/` were carried over unchanged from an earlier project of the same maintainer.
+No upstream source is asserted here, and no licence is claimed for them beyond what that earlier
+project established. If the lists are replaced or a new list is added, record its source, licence,
+attribution and any modification in this document in the same change.
 
-- the source, including a URL and the list's name or version where one exists;
-- the licence or terms the list is distributed under;
-- any attribution the terms require;
-- any modification made to the list before bundling, such as filtering, sorting, or
-  normalisation.
+| File | Contents | Provenance |
+| --- | --- | --- |
+| `words/candidates.txt` | 2,341 five-letter candidate words, one per line. | Carried over unchanged from an earlier project of the same maintainer. |
+| `words/guesses.txt` | 14,854 five-letter guess words, one per line. | Carried over unchanged from an earlier project of the same maintainer. |
 
 A list whose licence cannot be established, or whose terms do not permit redistribution in a public
 repository, is not bundled.
-
-**No word lists are bundled yet.** `words/` is to be added. When it is, the provenance record for
-each list is added in the same change, and this document gains a summary table of the bundled lists
-and their licences.
 
 ## Contributions
 
