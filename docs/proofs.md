@@ -107,6 +107,15 @@ They are what a pruning rule needs to discard a guess or a class before searchin
 
 The soundness statement for the capacity bound, that a valid tree with no duplicate candidates whose nodes have at most `k` children costs at least `capbound(|S|, k)`, is not proved yet. It needs the feedback classes of every node together with the number of candidates each level of the tree can hold, because a tree-derived capacity is only an upper bound on the class sizes when the candidates of a node are distinct. `cost(T, S) >= capbound(|S|, k)` is therefore the next step, not a claim the development makes today.
 
+### Bound-pruned search
+
+| File | What it proves |
+| --- | --- |
+| `fast_step.bend` | Computation lemmas for the pruned state machine in `src/solve_fast.bend`: one step per item kind, the block of one guess in both the skipped and the searched mode, and the class fold `FS.items` that mirrors `Eval.items` with the pruned child search. |
+| `fast_better.bend` | The skip lemma: `better` replaces only on a strictly lower cost, so a guess whose candidate cost is at least a bound `lb` leaves any accumulator with cost at most `lb` unchanged. |
+| `fast_lb.bend` | Soundness of `lower_bound(|S|, groups) = |S| + class_words(groups)` for the reference class fold: when the candidate cost is finite, every class cost is finite, valid (`mainvalid.bend`), equals its tree's cost (`optcost.bend`), and is at least its word count (`lb_size.bend`); when the candidate cost is at least infinity, `better` also keeps any accumulator below or at infinity. |
+| `fast_eq.bend` | Fuel induction over the jobs of a level showing that `SolveFast.solve_fast` returns the exact reference tree `SolveRef.solve` for every input. `PROOF.bend` states the result as `Fast.solve_eq`. |
+
 ### Parallel root
 
 | File | What it proves |
