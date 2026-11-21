@@ -94,6 +94,15 @@ purpose of the proof work, not the import order.
 | `optcomplete.bend` | Completeness: if a valid tree exists, the stored cost is below infinity and fits the square of the candidate count, by the same fuel induction over the classes of the given tree. |
 | `optstrong.bend` | Merges the optimality and completeness walks: one traversal of the given tree produces both the cost comparison and the class size and cost bounds, ending in `Laws.solve_optimal`. |
 
+### Lower bounds
+
+Standalone facts about the cost of an arbitrary valid tree, stated about `Tree.cost` only.
+They are what a pruning rule needs to discard a guess or a class before searching it.
+
+| File | What it proves |
+| --- | --- |
+| `lb_size.bend` | Every depth the tree produces is absent or at least one, so a valid tree costs at least the number of candidates: `cost(T, S) >= |S|`. |
+
 ## How the gate works
 
 `scripts/check-proofs.sh` is the gate. CI runs it, and contributors run the same script locally.
