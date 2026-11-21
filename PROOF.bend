@@ -340,3 +340,49 @@ def SolveProof.sat_add_lt_r(+inf: Nat, +a: Nat, +b: Nat,
     +e: {Nat.is_lt(Solve.sat_add(inf, a, b), inf) == True{} : Bool}) ->
   {Nat.is_lt(b, inf) == True{} : Bool}:
   SolveProof.sat_add_lt_r_go(inf, a, b, Nat.is_ge(a, inf), Nat.is_ge(b, inf), {==}, {==}, e)
+
+def SolveProof.MaybeTree.value(m: Maybe<Tree.Tree>) -> Tree.Tree:
+  match m:
+    case None{}:
+      Tree.Node{Nil{}, Nil{}}
+    case Some{t}:
+      t
+
+def SolveProof.MaybeTree.disc(m: Maybe<Tree.Tree>) -> Type:
+  match m:
+    case None{}:
+      Unit
+    case Some{t}:
+      Empty
+
+def SolveProof.MaybeTree.none_ne_some(T: Tree.Tree, e: {None{} == Some{T} : Maybe<Tree.Tree>}) -> Empty:
+  %e : SolveProof.MaybeTree.disc(_)
+  Unit{}
+
+def SolveProof.MaybeTree.some_inj(x: Tree.Tree, y: Tree.Tree,
+    e: {Some{x} == Some{y} : Maybe<Tree.Tree>}) -> {x == y : Tree.Tree}:
+  Equal.cong(Maybe<Tree.Tree>, Tree.Tree, SolveProof.MaybeTree.value, Some{x}, Some{y}, e)
+
+def SolveProof.BestIs(inf: Nat, best: Solve.Best, T: Tree.Tree) -> Type:
+  match best:
+    case Solve.Best{tree, cost}:
+      {tree == T : Tree.Tree} & {Nat.is_lt(cost, inf) == True{} : Bool}
+
+def SolveProof.best_to_maybe_some_bool(+inf: Nat, +tree: Tree.Tree, +cost: Nat, T: Tree.Tree,
+    b: Bool, +eb: {b == Nat.is_ge(cost, inf) : Bool},
+    +e: {Feedback.Bool.case(Maybe<Tree.Tree>, b, None{}, Some{tree}) == Some{T} : Maybe<Tree.Tree>}) ->
+  {tree == T : Tree.Tree} & {Nat.is_lt(cost, inf) == True{} : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({tree == T : Tree.Tree} & {Nat.is_lt(cost, inf) == True{} : Bool},
+                   SolveProof.MaybeTree.none_ne_some(T, e))
+    case False{}:
+      (SolveProof.MaybeTree.some_inj(tree, T, e),
+       Nat.lt_of_ge_false(cost, inf, Equal.sym(Bool, False{}, Nat.is_ge(cost, inf), eb)))
+
+def SolveProof.best_to_maybe_some(+inf: Nat, best: Solve.Best, T: Tree.Tree,
+    +e: {Solve.best_to_maybe(inf, best) == Some{T} : Maybe<Tree.Tree>}) ->
+  SolveProof.BestIs(inf, best, T):
+  match best:
+    case Solve.Best{+tree, +cost}:
+      SolveProof.best_to_maybe_some_bool(inf, tree, cost, T, Nat.is_ge(cost, inf), {==}, e)
