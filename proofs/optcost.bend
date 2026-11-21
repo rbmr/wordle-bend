@@ -30,6 +30,7 @@ import ./optimalvalue.bend as OV
 import ./optsum.bend as Sums
 import ./optfold.bend as Fold
 import ./optnode.bend as Node
+import ./optind.bend as Ind
 import ./solvevalid.bend as SV
 import ./mainvalid.bend as MV
 
@@ -531,3 +532,239 @@ def OC.cand_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
                           Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
                         Nil{})}, S), fin),
                     e2)))))
+
+# The cost/tree correspondence of the search at one candidate list.
+def OC.CJob(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>) -> Type:
+  OC.CostOK(inf, SolveRef.step(fuel, SolveRef.mk_schedule(G, S), G, S, inf,
+    Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()), S)
+
+# The conjunction of the job obligations over a list of candidate lists.
+def OC.CFlat(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    jobs: +List<+List<+List<Nat>>>) -> Type:
+  match jobs:
+    case Nil{}:
+      Unit
+    case Con{S, t}:
+      OC.CJob(fuel, inf, G, S) & OC.CFlat(fuel, inf, G, t)
+
+# The class results of one guess, only when the guess is usable.
+def OC.CClassIf(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, b: Bool,
+    +groups: +List<Groups.Group>) -> Type:
+  match b:
+    case True{}:
+      OC.CClass(fuel, inf, G, groups)
+    case False{}:
+      Unit
+
+# The class results of every guess in a guess list, in guess order.
+def OC.CByGs(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case Con{g, t}:
+      OC.CClassIf(fuel, inf, G,
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+        Groups.groups_build(g, S, Nil{}))
+      & OC.CByGs(fuel, inf, G, S, t)
+
+# The zero-fuel fold over a cost-zero accumulator stays at cost zero.
+def OC.zero_fold_cost(+G: +List<+List<Nat>>, +inf: Nat, +gs: +List<+List<Nat>>,
+    +tree: Tree.Tree,
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  {Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, gs,
+     SolveRef.Best{tree, 0n})) == 0n : Nat}:
+  match gs:
+    case Nil{}:
+      {==}
+    case Con{g, t}:
+      +e1 : {SolveRef.finish_guess(inf, g, Nil{}, 0n, Groups.len_words(Nil{}),
+                SolveRef.Best{tree, 0n}) == SolveRef.Best{tree, 0n}
+             : SolveRef.Best} =
+        Equal.trans(SolveRef.Best,
+          SolveRef.finish_guess(inf, g, Nil{}, 0n, 0n,
+            SolveRef.Best{tree, 0n}),
+          SolveRef.better(0n, Tree.Node{g, Nil{}}, SolveRef.Best{tree, 0n}),
+          SolveRef.Best{tree, 0n},
+          Equal.cong(Nat, SolveRef.Best,
+            x => SolveRef.better(x, Tree.Node{g, SolveRef.rev_kids(Nil{}, Nil{})},
+              SolveRef.Best{tree, 0n}),
+            SolveRef.sat_add(inf, 0n, 0n), 0n, Ind.OQ.sat_zero(inf, hz)),
+          Ind.OQ.better0_keep(Tree.Node{g, Nil{}}, tree))
+      +eq : {Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+                SolveRef.finish_guess(inf, g, Nil{}, 0n,
+                  Groups.len_words(Nil{}), SolveRef.Best{tree, 0n})))
+              == Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+                   SolveRef.Best{tree, 0n})) : Nat} =
+        Equal.cong(SolveRef.Best, Nat,
+          b => Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, t, b)),
+          SolveRef.finish_guess(inf, g, Nil{}, 0n, Groups.len_words(Nil{}),
+            SolveRef.Best{tree, 0n}),
+          SolveRef.Best{tree, 0n}, e1)
+      Equal.trans(Nat,
+        Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, g <> t,
+          SolveRef.Best{tree, 0n})),
+        Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+          SolveRef.Best{tree, 0n})),
+        0n, eq, OC.zero_fold_cost(G, inf, t, tree, hz))
+
+# The first guess of a zero-fuel fold replaces the dummy accumulator by a
+# cost-zero node.
+def OC.zero_first_cost(+G: +List<+List<Nat>>, +inf: Nat,
+    +g: +List<Nat>, +t: +List<+List<Nat>>,
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  {Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, g <> t,
+     Eval.Eval.dummy_inf(inf))) == 0n : Nat}:
+  +fin_eq : {SolveRef.finish_guess(inf, g, Nil{}, 0n, Groups.len_words(Nil{}),
+                 Eval.Eval.dummy_inf(inf))
+              == SolveRef.Best{Tree.Node{g, Nil{}}, 0n} : SolveRef.Best} =
+    Equal.trans(SolveRef.Best,
+      SolveRef.finish_guess(inf, g, Nil{}, 0n, 0n, Eval.Eval.dummy_inf(inf)),
+      SolveRef.better(0n, Tree.Node{g, Nil{}}, Eval.Eval.dummy_inf(inf)),
+      SolveRef.Best{Tree.Node{g, Nil{}}, 0n},
+      Equal.cong(Nat, SolveRef.Best,
+        x => SolveRef.better(x, Tree.Node{g, SolveRef.rev_kids(Nil{}, Nil{})},
+          Eval.Eval.dummy_inf(inf)),
+        SolveRef.sat_add(inf, 0n, 0n), 0n, Ind.OQ.sat_zero(inf, hz)),
+      Ind.OQ.better0_eq(inf, Tree.Node{g, Nil{}}, hz))
+  +e1 : {Eval.Eval.guesses(0n, G, Nil{}, inf, g <> t, Eval.Eval.dummy_inf(inf))
+          == Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+               SolveRef.Best{Tree.Node{g, Nil{}}, 0n}) : SolveRef.Best} =
+    Equal.trans(SolveRef.Best,
+      Eval.Eval.guesses(0n, G, Nil{}, inf, g <> t, Eval.Eval.dummy_inf(inf)),
+      Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+        SolveRef.finish_guess(inf, g, Nil{}, 0n, Groups.len_words(Nil{}),
+          Eval.Eval.dummy_inf(inf))),
+      Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+        SolveRef.Best{Tree.Node{g, Nil{}}, 0n}),
+      {==},
+      Equal.cong(SolveRef.Best, SolveRef.Best,
+        b => Eval.Eval.guesses(0n, G, Nil{}, inf, t, b),
+        SolveRef.finish_guess(inf, g, Nil{}, 0n, Groups.len_words(Nil{}),
+          Eval.Eval.dummy_inf(inf)),
+        SolveRef.Best{Tree.Node{g, Nil{}}, 0n}, fin_eq))
+  Equal.trans(Nat,
+    Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, g <> t,
+      Eval.Eval.dummy_inf(inf))),
+    Eval.Eval.cost_of(Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+      SolveRef.Best{Tree.Node{g, Nil{}}, 0n})),
+    0n,
+    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+      Eval.Eval.guesses(0n, G, Nil{}, inf, g <> t, Eval.Eval.dummy_inf(inf)),
+      Eval.Eval.guesses(0n, G, Nil{}, inf, t,
+        SolveRef.Best{Tree.Node{g, Nil{}}, 0n}), e1),
+    OC.zero_fold_cost(G, inf, t, Tree.Node{g, Nil{}}, hz))
+
+# Zero fuel at the empty candidate list: the search result is cost zero, or its
+# stored cost is infinite (only when there are no guesses at all).
+def OC.cjob_zero_nil(+inf: Nat, +G: +List<+List<Nat>>,
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  OC.CJob(0n, inf, G, Nil{}):
+  match G:
+    case Nil{}:
+      e =>
+        +eb : {SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{},
+                  inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                  Eval.Eval.dummy_zero())
+                == Eval.Eval.guesses(0n, Nil{}, Nil{}, inf, Nil{},
+                     Eval.Eval.dummy_inf(inf)) : SolveRef.Best} =
+          Eval.Eval.guesses_zero(Nil{}, inf, Nil{}, Eval.Eval.dummy_inf(inf))
+        +ec : {Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}),
+                    Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                    Eval.Eval.dummy_zero()))
+                == Eval.Eval.cost_of(Eval.Eval.guesses(0n, Nil{}, Nil{}, inf, Nil{},
+                     Eval.Eval.dummy_inf(inf))) : Nat} =
+          Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+            SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf,
+              Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+            Eval.Eval.guesses(0n, Nil{}, Nil{}, inf, Nil{}, Eval.Eval.dummy_inf(inf)),
+            eb)
+        +bad : {Nat.is_lt(inf, inf) == True{} : Bool} =
+          CBN.CB.lt_eq_l(inf,
+            Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}),
+              Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+              Eval.Eval.dummy_zero())),
+            inf,
+            Equal.trans(Nat,
+              Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}),
+                Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                Eval.Eval.dummy_zero())),
+              Eval.Eval.cost_of(Eval.Eval.guesses(0n, Nil{}, Nil{}, inf, Nil{},
+                Eval.Eval.dummy_inf(inf))),
+              inf, ec, {==}), e)
+        Empty.absurd(
+          {Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+             SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{}, Nil{},
+             0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{})
+           == Eval.Eval.cost_of(SolveRef.step(0n,
+                SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{},
+                Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()))
+           : Nat},
+          NatProof.Nat.not_lt_self(inf, bad))
+    case Con{g, t}:
+      e =>
+        +eb : {SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{},
+                  inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                  Eval.Eval.dummy_zero())
+                == Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+                     Eval.Eval.dummy_inf(inf)) : SolveRef.Best} =
+          Eval.Eval.guesses_zero(g <> t, inf, g <> t, Eval.Eval.dummy_inf(inf))
+        +ec : {Eval.Eval.cost_of(SolveRef.step(0n,
+                    SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+                    Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                    Eval.Eval.dummy_zero()))
+                == Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf,
+                     g <> t, Eval.Eval.dummy_inf(inf))) : Nat} =
+          Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+            SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{},
+              inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+              Eval.Eval.dummy_zero()),
+            Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+              Eval.Eval.dummy_inf(inf)), eb)
+        +ec2 : {Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+                   Eval.Eval.dummy_inf(inf))) == 0n : Nat} =
+          OC.zero_first_cost(g <> t, inf, g, t, hz)
+        +ec3 : {Eval.Eval.cost_of(SolveRef.step(0n,
+                   SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+                   Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                   Eval.Eval.dummy_zero())) == 0n : Nat} =
+          Equal.trans(Nat,
+            Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+              g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+              Eval.Eval.dummy_zero())),
+            Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+              Eval.Eval.dummy_inf(inf))),
+            0n, ec, ec2)
+        +e0 : {Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+                   SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+                   Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                   Eval.Eval.dummy_zero())), Nil{}) == 0n : Nat} = {==}
+        Equal.trans(Nat,
+          Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+            SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
+            0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{}),
+          0n,
+          Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+            g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+            Eval.Eval.dummy_zero())),
+          e0, Equal.sym(Nat, Eval.Eval.cost_of(SolveRef.step(0n,
+            SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
+            0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), 0n, ec3))
+
+# A job moved to an equal candidate list.
+def OC.cjob_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S1: +List<+List<Nat>>, +S2: +List<+List<Nat>>,
+    e: {S1 == S2 : +List<+List<Nat>>},
+    c: OC.CJob(fuel, inf, G, S1)) -> OC.CJob(fuel, inf, G, S2):
+  %e : OC.CJob(fuel, inf, G, _)
+  c
+
+# A zero-length candidate list is empty, so its job is the zero-fuel base case.
+def OC.cjob_zero(+inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    le: {Nat.is_le(Groups.len_words(S), 0n) == True{} : Bool},
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) -> OC.CJob(0n, inf, G, S):
+  +eS : {S == Nil{} : +List<+List<Nat>>} =
+    MV.MV.nil_of_len_zero(S, NatProof.Nat.eq_zero_of_le_zero(Groups.len_words(S), le))
+  OC.cjob_transport(0n, inf, G, Nil{}, S,
+    Equal.sym(+List<+List<Nat>>, S, Nil{}, eS), OC.cjob_zero_nil(inf, G, hz))
