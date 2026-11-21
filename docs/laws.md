@@ -163,17 +163,21 @@ law tree_json_wellformed:
   {Spec.well_formed(Json.print(t)) == True{} : Bool}
 ```
 
-Open. `src/spec_json.bend` defines `Spec.well_formed`, an independent
-recogniser for the subset `array | number` with no whitespace, no sign, no
-leading zero and no trailing text. The law needs a proof that the recogniser
-accepts the printer's output. A roundtrip law cannot replace it: a printer that
-emits invalid JSON could still parse back through a matching parser.
+Proved in `PROOF.bend` by `JsonProof.Rec.tree`. `src/spec_json.bend` defines
+`Spec.well_formed`, an independent recogniser for the subset `array | number`
+with no whitespace, no sign, no leading zero and no trailing text, and the law
+shows that it accepts the printer's output. A roundtrip law cannot replace it:
+a printer that emits invalid JSON could still parse back through a matching
+parser.
 
-The recogniser lemmas in `proofs/json_spec.bend` already cover the decimal
-letters (through `Digits.show_letter` and the canonical `digits_lsb` lists), the
-guess arrays and the feedback arrays. The remaining step is a kids array: after
-a child's feedback and guess have been consumed, the child's own kids array is
-read by the same induction on the tree. That step is not yet proved.
+The recogniser lemmas in `proofs/json_spec.bend` cover the decimal letters
+(through `Digits.show_letter` and the canonical `digits_lsb` lists), the guess
+arrays, the feedback arrays, and the kids arrays. `Rec.kids_run` walks a kids
+body with a mode for the first child and for a child after a comma, pushes and
+pops one stack entry per open array, and `Rec.child_core` reads one child's
+feedback, guess and nested kids. `Rec.tree` then reads the whole tree from
+`SValue`, and `Laws.tree_json_wellformed` instantiates it at the empty stack and
+empty suffix.
 
 ## 8. print_matches_render
 

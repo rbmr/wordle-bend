@@ -1470,3 +1470,27 @@ def FeedbackProof.feedback_eq_trans(+a: +List<Feedback.Color>, +b: +List<Feedbac
              True{}, Nat.is_eq_refl(List.length(&2, Feedback.Color, c))) : {
     Bool.and(_, SolveProof.all_pairs(a, c)) == True{} : Bool}
   all_ac
+
+def TreeWF.proof(+t: Tree.Tree) ->
+  {JsonSpec.well_formed(Json.print(t)) == True{} : Bool}:
+  e0 = JsonProof.Rec.tree(t, SNil{}, Nil{}, JsonSpec.SValue{}, Unit{})
+  e1 = Equal.cong(String, Maybe<String>,
+         ss => JsonSpec.recognise.go(ss, JsonSpec.SValue{}, Nil{}),
+         String.append(Json.print(t), SNil{}), Json.print(t),
+         JsonProof.Str.append_nil(Json.print(t)))
+  e2 = Equal.trans(Maybe<String>,
+         JsonSpec.recognise.go(Json.print(t), JsonSpec.SValue{}, Nil{}),
+         JsonSpec.recognise.go(String.append(Json.print(t), SNil{}), JsonSpec.SValue{}, Nil{}),
+         JsonSpec.recognise.go(SNil{}, JsonSpec.SAfter{}, Nil{}),
+         Equal.sym(Maybe<String>,
+           JsonSpec.recognise.go(String.append(Json.print(t), SNil{}), JsonSpec.SValue{}, Nil{}),
+           JsonSpec.recognise.go(Json.print(t), JsonSpec.SValue{}, Nil{}),
+           e1),
+         e0)
+  Equal.cong(Maybe<String>, Bool, JsonSpec.whole,
+             JsonSpec.recognise.go(Json.print(t), JsonSpec.SValue{}, Nil{}),
+             JsonSpec.recognise.go(SNil{}, JsonSpec.SAfter{}, Nil{}),
+             e2)
+
+def Laws.tree_json_wellformed(t):
+  TreeWF.proof(t)
