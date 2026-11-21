@@ -22,6 +22,7 @@ import ./proofs/validbag.bend as ValidBag
 import ./proofs/solvevalid.bend as SVProof
 import ./proofs/mainvalid.bend as MVProof
 import ./proofs/optimalvalue.bend as OVProof
+import ./proofs/optfold.bend as OQProof
 
 def Bool.disc(b: Bool) -> Type:
   match b:
