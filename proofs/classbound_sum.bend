@@ -14,6 +14,7 @@ import Base
 import ../src/solve_ref.bend as SolveRef
 import ../src/tree.bend as Tree
 import ../src/groups.bend as Groups
+import ../src/feedback.bend as Feedback
 import ./logic.bend as Logic
 import ./nat.bend as NatProof
 import ./optimalvalue.bend as OV
@@ -322,3 +323,35 @@ def CU.finish_cost(+inf: Nat, +S: +List<+List<Nat>>, +g: +List<Nat>,
       Tree.cost(Tree.Node{g, kids}, S), e1,
       Equal.sym(Nat, Tree.cost(Tree.Node{g, kids}, S),
                 Nat.add(Groups.len_words(S), CBN.CB.sum(cs)), tree_eq)))
+
+# The saturating sum is below the plain sum of its arguments.
+def CU.sat_add_le_add_go(+inf: Nat, +a: Nat, +b: Nat, ga: Bool, gb: Bool,
+    +ea: {ga == Nat.is_ge(a, inf) : Bool},
+    +eb: {gb == Nat.is_ge(b, inf) : Bool}) ->
+  {Nat.is_le(Feedback.Bool.case(Nat, ga, inf,
+     Feedback.Bool.case(Nat, gb, inf, Nat.add(a, b))), Nat.add(a, b))
+   == True{} : Bool}:
+  match ga:
+    case True{}:
+      +ge : {Nat.is_ge(a, inf) == True{} : Bool} =
+        Equal.sym(Bool, ga, Nat.is_ge(a, inf), ea)
+      +le_inf : {Nat.is_le(inf, a) == True{} : Bool} =
+        CBN.CB.is_le_of_ge(a, inf, ge)
+      NatProof.Nat.is_le_trans(inf, a, Nat.add(a, b), le_inf,
+        CBN.CB.is_le_add_self_r(a, b))
+    case False{}:
+      match gb:
+        case True{}:
+          +ge : {Nat.is_ge(b, inf) == True{} : Bool} =
+            Equal.sym(Bool, gb, Nat.is_ge(b, inf), eb)
+          +le_inf : {Nat.is_le(inf, b) == True{} : Bool} =
+            CBN.CB.is_le_of_ge(b, inf, ge)
+          NatProof.Nat.is_le_trans(inf, b, Nat.add(a, b), le_inf,
+            NatProof.Nat.is_le_add_self_l(a, b))
+        case False{}:
+          NatProof.Nat.is_le_refl(Nat.add(a, b))
+
+# The saturating sum is below the plain sum of its arguments.
+def CU.sat_add_le_add(+inf: Nat, +a: Nat, +b: Nat) ->
+  {Nat.is_le(SolveRef.sat_add(inf, a, b), Nat.add(a, b)) == True{} : Bool}:
+  CU.sat_add_le_add_go(inf, a, b, Nat.is_ge(a, inf), Nat.is_ge(b, inf), {==}, {==})

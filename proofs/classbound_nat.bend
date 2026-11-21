@@ -476,3 +476,56 @@ def CB.lt_eq_l(a: Nat, b: Nat, c: Nat, e: {b == c : Nat},
   {Nat.is_lt(c, a) == True{} : Bool}:
   %e : {Nat.is_lt(_, a) == True{} : Bool}
   p
+
+# Comparison with its arguments swapped.
+def CB.cmp_swap(c: Cmp) -> Cmp:
+  match c:
+    case LT{}:
+      GT{}
+    case EQ{}:
+      EQ{}
+    case GT{}:
+      LT{}
+
+def CB.cmp_swap_cmp(a: Nat, b: Nat) ->
+  {Nat.cmp(b, a) == CB.cmp_swap(Nat.cmp(a, b)) : Cmp}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bp:
+      {==}
+    case 1n+ap 0n:
+      {==}
+    case 1n+ap 1n+bp:
+      CB.cmp_swap_cmp(ap, bp)
+
+def CB.ge_swap_le_go(c: Cmp, +e: {Cmp.is_ge(c) == True{} : Bool}) ->
+  {Cmp.is_le(CB.cmp_swap(c)) == True{} : Bool}:
+  match c:
+    case LT{}:
+      Empty.absurd({Cmp.is_le(CB.cmp_swap(LT{})) == True{} : Bool},
+        Logic.Proof.false_ne_true(e))
+    case EQ{}:
+      {==}
+    case GT{}:
+      {==}
+
+# `a >= b` is `b <= a`.
+def CB.is_le_of_ge(+a: Nat, +b: Nat,
+    +e: {Nat.is_ge(a, b) == True{} : Bool}) ->
+  {Nat.is_le(b, a) == True{} : Bool}:
+  +eb : {Cmp.is_le(Nat.cmp(b, a))
+         == Cmp.is_le(CB.cmp_swap(Nat.cmp(a, b))) : Bool} =
+    Equal.cong(Cmp, Bool, Cmp.is_le, Nat.cmp(b, a),
+      CB.cmp_swap(Nat.cmp(a, b)), CB.cmp_swap_cmp(a, b))
+  Equal.trans(Bool, Cmp.is_le(Nat.cmp(b, a)),
+    Cmp.is_le(CB.cmp_swap(Nat.cmp(a, b))), True{}, eb,
+    CB.ge_swap_le_go(Nat.cmp(a, b), e))
+
+# `a <= a + b`.
+def CB.is_le_add_self_r(+a: Nat, +b: Nat) ->
+  {Nat.is_le(a, Nat.add(a, b)) == True{} : Bool}:
+  +h : {Nat.is_le(a, Nat.add(b, a)) == True{} : Bool} =
+    NatProof.Nat.is_le_add_self_l(b, a)
+  NatProof.Nat.is_le_eq_r(a, Nat.add(b, a), Nat.add(a, b),
+    NatProof.NatPrf.add_comm(b, a), h)
