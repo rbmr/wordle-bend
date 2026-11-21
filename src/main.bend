@@ -6,7 +6,7 @@
 # Both files hold one word per line. Leading and trailing whitespace on a line
 # is ignored, so CRLF line endings and blank lines are fine, and the rest of
 # the line is the word. A letter is the code point of one character, unchanged:
-# any alphabet works, and the bundled lower-case lists stay lower case.
+# any alphabet works, and the guesses and candidates must agree on case.
 import Base
 import ./tree.bend as Tree
 import ./solve.bend as Solve
