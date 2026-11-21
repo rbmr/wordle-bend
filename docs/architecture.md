@@ -57,7 +57,8 @@ tree. The output format is not settled yet. Not yet present.
 
 A standardised benchmark harness. It runs fixed inputs through the solver and reports wall-clock
 time, so runs are comparable across machines and across changes. Benchmarks measure performance
-only; they do not establish correctness. Not yet present.
+only; they do not establish correctness. The harness is present; the solver it drives is not yet.
+See [benchmarking.md](benchmarking.md).
 
 ## Data flow
 

@@ -22,10 +22,11 @@ a correctness guarantee that the earlier work could not give.
 
 ## Status
 
-**Scaffolding, in progress.** The repository currently contains only the project documentation,
-repository hooks, and a CI check for commit and branch conventions. There is no solver, no laws, no
-word data, no CLI, and no benchmark harness in the tree yet. Anything described below is planned
-layout, not an implemented feature.
+**Scaffolding, in progress.** The repository currently contains the project documentation, the
+repository hooks, a CI check for commit and branch conventions, and the standardised benchmark
+harness in `bench/`. There is no solver, no laws, no word data and no CLI yet, so the harness cannot
+run until those exist; anything below that is not the harness is planned layout, not an implemented
+feature.
 
 ## Planned layout
 
@@ -45,6 +46,8 @@ layout, not an implemented feature.
   and repository hygiene rules.
 - [docs/testing.md](docs/testing.md) — why correctness is established by laws and proofs rather than
   example tests, and how benchmarks differ from tests.
+- [docs/benchmarking.md](docs/benchmarking.md) — how the benchmark harness times the solver, how to
+  read `bench/results.csv`, and how to add a benchmark scenario.
 - [docs/licenses.md](docs/licenses.md) — the MIT licence for the code, and the provenance requirement
   for bundled word lists.
 
