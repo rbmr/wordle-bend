@@ -87,8 +87,9 @@ evaluated by the reference machine from the neutral accumulator, so a guess's re
 depend on the other guesses. The root list is split in halves down to a small grain, the halves are
 evaluated in parallel, and the per-guess results are folded with the reference `better`. That fold
 keeps the first strictly cheapest result, which is the reference's tie-breaking, so the tree is
-the same tree `src/solve_ref.bend` returns. The command line keeps using `src/solve.bend`; this
-module is the proven fast path. `PROOF.bend` states and proves the equality as `Par.solve_eq`.
+the same tree `src/solve_ref.bend` returns. The command line uses this module; `src/solve.bend`
+and `src/solve_ref.bend` stay in the tree as the specification, and `PROOF.bend` states and proves
+the equality as `Par.solve_eq`.
 
 ### `src/json.bend`
 
@@ -156,13 +157,13 @@ script. See [proofs.md](proofs.md) and [testing.md](testing.md).
 guesses file, candidates file
           │
           ▼
-     src/main.bend  ──►  src/solve.bend  ──►  src/solve_ref.bend
-          │                                        │
-          │                                        ▼
-          │                                 Tree (Maybe)
-          │                                        │
-          ▼                                        ▼
-   error on stderr                      src/json.bend ──► JSON on stdout
+     src/main.bend  ──►  src/solve_par.bend
+          │                 │  proved equal to src/solve.bend ──► src/solve_ref.bend
+          │                 ▼
+          │           Tree (Maybe)
+          │                 │
+          ▼                 ▼
+   error on stderr   src/json.bend ──► JSON on stdout
 
 LAWS.bend ── checked by PROOF.bend and proofs/ ──► validity and optimality claims
 ```

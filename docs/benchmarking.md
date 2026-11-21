@@ -7,8 +7,7 @@ fast", never "is it right": correctness is established by the laws in `LAWS.bend
 regression, not a win.
 
 The harness is in `bench/`, the solver is in `src/`, and the bundled lists are in `words/`. The
-reference solver is exact but exponential, so benchmark sizes must stay small until the faster
-search lands. [performance.md](performance.md) records the current status and the optimisation
+search is exact but exponential, so benchmark sizes must stay small. [performance.md](performance.md) records the current status and the optimisation
 plan.
 
 ## What is measured

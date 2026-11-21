@@ -2,13 +2,16 @@
 
 ## Current status
 
-The solver in `src/solve.bend` is the exact, exhaustive reference solver. It is verified correct for
-every input, including optimality, but it is not fast: for every candidate list it tries every
-usable guess, partitions the candidates by feedback, and solves every class recursively. The work
-grows exponentially with the number of candidates.
+The reference solver in `src/solve.bend` (through `src/solve_ref.bend`) is exact and exhaustive. It
+is verified correct for every input, including optimality, but it is not fast: for every candidate
+list it tries every usable guess, partitions the candidates by feedback, and solves every class
+recursively. The work grows exponentially with the number of candidates.
 
-At 10 candidates a run takes a few seconds. The full bundled lists in `words/` are therefore not
-practical with the reference solver. Speed is the remaining work; correctness is not.
+The command line uses `src/solve_par.bend`, which evaluates the root guess list in parallel and is
+proved to return exactly the reference tree (`Par.solve_eq` in `PROOF.bend`). The reference solver
+stays in the tree as the specification. The search is still exponential in the candidate count, so
+the full bundled lists in `words/` are not practical yet. Speed is the remaining work; correctness
+is not.
 
 ## Smoke baseline
 
