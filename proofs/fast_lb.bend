@@ -7,10 +7,11 @@
 # When the reference class fold produces a finite candidate cost `< inf`, every
 # class search at fuel `p` also has a finite cost `< inf`. By the validity
 # invariant (`mainvalid.bend`), the cost correspondence (`optcost.bend`) and the
-# size lower bound (`lb_size.bend`), each class cost is at least its word count,
-# so `lower_bound(|S|, groups)` is at most the guess's candidate cost and
-# `better` keeps the accumulator. When the candidate cost is not below `inf`,
-# `better` also keeps any accumulator whose cost is at most `inf`.
+# depth-two lower bound (`lb_twice.bend`), each class cost is at least
+# `2 * |ws| - max_mult(ws)`, so `lower_bound(|S|, groups)` is at most the
+# guess's candidate cost and `better` keeps the accumulator. When the candidate
+# cost is not below `inf`, `better` also keeps any accumulator whose cost is at
+# most `inf`.
 import Base
 import ../src/solve_fast.bend as SolveFast
 import ../src/solve_ref.bend as SolveRef
@@ -31,10 +32,107 @@ import ./optimalvalue.bend as OV
 import ./optfold.bend as Fold
 import ./optnode.bend as Node
 import ./optcost.bend as OC
-import ./lb_size.bend as LBProof
+import ./lb_twice.bend as LBProof2
+import ./lb_capacity.bend as CapProof
 import ./fast_step.bend as FStep
 import ./fast_better.bend as FB
 import ./par_elt.bend as ParElt
+
+# `SolveFast.word_mult` agrees with `LBProof2.LB.mult`.
+def FS.word_mult_eq(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
+  {SolveFast.word_mult(g, S) == LBProof2.LB.mult(g, S) : Nat}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{+h, +t}:
+      Equal.cong(Nat, Nat, x => Nat.add(SolveFast.hit_word(g, h), x),
+        SolveFast.word_mult(g, t), LBProof2.LB.mult(g, t),
+        FS.word_mult_eq(g, t))
+
+# Helper to combine both arguments of `Nat.max`.
+def FS.max_cong(+a1: Nat, +a2: Nat, +b1: Nat, +b2: Nat,
+    ea: {a1 == a2 : Nat}, eb: {b1 == b2 : Nat}) ->
+  {Nat.max(a1, b1) == Nat.max(a2, b2) : Nat}:
+  Equal.trans(Nat, Nat.max(a1, b1), Nat.max(a2, b1), Nat.max(a2, b2),
+    Equal.cong(Nat, Nat, x => Nat.max(x, b1), a1, a2, ea),
+    Equal.cong(Nat, Nat, y => Nat.max(a2, y), b1, b2, eb))
+
+# `SolveFast.max_mult` agrees with `LBProof2.LB.maxMult`.
+def FS.max_mult_eq(+S: +List<+List<Nat>>) ->
+  {SolveFast.max_mult(S) == LBProof2.LB.maxMult(S) : Nat}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{+h, +t}:
+      FS.max_cong(
+        SolveFast.word_mult(h, h <> t), LBProof2.LB.mult(h, h <> t),
+        SolveFast.max_mult(t), LBProof2.LB.maxMult(t),
+        FS.word_mult_eq(h, h <> t),
+        FS.max_mult_eq(t))
+
+# Subtracting zero leaves a number unchanged.
+def FS.sub_zero(b: Nat) -> {Nat.sub(b, 0n) == b : Nat}:
+  match b:
+    case 0n:
+      {==}
+    case 1n+bp:
+      {==}
+
+# `(c + b) - c = b`.
+def FS.add_sub_cancel_l(c: Nat, +b: Nat) ->
+  {Nat.sub(Nat.add(c, b), c) == b : Nat}:
+  match c:
+    case 0n:
+      FS.sub_zero(b)
+    case 1n+cp:
+      FS.add_sub_cancel_l(cp, b)
+
+# `(b + c) - c = b`.
+def FS.add_sub_cancel(+b: Nat, +c: Nat) ->
+  {Nat.sub(Nat.add(b, c), c) == b : Nat}:
+  Equal.trans(Nat,
+    Nat.sub(Nat.add(b, c), c),
+    Nat.sub(Nat.add(c, b), c),
+    b,
+    Equal.cong(Nat, Nat, x => Nat.sub(x, c),
+      Nat.add(b, c), Nat.add(c, b), NatProof.NatPrf.add_comm(b, c)),
+    FS.add_sub_cancel_l(c, b))
+
+# From `a <= b + c` conclude `a - c <= b`.
+def FS.sub_le_of_le_add(+a: Nat, +b: Nat, +c: Nat,
+    +e: {Nat.is_le(a, Nat.add(b, c)) == True{} : Bool}) ->
+  {Nat.is_le(Nat.sub(a, c), b) == True{} : Bool}:
+  +s : {Nat.is_le(Nat.sub(a, c), Nat.sub(Nat.add(b, c), c)) == True{} : Bool} =
+    CapProof.LB.sub_le_l(a, Nat.add(b, c), c, e)
+  NatProof.Nat.is_le_eq_r(
+    Nat.sub(a, c), Nat.sub(Nat.add(b, c), c), b,
+    FS.add_sub_cancel(b, c), s)
+
+# For any valid tree `t` over `ws`, `class_lb(ws) <= Tree.cost(t, ws)`.
+def FS.valid_cost_ge_class_lb(t: Tree.Tree, +G: +List<+List<Nat>>,
+    +ws: +List<+List<Nat>>, v: Tree.Valid(t, G, ws)) ->
+  {Nat.is_le(SolveFast.class_lb(ws), Tree.cost(t, ws)) == True{} : Bool}:
+  (vi, vd) = v
+  +m : Nat = Groups.len_words(ws)
+  +tc : Tree.Tree = t
+  +core : {Nat.is_le(Nat.add(m, m),
+             Nat.add(Tree.cost(tc, ws), LBProof2.LB.maxMult(ws)))
+           == True{} : Bool} =
+    LBProof2.LB.cost_plus_maxMult(tc, ws, vd)
+  +sub1 : {Nat.is_le(Nat.sub(Nat.add(m, m), LBProof2.LB.maxMult(ws)),
+             Tree.cost(tc, ws)) == True{} : Bool} =
+    FS.sub_le_of_le_add(Nat.add(m, m), Tree.cost(tc, ws),
+      LBProof2.LB.maxMult(ws), core)
+  +meq : {Nat.sub(Nat.add(m, m), SolveFast.max_mult(ws))
+          == Nat.sub(Nat.add(m, m), LBProof2.LB.maxMult(ws)) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.sub(Nat.add(m, m), x),
+      SolveFast.max_mult(ws), LBProof2.LB.maxMult(ws), FS.max_mult_eq(ws))
+  NatProof.Nat.is_le_eq_l(Tree.cost(tc, ws),
+    Nat.sub(Nat.add(m, m), LBProof2.LB.maxMult(ws)),
+    SolveFast.class_lb(ws),
+    Equal.sym(Nat, SolveFast.class_lb(ws),
+      Nat.sub(Nat.add(m, m), LBProof2.LB.maxMult(ws)), meq),
+    sub1)
 
 # Extract a single job's cost correspondence from `OC.c_flat`.
 def FS.child_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
@@ -47,32 +145,31 @@ def FS.child_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     OC.OC.c_flat(p, inf, G, ws <> Nil{}, Tuple{ble, Unit{}}, hz),
     j => u => j)
 
-# A finite child search at fuel `p` costs at least the number of words in the
-# class.
+# A finite child search at fuel `p` costs at least `class_lb(ws)`.
 def FS.child_size_le(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +ws: +List<+List<Nat>>,
     +ble: {Nat.is_le(Groups.len_words(ws), p) == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +clt: {Nat.is_lt(Sat.SB.child_cost(p, G, ws, inf), inf) == True{} : Bool}) ->
-  {Nat.is_le(Groups.len_words(ws), Sat.SB.child_cost(p, G, ws, inf))
+  {Nat.is_le(SolveFast.class_lb(ws), Sat.SB.child_cost(p, G, ws, inf))
    == True{} : Bool}:
   +cr : SolveRef.Best = FStep.FS.ref_run_at(p, inf, G, ws)
   ok : BO.BO.BestOK(inf, cr, G, ws) = MV.MV.main_ok(p, inf, G, ws, ble)
   v : Tree.Valid(Eval.Eval.tree_of(cr), G, ws) =
     SV.SV.valid_of_ok_lt(inf, cr, G, ws, clt, ok)
-  +le1 : {Nat.is_le(Groups.len_words(ws),
+  +le1 : {Nat.is_le(SolveFast.class_lb(ws),
             Tree.cost(Eval.Eval.tree_of(cr), ws)) == True{} : Bool} =
-    LBProof.LB.valid_cost_ge_size(Eval.Eval.tree_of(cr), G, ws, v)
+    FS.valid_cost_ge_class_lb(Eval.Eval.tree_of(cr), G, ws, v)
   cok : OC.OC.CJob(p, inf, G, ws) = FS.child_cost_ok(p, inf, G, ws, ble, hz)
   +le2 : {Nat.is_le(Tree.cost(Eval.Eval.tree_of(cr), ws),
             Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
     cok(clt)
-  NatProof.Nat.is_le_trans(Groups.len_words(ws),
+  NatProof.Nat.is_le_trans(SolveFast.class_lb(ws),
     Tree.cost(Eval.Eval.tree_of(cr), ws),
     Sat.SB.child_cost(p, G, ws, inf), le1, le2)
 
-# Summing the word counts over a list of finite classes sits below the plain
-# sum of the class costs.
+# Summing the class lower bounds over a list of finite classes sits below the
+# plain sum of the class costs.
 def FS.classes_size_le(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +groups: +List<Groups.Group>,
     bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
@@ -88,14 +185,14 @@ def FS.classes_size_le(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
         case Groups.Group{fb, ws}:
           (ble, bt) = bounds
           (clt, at) = all
-          +hd : {Nat.is_le(Groups.len_words(ws),
+          +hd : {Nat.is_le(SolveFast.class_lb(ws),
                    Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
             FS.child_size_le(p, inf, G, ws, ble, hz, clt)
           +tl : {Nat.is_le(SolveFast.class_words(rest),
                    CBN.CB.sum(Sat.SB.child_costs(p, G, rest, inf)))
                  == True{} : Bool} =
             FS.classes_size_le(p, inf, G, rest, bt, at, hz)
-          CBN.CB.is_le_add(Groups.len_words(ws),
+          CBN.CB.is_le_add(SolveFast.class_lb(ws),
             Sat.SB.child_cost(p, G, ws, inf),
             SolveFast.class_words(rest),
             CBN.CB.sum(Sat.SB.child_costs(p, G, rest, inf)), hd, tl)
