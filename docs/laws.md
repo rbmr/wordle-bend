@@ -140,7 +140,37 @@ law solve_optimal:
     & {Nat.is_le(Tree.cost(T, C), Tree.cost(T2, C)) == True{} : Bool})
 ```
 
-Open. It becomes provable when the search replaces the placeholder.
+Proved in `proofs/opt*.bend`. The argument compares the stored cost of the
+search with the cost of an arbitrary valid tree, and it has to compare the
+*tree* the search returns as well, so it proves three facts.
+
+The first is the lower bound: the stored cost is at most the cost of every
+valid tree. `proofs/optind.bend` is the induction on the fuel. At positive fuel
+one guess is evaluated by the class fold, so a single recursive call hands
+every class of every guess its own obligation at the smaller fuel; the classes
+are strictly shorter than the candidate list (`groups_smaller`), which is what
+supplies the smaller fuel. For a usable node the class children of the guess are
+the children of the tree (`proofs/cover*.bend`), so the node's cost splits into
+one guess per candidate plus the class costs, and the class results sit below
+those children. For an unusable node one class holds all of the candidates
+(`proofs/cover_groups.bend`), so its valid child is a tree for the same list and
+the same fuel applies to it.
+
+The second is finiteness: if a valid tree exists, the stored cost is below
+infinity. `proofs/optcomplete.bend` is the same fuel induction, but the classes
+of the *given* tree supply the child searches. A class of size `m` costs at most
+`m*m` (`proofs/classbound*.bend`), the classes partition the candidate list, and
+so the node cost fits `|S|*|S|`, which is below `inf`. The completeness
+induction and the lower bound both walk the given tree, and each step reads the
+same class subtrees out of it, so `proofs/optstrong.bend` merges the two walks:
+one class traversal delivers the cost comparison together with the size and cost
+bounds for the classes, and one structural recursion carries both facts.
+
+The third is the bookkeeping of the machine: `proofs/optcost.bend` shows that
+when the stored cost is finite the tree the search returns costs at most that
+cost, so the two numbers agree. `solve` then returns that tree, and the law
+chains the tree's cost against the stored cost and the stored cost against the
+given tree.
 
 ## 6. tree_roundtrip
 
