@@ -94,6 +94,19 @@ purpose of the proof work, not the import order.
 | `optcomplete.bend` | Completeness: if a valid tree exists, the stored cost is below infinity and fits the square of the candidate count, by the same fuel induction over the classes of the given tree. |
 | `optstrong.bend` | Merges the optimality and completeness walks: one traversal of the given tree produces both the cost comparison and the class size and cost bounds, ending in `Laws.solve_optimal`. |
 
+### Lower bounds
+
+Standalone facts about the cost of an arbitrary valid tree, stated about `Tree.cost` only.
+They are what a pruning rule needs to discard a guess or a class before searching it.
+
+| File | What it proves |
+| --- | --- |
+| `lb_size.bend` | Every depth the tree produces is absent or at least one, so a valid tree costs at least the number of candidates: `cost(T, S) >= |S|`. |
+| `lb_twice.bend` | Only the root guess can end a candidate at depth one, so `2|S| <= cost(T, S) + mult(root, S)`, with `mult` the number of candidates equal to the root guess. This is exact with duplicates; `mult <= maxMult(S)` and the duplicate-free `2|S| - 1` bound follow. |
+| `lb_capacity.bend` | The capacity bound function `capbound(n, k) = n + sum over j of (n - (1 + k + ... + k^(j-1)))+`, with the facts a pruning rule needs about the bound itself: it is monotone in `n`, its capacity sequence grows by at least one per level, and it is at least the depth bound `2n - 1`. |
+
+The soundness statement for the capacity bound, that a valid tree with no duplicate candidates whose nodes have at most `k` children costs at least `capbound(|S|, k)`, is not proved yet. It needs the feedback classes of every node together with the number of candidates each level of the tree can hold, because a tree-derived capacity is only an upper bound on the class sizes when the candidates of a node are distinct. `cost(T, S) >= capbound(|S|, k)` is therefore the next step, not a claim the development makes today.
+
 ## How the gate works
 
 `scripts/check-proofs.sh` is the gate. CI runs it, and contributors run the same script locally.

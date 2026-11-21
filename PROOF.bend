@@ -34,6 +34,9 @@ import ./proofs/optcost.bend as OQCostProof
 import ./proofs/optcomplete.bend as OQCompleteProof
 import ./proofs/eval.bend as EvalProof
 import ./proofs/optstrong.bend as OQStrongProof
+import ./proofs/lb_size.bend as LBProof
+import ./proofs/lb_twice.bend as LBProof2
+import ./proofs/lb_capacity.bend as LBProof3
 import ./src/solve_fast.bend as SolveFast
 import ./proofs/fast_step.bend as FSProof
 import ./proofs/fast_better.bend as FSPrune
