@@ -733,3 +733,36 @@ def Cover.cover(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
   CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
     Some{Tree.cost(t, S)}):
   Cover.bound(G, t)(S, entries, oracle, v)
+
+# A discriminator that is empty at `None`.
+def Cover.maybe_nat_none_disc(m: Maybe<&2, Nat>) -> Type:
+  match m:
+    case None{}:
+      Empty
+    case Some{n}:
+      Unit
+
+# `Some` is not `None`.
+def Cover.some_ne_none(+n: Nat, e: {Some{n} == None{} : Maybe<&2, Nat>}) -> Empty:
+  %e : Cover.maybe_nat_none_disc(_)
+  Unit{}
+
+# An infinite value cannot be below a number.
+def Cover.none_mle(a: Maybe<&2, Nat>, +y: Nat,
+    e: {a == None{} : Maybe<&2, Nat>},
+    p: CoverMaybe.Cover.MLe(a, Some{y})) -> Empty:
+  match a:
+    case None{}:
+      p
+    case Some{n}:
+      Empty.absurd(Empty, Cover.some_ne_none(n, e))
+
+# The dual of the cover lemma: if the best guess value is infinite, no valid
+# tree exists.
+def Cover.no_valid(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +entries: +List<+List<Maybe<&2, Nat>>>,
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
+    +e: {CoverOracle.Cover.BestValue(G, S, entries) == None{} : Maybe<&2, Nat>},
+    +t: Tree.Tree, v: Tree.Valid(t, G, S)) -> Empty:
+  Cover.none_mle(CoverOracle.Cover.BestValue(G, S, entries), Tree.cost(t, S), e,
+    Cover.cover(G, S, entries, oracle, t, v))
