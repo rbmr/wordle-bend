@@ -26,11 +26,11 @@ import ./solvevalid.bend as SV
 
 # The class obligations of one guess, only when the guess is usable. An
 # unusable guess contributes no class to the schedule, so it needs none.
-def MV.OksIf(b: Bool, +p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +g: +List<Nat>, +inf: Nat) -> Type:
+def MV.OksIf(b: Bool, +p: Nat, +G: +List<+List<Nat>>, +inf: Nat,
+    +groups: +List<Groups.Group>) -> Type:
   match b:
     case True{}:
-      SV.SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{}))
+      SV.SV.Oks(p, G, inf, groups)
     case False{}:
       Unit
 
@@ -131,7 +131,7 @@ def MV.guess_ok_go(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +g: +List<Nat>, +inf: Nat, best: SolveRef.Best, b: Bool,
     +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
     wg: Tree.WordIn(g, G),
-    oks: MV.OksIf(b, p, G, S, g, inf),
+    oks: MV.OksIf(b, p, G, inf, Groups.groups_build(g, S, Nil{})),
     ok: BO.BO.BestOK(inf, best, G, S)) ->
   BO.BO.BestOK(inf,
     Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, b, best),
@@ -154,9 +154,182 @@ def MV.guess_ok(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     b: Bool,
     +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
     wg: Tree.WordIn(g, G),
-    oks: MV.OksIf(b, p, G, S, g, inf),
+    oks: MV.OksIf(b, p, G, inf, Groups.groups_build(g, S, Nil{})),
     ok: BO.BO.BestOK(inf, best, G, S)) ->
   BO.BO.BestOK(inf,
     Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, b, best),
     G, S):
   MV.guess_ok_go(p, G, S, g, inf, best, b, eb, wg, oks, ok)
+
+# The proof obligation for one candidate list at a given fuel.
+def MV.Job(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>) -> Type:
+  BO.BO.BestOK(inf, SolveRef.step(fuel, SolveRef.mk_schedule(G, S), G, S, inf,
+    Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()), G, S)
+
+# The conjunction of the obligations over a list of candidate lists.
+def MV.Flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    jobs: +List<+List<+List<Nat>>>) -> Type:
+  match jobs:
+    case Nil{}:
+      Unit
+    case Con{S, t}:
+      MV.Job(fuel, inf, G, S) & MV.Flat(fuel, inf, G, t)
+
+# The class lists of one group list, in order.
+def MV.next_groups(+groups: +List<Groups.Group>) -> +List<+List<+List<Nat>>>:
+  match groups:
+    case Nil{}:
+      Nil{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          ws <> MV.next_groups(t)
+
+# The class lists of one guess, only when the guess is usable.
+def MV.classes_b(b: Bool, +groups: +List<Groups.Group>) -> +List<+List<+List<Nat>>>:
+  match b:
+    case True{}:
+      MV.next_groups(groups)
+    case False{}:
+      Nil{}
+
+def MV.classes(+g: +List<Nat>, +S: +List<+List<Nat>>) -> +List<+List<+List<Nat>>>:
+  MV.classes_b(Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+    Groups.groups_build(g, S, Nil{}))
+
+# The class lists of a guess list, in order.
+def MV.next_guess(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>)
+    -> +List<+List<+List<Nat>>>:
+  match G:
+    case Nil{}:
+      Nil{}
+    case Con{g, t}:
+      List.append(&2, +List<+List<Nat>>, MV.classes(g, S), MV.next_guess(t, S))
+
+# The classes of every job, in order.
+def MV.next_jobs(+G: +List<+List<Nat>>, +jobs: +List<+List<+List<Nat>>>)
+    -> +List<+List<+List<Nat>>>:
+  match jobs:
+    case Nil{}:
+      Nil{}
+    case Con{S, t}:
+      List.append(&2, +List<+List<Nat>>, MV.next_guess(G, S), MV.next_jobs(G, t))
+
+# Eliminate a pair with a continuation, so a computed pair is destructured once.
+def MV.use_pair(-R: Type, -A: Type, -B: Type, p: A & B,
+    k: A -> B -> R) -> R:
+  match p:
+    case (a, b):
+      k(a, b)
+
+# Split the conjunction at an append.
+def MV.flat_append(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +xs: +List<+List<+List<Nat>>>, +ys: +List<+List<+List<Nat>>>,
+    f: MV.Flat(fuel, inf, G, List.append(&2, +List<+List<Nat>>, xs, ys))) ->
+  MV.Flat(fuel, inf, G, xs) & MV.Flat(fuel, inf, G, ys):
+  match xs:
+    case Nil{}:
+      Tuple{Unit{}, f}
+    case Con{S, t}:
+      (j, fr) = f
+      MV.use_pair(MV.Flat(fuel, inf, G, S <> t) & MV.Flat(fuel, inf, G, ys),
+        MV.Flat(fuel, inf, G, t), MV.Flat(fuel, inf, G, ys),
+        MV.flat_append(fuel, inf, G, t, ys, fr),
+        ft => fys => Tuple{Tuple{j, ft}, fys})
+
+# The class obligations of one group list, read off the conjunction.
+def MV.oks_of_flat(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    f: MV.Flat(p, inf, G, MV.next_groups(groups))) -> SV.SV.Oks(p, G, inf, groups):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          (j, fr) = f
+          (j, MV.oks_of_flat(p, inf, G, t, fr))
+
+# The class obligations of a guess, when it is usable.
+def MV.oks_if(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>, b: Bool,
+    f: MV.Flat(p, inf, G, MV.classes_b(b, groups))) ->
+  MV.OksIf(b, p, G, inf, groups):
+  match b:
+    case True{}:
+      MV.oks_of_flat(p, inf, G, groups, f)
+    case False{}:
+      Unit{}
+
+# The per-guess class obligations of a guess list.
+def MV.ByGs(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    gs: +List<+List<Nat>>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case Con{g, t}:
+      MV.OksIf(Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), p, G, inf,
+        Groups.groups_build(g, S, Nil{}))
+      & MV.ByGs(p, inf, G, S, t)
+
+def MV.by_gs(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +gs: +List<+List<Nat>>,
+    f: MV.Flat(p, inf, G, MV.next_guess(gs, S))) -> MV.ByGs(p, inf, G, S, gs):
+  match gs:
+    case Nil{}:
+      Unit{}
+    case Con{g, t}:
+      MV.use_pair(MV.ByGs(p, inf, G, S, g <> t),
+        MV.Flat(p, inf, G, MV.classes(g, S)),
+        MV.Flat(p, inf, G, MV.next_guess(t, S)),
+        MV.flat_append(p, inf, G, MV.classes(g, S), MV.next_guess(t, S), f),
+        fg => ft =>
+          Tuple{MV.oks_if(p, inf, G, Groups.groups_build(g, S, Nil{}),
+             Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), fg),
+           MV.by_gs(p, inf, G, S, t, ft)})
+
+# The guess fold: every guess keeps the invariant.
+def MV.guesses_fold(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>, +best: SolveRef.Best,
+    f: MV.ByGs(p, inf, G, S, gs),
+    every: BO.BO.EveryIn(gs, G),
+    ok: BO.BO.BestOK(inf, best, G, S)) ->
+  BO.BO.BestOK(inf, Eval.Eval.guesses(1n+p, G, S, inf, gs, best), G, S):
+  match gs:
+    case Nil{}:
+      ok
+    case Con{g, t}:
+      (oks, ft) = f
+      (wg, every2) = every
+      MV.guesses_fold(inf, p, G, S, t, Eval.Eval.guess(p, G, S, g, inf, best), ft, every2,
+        MV.guess_ok(p, G, S, g, inf, best,
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, wg, oks, ok))
+
+# One step of the fuel: the machine fold is the specification fold.
+def MV.step_to_fold(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>,
+    f: MV.ByGs(p, inf, G, S, G)) -> MV.Job(1n+p, inf, G, S):
+  %Equal.sym(SolveRef.Best,
+      SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)),
+      Eval.Eval.guesses_step(p, G, S, inf, G, Eval.Eval.dummy_inf(inf)))
+    : BO.BO.BestOK(inf, _, G, S)
+  MV.guesses_fold(inf, p, G, S, G, Eval.Eval.dummy_inf(inf), f,
+    BO.BO.every_in_self(G), BO.BO.base_ok(inf, G, S))
+
+# Every job of a list gets its obligation from the conjunction at the classes.
+def MV.flat_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    f: MV.Flat(p, inf, G, MV.next_jobs(G, jobs))) -> MV.Flat(1n+p, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      MV.use_pair(MV.Flat(1n+p, inf, G, S <> t),
+        MV.Flat(p, inf, G, MV.next_guess(G, S)),
+        MV.Flat(p, inf, G, MV.next_jobs(G, t)),
+        MV.flat_append(p, inf, G, MV.next_guess(G, S), MV.next_jobs(G, t), f),
+        fS => ft =>
+          Tuple{MV.step_to_fold(inf, p, G, S, MV.by_gs(p, inf, G, S, G, fS)),
+           MV.flat_step(inf, p, G, t, ft)})
