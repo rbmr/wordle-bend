@@ -151,3 +151,101 @@ def FC.FinByGs(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
         Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
         Groups.groups_build(g, S, Nil{}))
       & FC.FinByGs(fuel, inf, G, S, t)
+
+# The empty guess list has an infinite search cost, which a valid tree rules out.
+def FC.fin_zero_empty(+inf: Nat, T: Tree.Tree, v: Tree.Valid(T, Nil{}, Nil{}),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
+          == True{} : Bool}) ->
+  {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(Nil{}, Nil{}),
+      Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+      Eval.Eval.dummy_zero())), inf) == True{} : Bool}
+  & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
+       SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n,
+       Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+      Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))) == True{} : Bool}:
+  match T:
+    case Tree.Node{g, kids}:
+      (ti, ad) = v
+      (wg, kidsin) = ti
+      Empty.absurd(
+        {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n,
+           SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{}, Nil{}, 0n,
+           Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), inf) == True{}
+         : Bool}
+        & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
+             SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{}, Nil{},
+             0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+            Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))) == True{}
+           : Bool},
+        Logic.Proof.false_ne_true(wg))
+
+# A nonempty guess list at zero fuel gives the candidate count, at cost zero.
+def FC.fin_zero_cons(+inf: Nat, +g: +List<Nat>, +t: +List<+List<Nat>>,
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})), inf)
+          == True{} : Bool}) ->
+  {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n,
+      SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
+      Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), inf) == True{} : Bool}
+  & {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
+       SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
+       Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+      Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{}))) == True{} : Bool}:
+  +eb : {SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+            Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
+          == Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+               Eval.Eval.dummy_inf(inf)) : SolveRef.Best} =
+    Eval.Eval.guesses_zero(g <> t, inf, g <> t, Eval.Eval.dummy_inf(inf))
+  +ec : {Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+              g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+              Eval.Eval.dummy_zero()))
+          == Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+               Eval.Eval.dummy_inf(inf))) : Nat} =
+    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+      SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+        Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t, Eval.Eval.dummy_inf(inf)), eb)
+  +ec2 : {Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+             Eval.Eval.dummy_inf(inf))) == 0n : Nat} =
+    Cost.OC.zero_first_cost(g <> t, inf, g, t, hz)
+  +ec3 : {Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+             g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+             Eval.Eval.dummy_zero())) == 0n : Nat} =
+    Equal.trans(Nat,
+      Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+        g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+        Eval.Eval.dummy_zero())),
+      Eval.Eval.cost_of(Eval.Eval.guesses(0n, g <> t, Nil{}, inf, g <> t,
+        Eval.Eval.dummy_inf(inf))), 0n, ec, ec2)
+  +f1 : {Nat.is_lt(Eval.Eval.cost_of(SolveRef.step(0n,
+              SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
+              0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), inf)
+          == True{} : Bool} =
+    CBN.CB.lt_eq_l(inf, 0n,
+      Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
+        g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+        Eval.Eval.dummy_zero())),
+      Equal.sym(Nat, Eval.Eval.cost_of(SolveRef.step(0n,
+        SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), 0n, ec3), hz)
+  +f2 : {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(0n,
+              SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
+              0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+             Nat.mul(Groups.len_words(Nil{}), Groups.len_words(Nil{})))
+          == True{} : Bool} =
+    NatProof.Nat.is_le_eq_l(0n, 0n, Eval.Eval.cost_of(SolveRef.step(0n,
+        SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+      Equal.sym(Nat, Eval.Eval.cost_of(SolveRef.step(0n,
+        SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), 0n, ec3),
+      NatProof.Nat.is_le_refl(0n))
+  (f1, f2)
+
+# Zero fuel at the empty candidate list.
+def FC.fin_zero_nil(+inf: Nat, +G: +List<+List<Nat>>) ->
+  FC.FinJob(0n, inf, G, Nil{}):
+  match G:
+    case Nil{}:
+      hz => T => v => FC.fin_zero_empty(inf, T, v, hz)
+    case Con{g, t}:
+      hz => T => v => FC.fin_zero_cons(inf, g, t, hz)
