@@ -333,3 +333,146 @@ def MV.flat_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
         fS => ft =>
           Tuple{MV.step_to_fold(inf, p, G, S, MV.by_gs(p, inf, G, S, G, fS)),
            MV.flat_step(inf, p, G, t, ft)})
+
+# The length bounds of the jobs at a level: every candidate list is at most
+# the fuel.
+def MV.Bounds(+fuel: Nat, jobs: +List<+List<+List<Nat>>>) -> Type:
+  match jobs:
+    case Nil{}:
+      Unit
+    case Con{S, t}:
+      {Nat.is_le(Groups.len_words(S), fuel) == True{} : Bool} & MV.Bounds(fuel, t)
+
+# The class bounds of one group list, from the guess list's bound.
+def MV.group_bounds(+p: Nat, +S: +List<+List<Nat>>, +groups: +List<Groups.Group>,
+    +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool},
+    sm: GM.GM.GroupsSmaller(S, groups)) -> MV.Bounds(p, MV.next_groups(groups)):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (lt, sm2) = sm
+          (NatProof.Nat.le_fuel(Groups.len_words(ws), Groups.len_words(S), p, lt, ele),
+           MV.group_bounds(p, S, t, ele, sm2))
+
+# The class bounds of one guess, when it is usable.
+def MV.guess_bounds(+p: Nat, +S: +List<+List<Nat>>, +groups: +List<Groups.Group>,
+    b: Bool, +eb: {b == Groups.groups_smaller(S, groups) : Bool},
+    +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool}) ->
+  MV.Bounds(p, MV.classes_b(b, groups)):
+  match b:
+    case True{}:
+      MV.group_bounds(p, S, groups, ele,
+        GM.GM.groups_smaller_sound(S, groups,
+          Equal.sym(Bool, True{}, Groups.groups_smaller(S, groups), eb)))
+    case False{}:
+      Unit{}
+
+# Build the bounds of an append from its two halves.
+def MV.bounds_append_build(+fuel: Nat, +xs: +List<+List<+List<Nat>>>,
+    +ys: +List<+List<+List<Nat>>>, fx: MV.Bounds(fuel, xs),
+    fy: MV.Bounds(fuel, ys)) ->
+  MV.Bounds(fuel, List.append(&2, +List<+List<Nat>>, xs, ys)):
+  match xs:
+    case Nil{}:
+      fy
+    case Con{S, t}:
+      (b, ft) = fx
+      (b, MV.bounds_append_build(fuel, t, ys, ft, fy))
+
+# The bounds of a guess list's classes.
+def MV.any_bounds(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool}) ->
+  MV.Bounds(p, MV.next_guess(G, S)):
+  match G:
+    case Nil{}:
+      Unit{}
+    case Con{g, t}:
+      MV.bounds_append_build(p, MV.classes(g, S), MV.next_guess(t, S),
+        MV.guess_bounds(p, S, Groups.groups_build(g, S, Nil{}),
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, ele),
+        MV.any_bounds(p, t, S, ele))
+
+# The bounds of the next level, from the bounds of this one.
+def MV.next_bounds(+p: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    bounds: MV.Bounds(1n+p, jobs)) -> MV.Bounds(p, MV.next_jobs(G, jobs)):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      (ble, bt) = bounds
+      MV.bounds_append_build(p, MV.next_guess(G, S), MV.next_jobs(G, t),
+        MV.any_bounds(p, G, S, ble), MV.next_bounds(p, G, t, bt))
+
+# A list of no length is empty.
+def MV.nil_of_len_zero(+S: +List<+List<Nat>>,
+    e: {Groups.len_words(S) == 0n : Nat}) -> {S == Nil{} : +List<+List<Nat>>}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{w, t}:
+      Empty.absurd({w <> t == Nil{} : +List<+List<Nat>>},
+        NatProof.NatPrf.zero_ne_succ(Groups.len_words(t),
+          Equal.sym(Nat, 1n+Groups.len_words(t), 0n, e)))
+
+# A job obligation, moved to an equal candidate list.
+def MV.job_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S1: +List<+List<Nat>>, +S2: +List<+List<Nat>>,
+    e: {S1 == S2 : +List<+List<Nat>>}, j: MV.Job(fuel, inf, G, S1)) ->
+  MV.Job(fuel, inf, G, S2):
+  %e : MV.Job(fuel, inf, G, _)
+  j
+
+# The empty candidate list at zero fuel.
+def MV.job_nil(+inf: Nat, +G: +List<+List<Nat>>) -> MV.Job(0n, inf, G, Nil{}):
+  %Equal.sym(SolveRef.Best,
+      SolveRef.step(0n, SolveRef.mk_schedule(G, Nil{}), G, Nil{}, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(0n, G, Nil{}, inf, G, Eval.Eval.dummy_inf(inf)),
+      Eval.Eval.guesses_zero(G, inf, G, Eval.Eval.dummy_inf(inf)))
+    : BO.BO.BestOK(inf, _, G, Nil{})
+  BO.BO.guesses_zero_ok(G, inf, G, Eval.Eval.dummy_inf(inf),
+    BO.BO.every_in_self(G), BO.BO.base_ok(inf, G, Nil{}))
+
+# A zero-length candidate list is empty, so its obligation is the base case.
+def MV.job_zero(+inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    le: {Nat.is_le(Groups.len_words(S), 0n) == True{} : Bool}) ->
+  MV.Job(0n, inf, G, S):
+  +eS : {S == Nil{} : +List<+List<Nat>>} =
+    MV.nil_of_len_zero(S, NatProof.Nat.eq_zero_of_le_zero(Groups.len_words(S), le))
+  MV.job_transport(0n, inf, G, Nil{}, S, Equal.sym(+List<+List<Nat>>, S, Nil{}, eS), MV.job_nil(inf, G))
+
+# Zero fuel: every job is empty.
+def MV.flat_zero(+inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    bounds: MV.Bounds(0n, jobs)) -> MV.Flat(0n, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      (ble, bt) = bounds
+      Tuple{MV.job_zero(inf, G, S, ble), MV.flat_zero(inf, G, t, bt)}
+
+# The fuel induction. One recursive call per level hands every class of every
+# job its obligation at the smaller fuel.
+def MV.flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    bounds: MV.Bounds(fuel, jobs)) -> MV.Flat(fuel, inf, G, jobs):
+  match fuel:
+    case 0n:
+      MV.flat_zero(inf, G, jobs, bounds)
+    case 1n+p:
+      MV.flat_step(inf, p, G, jobs,
+        MV.flat(p, inf, G, MV.next_jobs(G, jobs), MV.next_bounds(p, G, jobs, bounds)))
+
+# The obligation for the top-level candidate list.
+def MV.main_ok(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>,
+    le: {Nat.is_le(Groups.len_words(S), fuel) == True{} : Bool}) ->
+  MV.Job(fuel, inf, G, S):
+  MV.use_pair(MV.Job(fuel, inf, G, S), MV.Job(fuel, inf, G, S), Unit,
+    MV.flat(fuel, inf, G, S <> Nil{}, Tuple{le, Unit{}}),
+    j => u => j)
