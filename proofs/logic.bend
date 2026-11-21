@@ -36,3 +36,30 @@ def Proof.true_elim(b: Bool, p: Proof.is_true(b)) -> {b == True{} : Bool}:
       {==}
     case False{}:
       match p:
+
+# Conjunction on booleans.
+def Proof.and_true_l(a: Bool, b: Bool,
+    e: {Bool.and(a, b) == True{} : Bool}) -> {a == True{} : Bool}:
+  match a:
+    case True{}:
+      {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, Proof.false_ne_true(e))
+
+def Proof.and_true_r(a: Bool, b: Bool,
+    e: {Bool.and(a, b) == True{} : Bool}) -> {b == True{} : Bool}:
+  match a:
+    case True{}:
+      e
+    case False{}:
+      Empty.absurd({b == True{} : Bool}, Proof.false_ne_true(e))
+
+def Proof.and_intro(a: Bool, b: Bool,
+    ea: {a == True{} : Bool}, eb: {b == True{} : Bool}) ->
+  {Bool.and(a, b) == True{} : Bool}:
+  match a:
+    case True{}:
+      eb
+    case False{}:
+      Empty.absurd({Bool.and(False{}, b) == True{} : Bool},
+                   Proof.false_ne_true(ea))
