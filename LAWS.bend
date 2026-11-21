@@ -59,3 +59,5 @@ law tree_json_wellformed:
 law print_matches_render:
   for t: Tree.Tree
   {Json.print(t) == Spec.render(t) : String}
+
+# guard smoke test, not for merging
