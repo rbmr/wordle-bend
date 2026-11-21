@@ -80,6 +80,15 @@ count and is intended as the correctness reference, not the final fast path. See
 
 The entry point the laws talk about. It delegates to the reference solver in `src/solve_ref.bend`.
 
+### `src/solve_fast.bend`
+
+The bound-pruned search, proved equal to the reference solver. Each usable guess carries the lower
+bound `|S| + sum over classes of |class|`, which any tree rooted at that guess costs at least: the
+node costs one per candidate and every class costs at least its candidate count. When the best cost
+so far is at most that bound, the guess's block is skipped without searching its classes. The
+command line uses this module; `src/solve.bend` and `src/solve_ref.bend` stay in the tree as the
+specification, and `PROOF.bend` states and proves the equality as `Fast.solve_eq`.
+
 ### `src/solve_par.bend`
 
 Parallel evaluation of the root guess list, proved equal to the reference solver. Each guess is
@@ -87,9 +96,8 @@ evaluated by the reference machine from the neutral accumulator, so a guess's re
 depend on the other guesses. The root list is split in halves down to a small grain, the halves are
 evaluated in parallel, and the per-guess results are folded with the reference `better`. That fold
 keeps the first strictly cheapest result, which is the reference's tie-breaking, so the tree is
-the same tree `src/solve_ref.bend` returns. The command line uses this module; `src/solve.bend`
-and `src/solve_ref.bend` stay in the tree as the specification, and `PROOF.bend` states and proves
-the equality as `Par.solve_eq`.
+the same tree `src/solve_ref.bend` returns. `PROOF.bend` states and proves the equality as
+`Par.solve_eq`.
 
 ### `src/json.bend`
 
@@ -157,7 +165,7 @@ script. See [proofs.md](proofs.md) and [testing.md](testing.md).
 guesses file, candidates file
           │
           ▼
-     src/main.bend  ──►  src/solve_par.bend
+     src/main.bend  ──►  src/solve_fast.bend
           │                 │  proved equal to src/solve.bend ──► src/solve_ref.bend
           │                 ▼
           │           Tree (Maybe)

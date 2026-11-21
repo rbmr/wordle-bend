@@ -172,3 +172,7 @@ def solve_fast(+guesses: +List<+List<Nat>>,
   SolveRef.best_to_maybe(inf,
     step(n, schedule(guesses, candidates), guesses, candidates, inf,
          Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
+
+def solve(+guesses: +List<+List<Nat>>,
+          +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
+  solve_fast(guesses, candidates)

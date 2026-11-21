@@ -27,8 +27,9 @@ a correctness guarantee that the earlier work could not give.
 `src/solve.bend` is the exact, exhaustive specification: it is verified correct for every input,
 including optimality, but it is not fast. Its search is exponential and takes a few seconds at 10
 candidates, so the full bundled lists are not practical yet. The command line uses
-`src/solve_par.bend`, which evaluates the root guess list in parallel and is proved to return
-exactly the reference tree (`Par.solve_eq` in `PROOF.bend`). The command-line interface is
+`src/solve_fast.bend`, which prunes any guess whose lower bound cannot beat the best cost found so
+far and is proved to return the exact reference tree (`Fast.solve_eq` in `PROOF.bend`). The
+command-line interface is
 documented in [docs/cli.md](docs/cli.md), the bundled word lists are in `words/`, and the benchmark
 harness is in `bench/`. [docs/performance.md](docs/performance.md) records the current performance
 status and the plan for speeding the solver up.
