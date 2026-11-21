@@ -6,10 +6,11 @@
 #
 # For a guess `g` over a candidate list `S`, the reference builds one child per
 # class of the feedback partition and the node costs one per candidate plus the
-# children's costs. Every candidate costs at least one, so any tree rooted at
-# `g` costs at least
+# children's costs. In any valid subtree for a class `ws`, only the subtree's
+# root guess can end at depth one, so `cost(T, ws) >= 2 * |ws| - max_mult(ws)`
+# (`proofs/lb_twice.bend`). Any tree rooted at `g` therefore costs at least
 #
-#   bound(S, g) = |S| + sum over classes of |class|
+#   bound(S, g) = |S| + sum over classes ws of (2 * |ws| - max_mult(ws))
 #
 # The search evaluates the guesses in order and keeps the best cost. `better`
 # only replaces on a strictly lower cost, so ties keep the earlier guess. A
@@ -34,7 +35,36 @@ type Item is Data:
   Add{fb: +List<Feedback.Color>}
   End{}
 
-# The number of candidates in a class list.
+# One when the candidate equals the guess, zero otherwise.
+def hit_bool(b: Bool) -> Nat:
+  Feedback.Bool.case(Nat, b, 1n, 0n)
+
+def hit_word(+g: +List<Nat>, +w: +List<Nat>) -> Nat:
+  hit_bool(Feedback.word_eq(g, w))
+
+# The number of candidates in `S` equal to `g`, duplicates counted.
+def word_mult(+g: +List<Nat>, +S: +List<+List<Nat>>) -> Nat:
+  match S:
+    case Nil{}:
+      0n
+    case Con{+h, +t}:
+      Nat.add(hit_word(g, h), word_mult(g, t))
+
+# The largest multiplicity of any candidate in `S`.
+def max_mult(+S: +List<+List<Nat>>) -> Nat:
+  match S:
+    case Nil{}:
+      0n
+    case Con{+h, +t}:
+      Nat.max(word_mult(h, S), max_mult(t))
+
+# The depth-two lower bound on the cost of any valid tree for a class `ws`:
+# `2 * |ws| - max_mult(ws)` (`proofs/lb_twice.bend`).
+def class_lb(+ws: +List<+List<Nat>>) -> Nat:
+  +m = Groups.len_words(ws)
+  Nat.sub(Nat.add(m, m), max_mult(ws))
+
+# The sum of class lower bounds over a class list.
 def class_words(+groups: +List<Groups.Group>) -> Nat:
   match groups:
     case Nil{}:
@@ -42,11 +72,10 @@ def class_words(+groups: +List<Groups.Group>) -> Nat:
     case Con{gp, rest}:
       match gp:
         case Groups.Group{f, ws}:
-          Nat.add(Groups.len_words(ws), class_words(rest))
+          Nat.add(class_lb(ws), class_words(rest))
 
 # A lower bound on the cost of any tree rooted at a guess with these classes:
-# every candidate costs at least one, and the node itself costs one per
-# candidate.
+# the node costs one per candidate and each class costs at least `class_lb`.
 def lower_bound(+n: Nat, +groups: +List<Groups.Group>) -> Nat:
   Nat.add(n, class_words(groups))
 
