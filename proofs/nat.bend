@@ -236,3 +236,42 @@ def Nat.le_fuel(+m: Nat, +n: Nat, +fuel: Nat,
   {Nat.is_le(m, fuel) == True{} : Bool}:
   Nat.is_le_of_lt_succ(m, fuel,
     Nat.is_lt_le_trans(m, n, 1n+fuel, lt, le))
+
+# 9. Propositional forms of the numeric equalities.
+def NatPrf.is_eq_refl(a: Nat) -> {Nat.is_eq(a, a) == True{} : Bool}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      NatPrf.is_eq_refl(p)
+
+def NatPrf.succ_disc(n: Nat) -> Type:
+  match n:
+    case 0n:
+      Empty
+    case 1n+p:
+      Unit
+
+def NatPrf.zero_ne_succ(n: Nat, e: {0n == 1n+n : Nat}) -> Empty:
+  e2 = Equal.sym(Nat, 0n, 1n+n, e)
+  %e2 : NatPrf.succ_disc(_)
+  Unit{}
+
+def NatPrf.is_eq_true(a: Nat, b: Nat,
+    e: {Nat.is_eq(a, b) == True{} : Bool}) -> {a == b : Nat}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bp:
+      Empty.absurd({0n == 1n+bp : Nat}, Logic.Proof.false_ne_true(e))
+    case 1n+ap 0n:
+      Empty.absurd({1n+ap == 0n : Nat}, Logic.Proof.false_ne_true(e))
+    case 1n+ap 1n+bp:
+      Equal.cong(Nat, Nat, n => 1n+n, ap, bp, NatPrf.is_eq_true(ap, bp, e))
+
+def NatPrf.is_eq_sym(+a: Nat, +b: Nat,
+    e: {Nat.is_eq(a, b) == True{} : Bool}) ->
+  {Nat.is_eq(b, a) == True{} : Bool}:
+  +ab = NatPrf.is_eq_true(a, b, e)
+  %Equal.sym(Nat, a, b, ab) : {Nat.is_eq(b, _) == True{} : Bool}
+  NatPrf.is_eq_refl(b)
