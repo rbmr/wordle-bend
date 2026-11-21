@@ -950,3 +950,16 @@ def OQ.cost_le_valid(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     Node.OQ.AFlat(n, SolveRef.inf_of(n), G, Nil{}),
     OQ.a_flat(n, SolveRef.inf_of(n), G, C <> Nil{}, Tuple{le, Unit{}}, hz),
     fC => u => fC(T2, v))
+
+# The assembly of the law from the two halves of the invariant: the search
+# costs at most any valid tree, and the tree the search returns costs what the
+# search stored. The second half is the cost bookkeeping of the machine, which
+# is still open; this lemma names the exact fact the assembly needs.
+def OQ.optimal_of(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +T2: Tree.Tree, +T: Tree.Tree, v: Tree.Valid(T2, G, C),
+    +hcost: {Nat.is_le(Tree.cost(T, C),
+                Eval.Eval.cost_of(MV.MV.solve_best(G, C))) == True{} : Bool}) ->
+  {Nat.is_le(Tree.cost(T, C), Tree.cost(T2, C)) == True{} : Bool}:
+  NatProof.Nat.is_le_trans(Tree.cost(T, C),
+    Eval.Eval.cost_of(MV.MV.solve_best(G, C)), Tree.cost(T2, C), hcost,
+    OQ.cost_le_valid(G, C, T2, v))
