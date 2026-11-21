@@ -80,6 +80,16 @@ count and is intended as the correctness reference, not the final fast path. See
 
 The entry point the laws talk about. It delegates to the reference solver in `src/solve_ref.bend`.
 
+### `src/solve_par.bend`
+
+Parallel evaluation of the root guess list, proved equal to the reference solver. Each guess is
+evaluated by the reference machine from the neutral accumulator, so a guess's result does not
+depend on the other guesses. The root list is split in halves down to a small grain, the halves are
+evaluated in parallel, and the per-guess results are folded with the reference `better`. That fold
+keeps the first strictly cheapest result, which is the reference's tie-breaking, so the tree is
+the same tree `src/solve_ref.bend` returns. The command line keeps using `src/solve.bend`; this
+module is the proven fast path. `PROOF.bend` states and proves the equality as `Par.solve_eq`.
+
 ### `src/json.bend`
 
 Prints a tree as a JSON array. The encoding is:

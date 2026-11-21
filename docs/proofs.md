@@ -83,7 +83,6 @@ purpose of the proof work, not the import order.
 | `mainvalid.bend` | The validity invariant at every fuel for the whole fused search, ending in `Laws.solve_valid`. |
 
 ### Optimality
-
 | File | What it proves |
 | --- | --- |
 | `optnode.bend` | The node step of the optimality induction: for a usable root, the node cost splits into one guess per candidate plus the class costs, and the class results are below the children's costs. |
@@ -93,6 +92,14 @@ purpose of the proof work, not the import order.
 | `optcost.bend` | When the stored cost is finite it is the cost of the tree the search returns, because the saturating sum is then a plain sum and the returned tree is the node of class results. |
 | `optcomplete.bend` | Completeness: if a valid tree exists, the stored cost is below infinity and fits the square of the candidate count, by the same fuel induction over the classes of the given tree. |
 | `optstrong.bend` | Merges the optimality and completeness walks: one traversal of the given tree produces both the cost comparison and the class size and cost bounds, ending in `Laws.solve_optimal`. |
+
+### Parallel root
+
+| File | What it proves |
+| --- | --- |
+| `par_list.bend` | `take` and `drop` put a guess list back together, so the two parallel halves cover every guess exactly once, and appending two chunks' result lists is the result list of the appended chunks. |
+| `par_elt.bend` | Replaying one guess's independently computed result on a running accumulator is the guess's own step. The result carries the candidate and the comparison with the accumulator is exactly `better`'s, including the neutral result at infinity. |
+| `par_fold.bend` | Folding the per-guess results is the reference guess fold, the parallel split produces the same result list as the sequential one, and `SolvePar.solve` returns exactly `SolveRef.solve`'s tree. `PROOF.bend` states the last step as `Par.solve_eq`. |
 
 ## How the gate works
 

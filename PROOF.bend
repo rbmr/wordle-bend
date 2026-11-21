@@ -34,6 +34,8 @@ import ./proofs/optcost.bend as OQCostProof
 import ./proofs/optcomplete.bend as OQCompleteProof
 import ./proofs/eval.bend as EvalProof
 import ./proofs/optstrong.bend as OQStrongProof
+import ./src/solve_par.bend as SolvePar
+import ./proofs/par_fold.bend as ParFold
 
 def Bool.disc(b: Bool) -> Type:
   match b:
@@ -1556,3 +1558,11 @@ def Laws.solve_optimal(G, C, T2, v):
           EvalProof.Eval.cost_of(MVProof.MV.solve_best(guesses, cands)),
           Tree.cost(t2, cands), hcost, opt)
       (EvalProof.Eval.tree_of(MVProof.MV.solve_best(guesses, cands)), (es, le)))
+
+# The parallel root solver returns exactly the reference tree for every input.
+# The root guess list is split in halves, each half is evaluated by the
+# reference machine in parallel, and the per-guess results are folded with the
+# reference `better`, so the first minimal result wins exactly as in `solve`.
+def Par.solve_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
+  {SolvePar.solve(G, C) == SolveRef.solve(G, C) : Maybe<Tree.Tree>}:
+  ParFold.ParFold.solve_eq(G, C)
