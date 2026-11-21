@@ -276,7 +276,18 @@ def NatPrf.is_eq_sym(+a: Nat, +b: Nat,
   %Equal.sym(Nat, a, b, ab) : {Nat.is_eq(b, _) == True{} : Bool}
   NatPrf.is_eq_refl(b)
 
-# 10. Addition on the left, for regrouping sums of costs.
+# 10. The predecessor, to cancel a successor on both sides of an equality.
+def NatPrf.pred(n: Nat) -> Nat:
+  match n:
+    case 0n:
+      0n
+    case 1n+p:
+      p
+
+def NatPrf.pred_succ(a: Nat, b: Nat, e: {1n+a == 1n+b : Nat}) -> {a == b : Nat}:
+  Equal.cong(Nat, Nat, NatPrf.pred, 1n+a, 1n+b, e)
+
+# 11. Addition on the left, for regrouping sums of costs.
 def NatPrf.add_succ(a: Nat, b: Nat) ->
   {Nat.add(a, 1n+b) == 1n+Nat.add(a, b) : Nat}:
   match a:
