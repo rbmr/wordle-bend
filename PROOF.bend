@@ -416,3 +416,106 @@ def Color.eq_trans(+a: Feedback.Color, +b: Feedback.Color, +c: Feedback.Color,
   eac = Equal.trans(Feedback.Color, a, b, c, Color.eq_true(a, b, eab), Color.eq_true(b, c, ebc))
   %eac : {Feedback.Color.eq(a, _) == True{} : Bool}
   Color.eq_refl(a)
+
+def SolveProof.all_if_true_l(rest: Unit -> Bool, hit: Bool,
+    e: {List.all.if(rest, hit) == True{} : Bool}) -> {hit == True{} : Bool}:
+  match hit:
+    case True{}:
+      {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, Bool.false_ne_true(e))
+
+def SolveProof.all_if_true_r(rest: Unit -> Bool, hit: Bool,
+    e: {List.all.if(rest, hit) == True{} : Bool}) -> {rest(Unit{}) == True{} : Bool}:
+  match hit:
+    case True{}:
+      e
+    case False{}:
+      Empty.absurd({rest(Unit{}) == True{} : Bool}, Bool.false_ne_true(e))
+
+def Nat.succ_ne_zero(n: Nat, e: {1n+n == 0n : Nat}) -> Empty:
+  Nat.zero_ne_succ(n, Equal.sym(Nat, 1n+n, 0n, e))
+
+def SolveProof.all_pairs(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>) -> Bool:
+  List.all(&1, Feedback.Color & Feedback.Color, Feedback.pair_color_eq,
+           List.zip(&2, Feedback.Color, &2, Feedback.Color, a, b))
+
+def SolveProof.all_if_intro(rest: Unit -> Bool, hit: Bool,
+    h: {hit == True{} : Bool}, t: {rest(Unit{}) == True{} : Bool}) ->
+  {List.all.if(rest, hit) == True{} : Bool}:
+  match hit:
+    case True{}:
+      t
+    case False{}:
+      Empty.absurd({List.all.if(rest, False{}) == True{} : Bool}, Bool.false_ne_true(h))
+
+def SolveProof.all_pairs_trans(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>,
+    +c: +List<Feedback.Color>,
+    +lab: {List.length(&2, Feedback.Color, a) == List.length(&2, Feedback.Color, b) : Nat},
+    +lbc: {List.length(&2, Feedback.Color, b) == List.length(&2, Feedback.Color, c) : Nat},
+    +eab: {SolveProof.all_pairs(a, b) == True{} : Bool},
+    +ebc: {SolveProof.all_pairs(b, c) == True{} : Bool}) ->
+  {SolveProof.all_pairs(a, c) == True{} : Bool}:
+  match a b c:
+    case Nil{} _ _:
+      {==}
+    case Con{+a0, +at} Nil{} Nil{}:
+      {==}
+    case Con{+a0, +at} Nil{} Con{+c0, +ct}:
+      Empty.absurd({SolveProof.all_pairs(a0 <> at, c0 <> ct) == True{} : Bool},
+                   Nat.succ_ne_zero(List.length(&2, Feedback.Color, at), lab))
+    case Con{+a0, +at} Con{+b0, +bt} Nil{}:
+      {==}
+    case Con{+a0, +at} Con{+b0, +bt} Con{+c0, +ct}:
+      +lab_t : {List.length(&2, Feedback.Color, at) == List.length(&2, Feedback.Color, bt) : Nat} =
+        Equal.cong(Nat, Nat, Nat.pred,
+                   List.length(&2, Feedback.Color, a0 <> at),
+                   List.length(&2, Feedback.Color, b0 <> bt), lab)
+      +lbc_t : {List.length(&2, Feedback.Color, bt) == List.length(&2, Feedback.Color, ct) : Nat} =
+        Equal.cong(Nat, Nat, Nat.pred,
+                   List.length(&2, Feedback.Color, b0 <> bt),
+                   List.length(&2, Feedback.Color, c0 <> ct), lbc)
+      +eq_ab : {Feedback.Color.eq(a0, b0) == True{} : Bool} =
+        SolveProof.all_if_true_l(u => SolveProof.all_pairs(at, bt), Feedback.Color.eq(a0, b0), eab)
+      +tail_ab : {SolveProof.all_pairs(at, bt) == True{} : Bool} =
+        SolveProof.all_if_true_r(u => SolveProof.all_pairs(at, bt), Feedback.Color.eq(a0, b0), eab)
+      +eq_bc : {Feedback.Color.eq(b0, c0) == True{} : Bool} =
+        SolveProof.all_if_true_l(u => SolveProof.all_pairs(bt, ct), Feedback.Color.eq(b0, c0), ebc)
+      +tail_bc : {SolveProof.all_pairs(bt, ct) == True{} : Bool} =
+        SolveProof.all_if_true_r(u => SolveProof.all_pairs(bt, ct), Feedback.Color.eq(b0, c0), ebc)
+      +eq_ac : {Feedback.Color.eq(a0, c0) == True{} : Bool} =
+        Color.eq_trans(a0, b0, c0, eq_ab, eq_bc)
+      +tail_ac : {SolveProof.all_pairs(at, ct) == True{} : Bool} =
+        SolveProof.all_pairs_trans(at, bt, ct, lab_t, lbc_t, tail_ab, tail_bc)
+      SolveProof.all_if_intro(u => SolveProof.all_pairs(at, ct), Feedback.Color.eq(a0, c0),
+                              eq_ac, tail_ac)
+
+def FeedbackProof.feedback_eq_trans(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>,
+    +c: +List<Feedback.Color>,
+    +eab: {Feedback.feedback_eq(a, b) == True{} : Bool},
+    +ebc: {Feedback.feedback_eq(b, c) == True{} : Bool}) ->
+  {Feedback.feedback_eq(a, c) == True{} : Bool}:
+  +len_ab : {List.length(&2, Feedback.Color, a) == List.length(&2, Feedback.Color, b) : Nat} =
+    Nat.is_eq_true(List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b),
+      Bool.and_true_l(Nat.is_eq(List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b)),
+                      SolveProof.all_pairs(a, b), eab))
+  +len_bc : {List.length(&2, Feedback.Color, b) == List.length(&2, Feedback.Color, c) : Nat} =
+    Nat.is_eq_true(List.length(&2, Feedback.Color, b), List.length(&2, Feedback.Color, c),
+      Bool.and_true_l(Nat.is_eq(List.length(&2, Feedback.Color, b), List.length(&2, Feedback.Color, c)),
+                      SolveProof.all_pairs(b, c), ebc))
+  +len_ac : {List.length(&2, Feedback.Color, a) == List.length(&2, Feedback.Color, c) : Nat} =
+    Equal.trans(Nat, List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b),
+                List.length(&2, Feedback.Color, c), len_ab, len_bc)
+  +all_ac : {SolveProof.all_pairs(a, c) == True{} : Bool} =
+    SolveProof.all_pairs_trans(a, b, c, len_ab, len_bc,
+      Bool.and_true_r(Nat.is_eq(List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b)),
+                      SolveProof.all_pairs(a, b), eab),
+      Bool.and_true_r(Nat.is_eq(List.length(&2, Feedback.Color, b), List.length(&2, Feedback.Color, c)),
+                      SolveProof.all_pairs(b, c), ebc))
+  %Equal.sym(Nat, List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, c), len_ac) : {
+    Bool.and(Nat.is_eq(_, List.length(&2, Feedback.Color, c)), SolveProof.all_pairs(a, c))
+    == True{} : Bool}
+  %Equal.sym(Bool, Nat.is_eq(List.length(&2, Feedback.Color, c), List.length(&2, Feedback.Color, c)),
+             True{}, Nat.is_eq_refl(List.length(&2, Feedback.Color, c))) : {
+    Bool.and(_, SolveProof.all_pairs(a, c)) == True{} : Bool}
+  all_ac
