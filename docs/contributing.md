@@ -70,7 +70,8 @@ does not get a non-conforming change merged.
 
 ## Laws and proofs
 
-Laws are stated in `LAWS.bend` and proved in `PROOF.bend`. Run the proof gate before pushing:
+Laws are stated in `LAWS.bend` and proved in `PROOF.bend`, with helper lemmas under `proofs/`. All
+eight laws are proved. Run the proof gate before pushing:
 
 ```sh
 scripts/check-proofs.sh
@@ -80,7 +81,7 @@ CI runs the same script, so a local pass and a green `proofs` check mean the sam
 requires a proof for every law, except the laws named in `PENDING_LAWS` at the repository root.
 
 `PENDING_LAWS` lists laws that are stated but intentionally unproved, one name per line. Blank
-lines and `#` comments are ignored.
+lines and `#` comments are ignored. It is empty now, and the target is to keep it empty.
 
 - Adding a name to `PENDING_LAWS` needs an explicit explanation in the pull request description:
   which law, why it cannot be proved yet, and what will make it provable.
@@ -89,7 +90,12 @@ lines and `#` comments are ignored.
 - The list should only shrink over time. Remove a name in the same pull request that adds its proof.
 - The target is an empty list.
 
-See [testing.md](testing.md) for what the gate checks and how the two modes differ.
+See [testing.md](testing.md) for what the gate checks, [proofs.md](proofs.md) for the proof modules,
+and [laws.md](laws.md) for the laws themselves.
+
+A performance change must keep every law proved. A faster solver that weakens a law, leaves a proof
+broken, or moves a law into `PENDING_LAWS` is not an optimisation. See
+[performance.md](performance.md).
 
 ## Pull requests
 
