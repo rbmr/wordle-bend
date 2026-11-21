@@ -15,7 +15,7 @@ Two properties distinguish this solver from a heuristic one:
   tree is valid and optimal for every input. The guarantee is part of the artifact, not a claim
   checked by a handful of examples.
 
-The solver is written in [Bend](https://github.com/HigherOrderCO/Bend) for HVM, a runtime built for
+The solver is written in [Bend](https://github.com/bendlang/bend) for HVM, a runtime built for
 massive parallelism across GPUs and CPUs. The earlier solver for this problem was written in Rust
 and was unverified. This project succeeds it with the same goal of practical wall-clock speed, plus
 a correctness guarantee that the earlier work could not give.
@@ -38,14 +38,25 @@ Install Bend 2.0.40 and clang 19 or newer, then from the repository root:
 ```sh
 # requires Bend 2.0.40 and clang 19+
 bend src/main.bend -o wordle-bend
-head -n 10 words/candidates.txt > my-words.txt
-./wordle-bend --guesses my-words.txt --candidates my-words.txt
+
+# a small slice of the bundled lists: 6 candidates and 40 guesses
+head -n 6 words/candidates.txt > c.txt
+head -n 40 words/guesses.txt > g.txt
+./wordle-bend --guesses g.txt --candidates c.txt
+
+# a two-word list of your own, used as both the guesses and the candidates
 printf 'abc\nabd\n' > my-words.txt
 ./wordle-bend --guesses my-words.txt --candidates my-words.txt
 ```
 
-The first run uses a small sample of the bundled lists. The second uses a two-word list of your own,
-as both the guesses and the candidates, and prints
+The first run prints the tree for the six candidates in the slice; the first 40 lines of the
+bundled guesses include all six:
+
+```text
+[[65,66,65,84,69],[[[2,2,2,0,0],[[65,66,65,67,75],[]]],[[2,2,2,0,2],[[65,66,65,83,69],[]]],[[2,2,0,0,1],[[65,66,66,69,89],[]]],[[2,2,0,1,0],[[65,66,66,79,84],[]]],[[2,2,0,0,0],[[65,66,72,79,82],[]]]]]
+```
+
+The second run uses the two-word list as both the guesses and the candidates, and prints
 `[[97,98,99],[[[2,2,0],[[97,98,100],[]]]]]`, the tree for `abc` and `abd`. The reference solver is
 exponential, so keep both lists small until the faster search lands.
 
