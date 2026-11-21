@@ -775,3 +775,82 @@ def SV.epi(-R: Type, +p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                       SV.epi_join(R, p, G, S, g, inf, fb, ws, rest,
                         CH.CH.children(p, G, S, full, inf),
                         ti, kik_rest, bh, bag_rest, eh, eq_rest, k))))
+
+# Transport a group membership along an equality of group lists.
+def SV.in_groups_transport(+a: +List<Groups.Group>, +b: +List<Groups.Group>,
+    e: {a == b : +List<Groups.Group>}, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, m: Grp.Grp.InGroups(w, a)) -> Grp.Grp.InGroups(w, b):
+  %e : Grp.Grp.InGroups(w, _)
+  m
+
+# Transport a word membership along an equality of word lists.
+def SV.in_words_transport(+a: +List<+List<Nat>>, +b: +List<+List<Nat>>,
+    e: {a == b : +List<+List<Nat>>}, +w: +List<Nat>, m: Grp.Grp.InWords(w, a)) ->
+  Grp.Grp.InWords(w, b):
+  %e : Grp.Grp.InWords(w, _)
+  m
+
+# The fact half of a bag lookup.
+def SV.first(+g: +List<Nat>, +kids: +List<Tree.Child>, +w: +List<Nat>,
+    r: VB.VB.Fact(g, kids, w) & VB.VB.Bag(g, kids)) -> VB.VB.Fact(g, kids, w):
+  (a, b) = r
+  a
+
+# The fact of one candidate, from the bag.
+def SV.cand_fact_go(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +w: +List<Nat>, b: Bool, +eb: {b == Feedback.word_eq(g, w) : Bool},
+    +groups: +List<Groups.Group>, +S0: +List<+List<Nat>>, +pre: +List<+List<Nat>>,
+    +t: +List<+List<Nat>>,
+    +ePre: {S0 == List.append(&2, +List<Nat>, pre, w <> t) : +List<+List<Nat>>},
+    +eG: {groups == Groups.groups_build(g, S0, Nil{}) : +List<Groups.Group>},
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, x =>
+      {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, x)) == True{} : Bool}>>,
+    +eWords: {VB.VB.words(g, kids, bag) == SV.flatWords(groups) : +List<+List<Nat>>}) ->
+  VB.VB.Fact(g, kids, w):
+  match b:
+    case True{}:
+      SV.fact_guess(g, kids, w, Equal.sym(Bool, b, Feedback.word_eq(g, w), eb))
+    case False{}:
+      iw : Grp.Grp.InWords(w, S0) =
+        %Equal.sym(+List<+List<Nat>>, S0,
+           List.append(&2, +List<Nat>, pre, w <> t), ePre)
+        : Grp.Grp.InWords(w, _)
+        SV.in_words_at(pre, w, t)
+      inG : Grp.Grp.InGroups(w, groups) =
+        SV.in_groups_transport(Groups.groups_build(g, S0, Nil{}), groups,
+          Equal.sym(+List<Groups.Group>, groups, Groups.groups_build(g, S0, Nil{}), eG),
+          w, Feedback.feedback(g, w),
+          Grp.Grp.groups_build_contains(g, S0, w, iw,
+            Equal.sym(Bool, b, Feedback.word_eq(g, w), eb)))
+      eW : {VB.VB.words(g, kids, bag) == SV.flatWords(groups) : +List<+List<Nat>>} = eWords
+      SV.first(g, kids, w,
+        VB.VB.take(g, kids, bag, w,
+          SV.in_words_transport(SV.flatWords(groups), VB.VB.words(g, kids, bag),
+            Equal.sym(+List<+List<Nat>>, VB.VB.words(g, kids, bag),
+              SV.flatWords(groups), eW),
+            w, SV.flat_mem(groups, w, inG))))
+
+# Every candidate has a depth in the node.
+def SV.all_depth(+p: Nat, +G: +List<+List<Nat>>, +S0: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +groups: +List<Groups.Group>,
+    +kids: +List<Tree.Child>,
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, x =>
+      {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, x)) == True{} : Bool}>>,
+    +eWords: {VB.VB.words(g, kids, bag) == SV.flatWords(groups) : +List<+List<Nat>>},
+    +eG: {groups == Groups.groups_build(g, S0, Nil{}) : +List<Groups.Group>},
+    +S: +List<+List<Nat>>, +pre: +List<+List<Nat>>,
+    +ePre: {S0 == List.append(&2, +List<Nat>, pre, S) : +List<+List<Nat>>}) ->
+  Tree.AllHaveDepth(Tree.Node{g, kids}, S):
+  match S:
+    case Nil{}:
+      Unit{}
+    case Con{w, t}:
+      (SV.cand_fact_go(g, kids, w, Feedback.word_eq(g, w), {==},
+         groups, S0, pre, t, ePre, eG, bag, eWords),
+       SV.all_depth(p, G, S0, g, inf, groups, kids, bag, eWords, eG, t,
+          List.append(&2, +List<Nat>, pre, w <> Nil{}),
+          Equal.trans(+List<+List<Nat>>, S0,
+            List.append(&2, +List<Nat>, pre, w <> t),
+            List.append(&2, +List<Nat>,
+              List.append(&2, +List<Nat>, pre, w <> Nil{}), t),
+            ePre, SV.append_singleton(pre, w, t))))
