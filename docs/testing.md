@@ -27,7 +27,7 @@ rather than a claim about a run.
 | `feedback_length` | proved |
 | `solve_valid` | pending: the solver is a placeholder |
 | `solve_optimal` | pending: the solver is a placeholder |
-| `tree_roundtrip` | pending: the JSON parser is not implemented |
+| `tree_roundtrip` | proved |
 
 The three proved laws have a `def Laws.<name>` in `PROOF.bend`. The other three are listed in
 `PENDING_LAWS`, which allows them to stay open until their implementation exists.

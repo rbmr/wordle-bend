@@ -17,7 +17,7 @@ proven by `def Laws.foo`. A law with no proof is an open claim, and
 `src/feedback.bend` defines `Color`, the feedback function and `AllGreen`.
 `src/tree.bend` defines `Tree`, `depth`, `Valid` and `cost`.
 `src/solve.bend` holds the placeholder solver. `src/json.bend` prints a tree as
-JSON; its parser is not implemented yet.
+JSON and parses that text back.
 
 ## Feedback
 
@@ -140,6 +140,10 @@ law tree_roundtrip:
   {Json.parse(Json.print(t)) == Some{t} : Maybe<Tree.Tree>}
 ```
 
-Open. `Json.print` is implemented; `Json.parse` is still a rejecting stub, so
-this law is not true yet. It stays stated rather than weakened. It is
-expressible, so there is no `TODO(spec)` item.
+Proved in `PROOF.bend`. The printer writes the tree as a right-nested JSON array
+and the parser is a state machine over its characters. The proof is an
+induction on the tree: `KidsProof.body` proves that the body of a kids array
+parses back to exactly the same children, and the number and feedback traces
+prove that each unary letter and colour is consumed with its terminator. The
+top-level `TreeProof.parsed` chains those traces from `MStart` and `Laws.tree_roundtrip`
+applies `finish`, which keeps the tree only when no text remains.
