@@ -22,6 +22,9 @@ import ./proofs/validbag.bend as ValidBag
 import ./proofs/solvevalid.bend as SVProof
 import ./proofs/mainvalid.bend as MVProof
 import ./proofs/optimalvalue.bend as OVProof
+import ./proofs/classbound.bend as CBProof
+import ./proofs/classbound_kids.bend as CBKids
+import ./proofs/classbound_sum.bend as CBSum
 import ./proofs/optfold.bend as OQProof
 import ./proofs/optsum.bend as OQSumProof
 import ./proofs/optguess.bend as OQGuessProof
