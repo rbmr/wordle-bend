@@ -97,39 +97,12 @@ A performance change must keep every law proved. A faster solver that weakens a 
 broken, or moves a law into `PENDING_LAWS` is not an optimisation. See
 [performance.md](performance.md).
 
-## Protected files
-
-Some files define what the program must do and how that is measured. A pull request that changes
-any of them fails the `protected-files` check:
-
-- `LAWS.bend` states the goal, and `scripts/check-proofs.sh` is the gate that proves it. Weakening
-  either one makes every other check meaningless.
-- `PENDING_LAWS` records the laws that are allowed to remain unproved. A name may be removed, but
-  no name may be added.
-- `bench/run.sh`, `bench/sample.sh`, `bench/start.sh`, `bench/status.sh` and `bench/record.sh` are
-  the benchmark harness. Changing them changes the numbers that every later result is compared
-  against.
-- `bench/results.csv` holds measured runs. Existing lines may not be changed or removed. New rows
-  may only be appended at the end.
-- `.github/workflows/*.yml` and `.githooks/*` enforce the checks, locally and in CI. This includes
-  the pinned toolchain versions and the Bend checksum in the `env:` block of
-  `.github/workflows/proofs.yml`.
-- `scripts/guard-protected.sh` is the guard itself.
-
-The guard runs from the base branch's copy of the workflow and reads the pull request as git
-objects. It never checks out the pull request's tree or runs its code. Documentation is not
-protected, so `docs/` can be edited freely, but a statement may not be removed from `LAWS.bend`.
-
-Changing a protected file is the maintainer's job. The maintainer lifts the `protected-files`
-requirement from the branch protection for that one merge, merges the change, and restores the
-requirement immediately afterwards.
-
 ## Pull requests
 
 1. Push the branch and open a pull request into `main` with `gh pr create`.
 2. The PR title is itself a conventional commit, in the same format as a commit subject.
-3. CI checks the PR title, every commit subject in the branch, the head branch name, the proof
-   gate, and that no protected file is changed.
+3. CI checks the PR title, every commit subject in the branch, the head branch name, and the proof
+   gate.
 4. Merge with a merge commit only:
 
    ```sh
