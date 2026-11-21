@@ -34,6 +34,9 @@ import ./proofs/optcost.bend as OQCostProof
 import ./proofs/optcomplete.bend as OQCompleteProof
 import ./proofs/eval.bend as EvalProof
 import ./proofs/optstrong.bend as OQStrongProof
+import ./proofs/lb_size.bend as LBProof
+import ./proofs/lb_twice.bend as LBProof2
+import ./proofs/lb_capacity.bend as LBProof3
 import ./src/solve_par.bend as SolvePar
 import ./proofs/par_fold.bend as ParFold
 

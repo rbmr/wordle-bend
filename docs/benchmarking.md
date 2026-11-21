@@ -81,6 +81,10 @@ between commits as noise rather than signal.
 
 ## Running
 
+`bench/run.sh` is for tiny checks that finish in seconds. Anything larger goes through
+`bench/start.sh` (see [Detached runs](#detached-runs)), which runs `bench/run.sh` with a hard time
+limit in the background.
+
 From the repository root:
 
 ```sh
@@ -120,6 +124,89 @@ is already running remotely, and rsyncs the tree (without `.git` and without `be
 to `~/wordle-bend-bench` on the target. It runs `bench/run.sh` there with the same options, passing
 the local commit hash as `BENCH_COMMIT`, then appends the remote rows to the local CSV. `timeout`
 guards the ssh calls; `BENCH_SSH_TIMEOUT` sets the benchmark call's limit in seconds (default 3600).
+
+## Detached runs
+
+Anything that is not tiny goes through `bench/start.sh`, which starts the benchmark in the
+background, records it under `bench/runs/` and returns at once. Nothing waits on the run.
+
+```sh
+bench/start.sh --sizes "50 100 200" --seeds "1 2 3" --repeats 3 --label "cpu-class-a"
+```
+
+`bench/start.sh` refuses unless the tree is clean (changes under `bench/runs/` and to
+`bench/results.csv` are ignored, since they are run output), refuses while another run is active,
+and writes the run to `bench/runs/<UTC timestamp>-<commit>/`:
+
+| File | Contents |
+| --- | --- |
+| `meta.txt` | commit, command line, label, sizes, seeds, repeats, main, time limit, start time, CPU model |
+| `console.log` | everything `bench/run.sh` printed |
+| `rows.csv` | the rows for this run, same schema as `bench/results.csv` |
+| `pid` | the detached supervisor's process id |
+| `status.txt` | written when the run ends: exit code, end time, `timed_out` |
+
+The run id is also written to `bench/runs/CURRENT`. The start command prints the run id, the limit
+and the command to check on it. Check with:
+
+```sh
+bench/status.sh                  # the run in bench/runs/CURRENT
+bench/status.sh <run-id>         # one named run
+bench/status.sh --list           # every run, one per line with its state
+```
+
+`bench/status.sh` returns at once and never follows the log. It prints one of `RUNNING`,
+`FINISHED (exit 0)`, `FAILED (exit code)` or `TIMED OUT`, the elapsed time against the limit, the
+metadata, the last 25 lines of the console log and the rows in `rows.csv` so far.
+
+### The two-hour cap
+
+The time limit defaults to 7200 seconds and cannot be raised: `--time-limit` above 7200 is an
+error, and no flag or environment variable overrides the cap. The cap is a working rule, not a
+resource limit. A benchmark that needs more than two hours is a sign that the sizes are too large
+or the seeds too many, and the answer is a smaller run that finishes, never a longer wait. A
+smaller `--time-limit` is allowed and bounds a run that is expected to be short.
+
+A run that reaches the limit is stopped with `SIGTERM` and, 30 seconds later, `SIGKILL`; its
+status file then says `timed_out: yes`. Any rows it managed to write stay in its `rows.csv` but
+are not recorded.
+
+### One at a time
+
+Only one benchmark runs per machine. `bench/start.sh` refuses while another run is active, as
+checked by the supervisor pid recorded under `bench/runs/`, and a lock left behind by a run whose
+pid is gone is cleaned on the next start. `bench/remote.sh` applies the same rule to its target.
+Wall-clock time includes contention, so two runs on one machine measure each other as well as the
+commit.
+
+### Recording a result
+
+```sh
+bench/record.sh                  # record the run in bench/runs/CURRENT
+bench/record.sh <run-id>         # record one named run
+```
+
+`bench/record.sh` appends the rows of a finished run with exit code 0 to `bench/results.csv`,
+without the header. It refuses a run that is still running, failed, timed out, or was already
+recorded: a `recorded` marker in the run directory makes the refusal permanent.
+`bench/results.csv` is append-only. Existing rows are never edited or removed, so a correction is
+a new run recorded as new rows, not an edit of old ones.
+
+### Comparing and citing
+
+Compare only rows with the same `label`, `sizes` and `seeds`. A different label is a different
+hardware or scenario class, and different sizes or seeds are different inputs; a comparison across
+them measures the difference between the runs, not between the commits.
+
+To cite a result, quote the CSV rows and the commit they carry. Print the rows for one commit with
+the header and paste them as they are:
+
+```sh
+awk -F, 'NR == 1 || $2 == "<commit>"' bench/results.csv
+```
+
+The `commit`, `dirty` and `label` columns are part of the citation: a row with `dirty=1` cannot be
+attributed to a commit, and a row without its label cannot be placed in a comparison.
 
 ## Reading results.csv
 
