@@ -21,6 +21,7 @@ import ./optfold.bend as Fold
 import ./optind.bend as Ind
 import ./mainvalid.bend as MV
 import ./fast_step.bend as FS
+import ./fast_groups.bend as FG
 import ./fast_lb.bend as FLB
 
 # One job of the equality induction at a given fuel.
@@ -354,7 +355,10 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
       {==}
     case Con{+g, +t}:
       (ecif, ft) = f
+      +fgrp : +List<Groups.Group> = SolveFast.groups_build_fast(g, S, Nil{})
       +groups : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+      +egrp : {fgrp == groups : +List<Groups.Group>} =
+        FG.FG.groups_build_eq(g, S, Nil{})
       +usable : Bool = Groups.groups_smaller(S, groups)
       +rest : +List<SolveFast.Item> =
         SolveFast.schedule_go(t, S, Groups.len_words(S))
@@ -363,6 +367,24 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         NatProof.Nat.is_le_trans(
           Eval.Eval.cost_of(next_best), Eval.Eval.cost_of(best), inf,
           Fold.OQ.guess_cost_le_acc(p, G, S, g, inf, best), hbest)
+      +e0 : {SolveFast.step(1n+p,
+               SolveFast.schedule_guess(g, fgrp, Groups.len_words(S), rest,
+                 Groups.groups_smaller(S, fgrp)),
+               G, S, inf, Nil{}, Nil{}, 0n, best,
+               SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p,
+                  SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest,
+                    usable),
+                  G, S, inf, Nil{}, Nil{}, 0n, best,
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        Equal.cong(+List<Groups.Group>, SolveRef.Best,
+          grp => SolveFast.step(1n+p,
+                   SolveFast.schedule_guess(g, grp, Groups.len_words(S), rest,
+                     Groups.groups_smaller(S, grp)),
+                   G, S, inf, Nil{}, Nil{}, 0n, best,
+                   SolveFast.dummy_zero(), False{}),
+          fgrp, groups, egrp)
       +e1 : {SolveFast.step(1n+p,
                SolveFast.schedule_guess(g, groups, Groups.len_words(S),
                  rest, usable),
@@ -385,7 +407,18 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
           next_best, SolveFast.dummy_zero(), False{}),
         Eval.Eval.guesses(1n+p, G, S, inf, g <> t, best),
-        e1, e2)
+        Equal.trans(SolveRef.Best,
+          SolveFast.step(1n+p,
+            SolveFast.schedule_go(g <> t, S, Groups.len_words(S)),
+            G, S, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p,
+            SolveFast.schedule_guess(g, groups, Groups.len_words(S),
+              rest, usable),
+            G, S, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+            next_best, SolveFast.dummy_zero(), False{}),
+          e0, e1),
+        e2)
 
 # One job at positive fuel `1+p`: `FS.run_at` equals `FS.ref_run_at`.
 def FE.ejob_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
