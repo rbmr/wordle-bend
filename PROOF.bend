@@ -20,6 +20,7 @@ import ./proofs/cover.bend as CoverProof
 import ./proofs/depthgroups.bend as DepthGroups
 import ./proofs/validbag.bend as ValidBag
 import ./proofs/solvevalid.bend as SVProof
+import ./proofs/mainvalid.bend as MVProof
 
 def Bool.disc(b: Bool) -> Type:
   match b:
@@ -1498,3 +1499,7 @@ def TreeWF.proof(+t: Tree.Tree) ->
 
 def Laws.tree_json_wellformed(t):
   TreeWF.proof(t)
+
+# The law: a tree returned by the solver is valid.
+def Laws.solve_valid(G, C, T, e):
+  MVProof.MV.solve_valid(G, C, T, e)

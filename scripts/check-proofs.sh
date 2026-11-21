@@ -129,7 +129,11 @@ else
 		;;
 	esac
 
-	todo_line="Error: $pending_count TODOs found."
+	if [ "$pending_count" -eq 1 ]; then
+		todo_line="Error: 1 TODO found."
+	else
+		todo_line="Error: $pending_count TODOs found."
+	fi
 	todo_count=$(printf '%s\n' "$bend_output" | grep -Fxc -- "$todo_line" || true)
 	[ "$todo_count" -eq 1 ] || {
 		printf '%s\n' "$bend_output" >&2
