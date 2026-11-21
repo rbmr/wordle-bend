@@ -76,8 +76,4 @@ jobs:
 
       - name: Check proofs
         if: steps.proof.outputs.present == 'true'
-        run: bend PROOF.bend
-
-      - name: Check proofs with the Lean verdict kernel
-        if: steps.proof.outputs.present == 'true'
-        run: bend PROOF.bend --verdict
+        run: scripts/check-proofs.sh
