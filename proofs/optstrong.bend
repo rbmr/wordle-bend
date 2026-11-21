@@ -37,6 +37,7 @@ import ./mainvalid.bend as MV
 import ./cover.bend as Cover
 import ./cover_oracle.bend as Cora
 import ./cover_kids.bend as Ckids
+import ./cover_list.bend as Clist
 import ./kids.bend as KidPr
 
 # The merged node bound: the class comparison is a hypothesis.
@@ -226,6 +227,23 @@ def F2.StrongClassIf(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, b: Bool,
     case False{}:
       Unit
 
+# Move a filtered strong obligation to an equal test.
+def F2.classif_b(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    b1: Bool, b2: Bool, +eb: {b1 == b2 : Bool}, +groups: +List<Groups.Group>,
+    f: F2.StrongClassIf(fuel, inf, G, b1, groups)) ->
+  F2.StrongClassIf(fuel, inf, G, b2, groups):
+  %eb : F2.StrongClassIf(fuel, inf, G, _, groups)
+  f
+
+# Move a strong obligation to an equal group list.
+def F2.classif_g(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, +b: Bool,
+    +g1: +List<Groups.Group>, +g2: +List<Groups.Group>,
+    e: {g1 == g2 : +List<Groups.Group>},
+    f: F2.StrongClassIf(fuel, inf, G, b, g1)) ->
+  F2.StrongClassIf(fuel, inf, G, b, g2):
+  %e : F2.StrongClassIf(fuel, inf, G, b, _)
+  f
+
 # The class obligations of every guess in a guess list.
 def F2.StrongByGs(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>) -> Type:
@@ -346,3 +364,167 @@ def F2.class_both(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
                     F2.class_both(p, inf, G, S, kids, rest, gkt, sjt, smt, hz),
                     lr => fr => ((lh, lr), (lt2, (fr2, fr))))))
 
+
+# The two facts of one tree, uniformly over the candidate list.
+def F2.StrongBound(p: Nat, +inf: Nat, +G: +List<+List<Nat>>, T: Tree.Tree) -> Type:
+  @S: +List<+List<Nat>> -> F2.StrongByGs(p, inf, G, S, G)
+  -> @hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+           == True{} : Bool}
+  -> Tree.Valid(T, G, S) -> F2.SF(1n+p, inf, G, S, T)
+
+def F2.AllStrongBound(p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +kids: +List<Tree.Child>) -> Type:
+  match kids:
+    case Nil{}:
+      Unit
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          F2.StrongBound(p, inf, G, child) & F2.AllStrongBound(p, inf, G, rest)
+
+# A tree bound moved along an equality of trees.
+def F2.strongbound_transport(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +t1: Tree.Tree, +t2: Tree.Tree, e: {t1 == t2 : Tree.Tree},
+    b: F2.StrongBound(p, inf, G, t1)) -> F2.StrongBound(p, inf, G, t2):
+  %e : F2.StrongBound(p, inf, G, _)
+  b
+
+# The lookup decision at the head child, with the test as a parameter.
+def F2.strong_pick_head(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +child: Tree.Tree, +rest: +List<Tree.Child>,
+    head: F2.StrongBound(p, inf, G, child), +T: Tree.Tree,
+    e: {Tree.lookup(fb, Tree.Child{f, child} <> rest) == Some{T} : Maybe<Tree.Tree>},
+    b: Bool, +eb: {b == Feedback.feedback_eq(fb, f) : Bool},
+    k: {Tree.lookup(fb, rest) == Some{T} : Maybe<Tree.Tree>}
+       -> F2.StrongBound(p, inf, G, T)) -> F2.StrongBound(p, inf, G, T):
+  match b:
+    case True{}:
+      +e1 : {Some{child} == Cover.Cover.lookup_of(fb, f, child, rest,
+                  Feedback.feedback_eq(fb, f)) : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.lk_true(fb, f, child, rest, eb)
+      +e2 : {Some{child} == Some{T} : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.mtrans(Some{child},
+          Cover.Cover.lookup_of(fb, f, child, rest, Feedback.feedback_eq(fb, f)),
+          Some{T}, e1, e)
+      +ec : {child == T : Tree.Tree} = KidPr.KidsProof.some_inj(child, T, e2)
+      F2.strongbound_transport(p, inf, G, child, T, ec, head)
+    case False{}:
+      +e1 : {Tree.lookup(fb, rest) == Cover.Cover.lookup_of(fb, f, child, rest,
+                  Feedback.feedback_eq(fb, f)) : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.lk_false(fb, f, child, rest, eb)
+      +e2 : {Tree.lookup(fb, rest) == Some{T} : Maybe<&1, Tree.Tree>} =
+        Cover.Cover.mtrans(Tree.lookup(fb, rest),
+          Cover.Cover.lookup_of(fb, f, child, rest, Feedback.feedback_eq(fb, f)),
+          Some{T}, e1, e)
+      k(e2)
+
+def F2.strong_pick(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +fb: +List<Feedback.Color>, +kids: +List<Tree.Child>,
+    all: F2.AllStrongBound(p, inf, G, kids), +T: Tree.Tree,
+    e: {Tree.lookup(fb, kids) == Some{T} : Maybe<&1, Tree.Tree>}) ->
+  F2.StrongBound(p, inf, G, T):
+  match kids:
+    case Nil{}:
+      Empty.absurd(F2.StrongBound(p, inf, G, T),
+        KidPr.KidsProof.none_ne_some(T, e))
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          (head, tail) = all
+          F2.strong_pick_head(p, inf, G, fb, f, child, rest, head, T, e,
+            Feedback.feedback_eq(fb, f), {==},
+            e2 => F2.strong_pick(p, inf, G, fb, rest, tail, T, e2))
+
+# The unusable root: the bad class's valid child carries both facts.
+def F2.strong_unusable(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, +kids: +List<Tree.Child>,
+    res: Ind.OQ.KidRes(G, S, g, kids),
+    flatS: F2.StrongByGs(p, inf, G, S, G),
+    all: F2.AllStrongBound(p, inf, G, kids),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+          == True{} : Bool}) -> F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}):
+  match res:
+    case Tuple{+T2, r}:
+      (valid_S, r2) = r
+      (le2, r3) = r2
+      (fb2, el2) = r3
+      Comp.FC.use_pair(
+        F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}),
+        {Nat.is_le(Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S),
+           G, S, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+           Eval.Eval.dummy_zero())), Tree.cost(T2, S)) == True{} : Bool},
+        Comp.FC.Facts(1n+p, inf, G, S),
+        F2.strong_pick(p, inf, G, fb2, kids, all, T2, el2)(S, flatS, hz, valid_S),
+        o => f =>
+          (NatProof.Nat.is_le_trans(
+             Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+               inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+               Eval.Eval.dummy_zero())),
+             Tree.cost(T2, S), Tree.cost(Tree.Node{g, kids}, S), o, le2),
+           f))
+
+# The class obligation of the guess a membership points at.
+def F2.sbygs_head(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +h: +List<Nat>, +t: +List<+List<Nat>>,
+    +g: +List<Nat>, +mem: {Tree.member_word(g, h <> t) == True{} : Bool},
+    head: F2.StrongClassIf(fuel, inf, G,
+      Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+      Groups.groups_build(h, S, Nil{})),
+    b: Bool, +eb: {b == Feedback.word_eq(g, h) : Bool},
+    k: {Tree.member_word(g, t) == True{} : Bool}
+       -> F2.StrongClassIf(fuel, inf, G,
+            Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+            Groups.groups_build(g, S, Nil{}))) ->
+  F2.StrongClassIf(fuel, inf, G,
+    Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+    Groups.groups_build(g, S, Nil{})):
+  match b:
+    case True{}:
+      +egh : {g == h : +List<Nat>} =
+        Clist.Cover.word_eq_true(g, h,
+          Equal.sym(Bool, True{}, Feedback.word_eq(g, h), eb))
+      +egrp : {Groups.groups_build(g, S, Nil{})
+               == Groups.groups_build(h, S, Nil{}) : +List<Groups.Group>} =
+        Equal.cong(+List<Nat>, +List<Groups.Group>,
+          x => Groups.groups_build(x, S, Nil{}), g, h, egh)
+      +e_back : {Groups.groups_build(h, S, Nil{})
+                 == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>} =
+        Equal.sym(+List<Groups.Group>, Groups.groups_build(g, S, Nil{}),
+          Groups.groups_build(h, S, Nil{}), egrp)
+      +ebk : {Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{}))
+              == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+              : Bool} =
+        Equal.cong(+List<Groups.Group>, Bool, z => Groups.groups_smaller(S, z),
+          Groups.groups_build(h, S, Nil{}), Groups.groups_build(g, S, Nil{}), e_back)
+      F2.classif_b(fuel, inf, G,
+        Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), ebk,
+        Groups.groups_build(g, S, Nil{}),
+        F2.classif_g(fuel, inf, G,
+          Groups.groups_smaller(S, Groups.groups_build(h, S, Nil{})),
+          Groups.groups_build(h, S, Nil{}), Groups.groups_build(g, S, Nil{}),
+          e_back, head))
+    case False{}:
+      +mt : {Tree.member_word(g, t) == True{} : Bool} =
+        Cora.Cover.member_tail(g, h, t, b, eb, {==}, mem)
+      k(mt)
+
+def F2.sbygs_at(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>, +g: +List<Nat>,
+    +mem: {Tree.member_word(g, gs) == True{} : Bool},
+    f: F2.StrongByGs(fuel, inf, G, S, gs)) ->
+  F2.StrongClassIf(fuel, inf, G,
+    Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+    Groups.groups_build(g, S, Nil{})):
+  match gs:
+    case Nil{}:
+      Empty.absurd(
+        F2.StrongClassIf(fuel, inf, G,
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+          Groups.groups_build(g, S, Nil{})),
+        Logic.Proof.false_ne_true(mem))
+    case Con{h, t}:
+      (fh, ft) = f
+      F2.sbygs_head(fuel, inf, G, S, h, t, g, mem, fh, Feedback.word_eq(g, h), {==},
+        mt => F2.sbygs_at(fuel, inf, G, S, t, g, mt, ft))
