@@ -21,9 +21,11 @@ import ./optfold.bend as Fold
 import ./optind.bend as Ind
 import ./groupsmeasure.bend as GM
 import ./mainvalid.bend as MV
+import ./cover_groups.bend as CoverGroups
 import ./fast_step.bend as FS
 import ./fast_groups.bend as FG
 import ./fast_lb.bend as FLB
+import ./fast_one.bend as FO
 
 # Copy a `Bounds` witness so it can be used at this level and stepped to the
 # next. Every entry is a `Bool` equality (`Data`), so it duplicates cleanly.
@@ -381,9 +383,13 @@ def FE.live_groups_cons(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
                      SolveFast.dummy_zero(), False{})
                 : SolveRef.Best}) ->
   {SolveFast.step(1n+p, gs,
-     List.append(&2, SolveFast.Item,
-       SolveFast.group_items(Groups.len_words(S), Groups.Group{fb, ws} <> restg),
-       SolveFast.End{} <> rest),
+     SolveFast.Check{SolveFast.lower_bound(Groups.len_words(S),
+       Groups.Group{fb, ws} <> restg)}
+       <> (SolveFast.ClassItem{fb, ws}
+           <> (SolveFast.Add{fb}
+               <> List.append(&2, SolveFast.Item,
+                    SolveFast.group_items(Groups.len_words(S), restg),
+                    SolveFast.End{} <> rest))),
      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
    == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
         Eval.Eval.finish_ks(inf, g, S,
@@ -432,15 +438,158 @@ def FE.live_groups_cons(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
       SolveFast.dummy_zero(), False{}),
     e1, e2)
 
+# Step a live singleton `OneItem{fb, w}` directly into `Node{w, []}` of cost 1.
+def FE.live_groups_one(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +inf: Nat, +g: +List<Nat>,
+    +fb: +List<Feedback.Color>, +w: +List<Nat>,
+    +restg: +List<Groups.Group>, +kids: +List<Tree.Child>, +sum: Nat,
+    +best: SolveRef.Best, +rest: +List<SolveFast.Item>,
+    +ble: {Nat.is_le(1n, p) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +win: {Tree.member_word(w, G) == True{} : Bool},
+    rec_live: {SolveFast.step(1n+p, gs,
+                  List.append(&2, SolveFast.Item,
+                    SolveFast.group_items(Groups.len_words(S), restg),
+                    SolveFast.End{} <> rest),
+                  G, S, inf, g,
+                  Tree.Child{fb, Eval.Eval.tree_of(
+                    FS.FS.ref_run_at(p, inf, G, w <> Nil{}))} <> kids,
+                  SolveRef.sat_add(inf, sum,
+                    Eval.Eval.cost_of(
+                      FS.FS.ref_run_at(p, inf, G, w <> Nil{}))),
+                  best, SolveFast.dummy_zero(), False{})
+                == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                     Eval.Eval.finish_ks(inf, g, S,
+                       Eval.Eval.items(p, G, S, g, restg,
+                         Tree.Child{fb, Eval.Eval.tree_of(
+                           FS.FS.ref_run_at(p, inf, G, w <> Nil{}))} <> kids,
+                         SolveRef.sat_add(inf, sum,
+                           Eval.Eval.cost_of(
+                             FS.FS.ref_run_at(p, inf, G, w <> Nil{}))),
+                         inf),
+                       best),
+                     SolveFast.dummy_zero(), False{})
+                : SolveRef.Best}) ->
+  {SolveFast.step(1n+p, gs,
+     SolveFast.OneItem{fb, w}
+       <> List.append(&2, SolveFast.Item,
+            SolveFast.group_items(Groups.len_words(S), restg),
+            SolveFast.End{} <> rest),
+     G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+   == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.finish_ks(inf, g, S,
+          Eval.Eval.items(p, G, S, g,
+            Groups.Group{fb, w <> Nil{}} <> restg, kids, sum, inf),
+          best),
+        SolveFast.dummy_zero(), False{})
+   : SolveRef.Best}:
+  +n : Nat = Groups.len_words(S)
+  +inner : +List<SolveFast.Item> =
+    List.append(&2, SolveFast.Item, SolveFast.group_items(n, restg),
+      SolveFast.End{} <> rest)
+  +b1 : SolveRef.Best = SolveRef.Best{Tree.Node{w, Nil{}}, 1n}
+  +ref_c : SolveRef.Best = FS.FS.ref_run_at(p, inf, G, w <> Nil{})
+  +eone : {b1 == ref_c : SolveRef.Best} =
+    FO.FO.ref_run_one_eq(p, inf, G, w, ble, h1, win)
+  +kr : +List<Tree.Child> = Tree.Child{fb, Eval.Eval.tree_of(ref_c)} <> kids
+  +sr : Nat = SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(ref_c))
+  +e1 : {SolveFast.step(1n+p, gs, SolveFast.OneItem{fb, w} <> inner,
+           G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+         == SolveFast.step(1n+p, gs, inner, G, S, inf, g,
+              Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
+              SolveRef.sat_add(inf, sum, 1n), best,
+              SolveFast.dummy_zero(), False{})
+         : SolveRef.Best} =
+    FS.FS.one_live(p, gs, G, S, inf, g, fb, w, inner, kids, sum, best)
+  +e2 : {SolveFast.step(1n+p, gs, inner, G, S, inf, g,
+           Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
+           SolveRef.sat_add(inf, sum, 1n), best,
+           SolveFast.dummy_zero(), False{})
+         == SolveFast.step(1n+p, gs, inner, G, S, inf, g, kr, sr, best,
+              SolveFast.dummy_zero(), False{})
+         : SolveRef.Best} =
+    Equal.cong(SolveRef.Best, SolveRef.Best,
+      c => SolveFast.step(1n+p, gs, inner, G, S, inf, g,
+             Tree.Child{fb, Eval.Eval.tree_of(c)} <> kids,
+             SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(c)),
+             best, SolveFast.dummy_zero(), False{}),
+      b1, ref_c, eone)
+  +wk : {Eval.Eval.items(p, G, S, g, restg, kr, sr, inf)
+         == Eval.Eval.items(p, G, S, g,
+              Groups.Group{fb, w <> Nil{}} <> restg, kids, sum, inf)
+         : Eval.KS} =
+    Equal.sym(Eval.KS,
+      Eval.Eval.items(p, G, S, g, Groups.Group{fb, w <> Nil{}} <> restg,
+        kids, sum, inf),
+      Eval.Eval.items(p, G, S, g, restg, kr, sr, inf),
+      Eval.Eval.with_kid_eq(fb, kids, sum, inf, ref_c,
+        ka => sa => Eval.Eval.items(p, G, S, g, restg, ka, sa, inf)))
+  +e4 : {SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+           Eval.Eval.finish_ks(inf, g, S,
+             Eval.Eval.items(p, G, S, g, restg, kr, sr, inf), best),
+           SolveFast.dummy_zero(), False{})
+         == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+              Eval.Eval.finish_ks(inf, g, S,
+                Eval.Eval.items(p, G, S, g,
+                  Groups.Group{fb, w <> Nil{}} <> restg, kids, sum, inf),
+                best),
+              SolveFast.dummy_zero(), False{})
+         : SolveRef.Best} =
+    Equal.cong(Eval.KS, SolveRef.Best,
+      ks => SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+              Eval.Eval.finish_ks(inf, g, S, ks, best),
+              SolveFast.dummy_zero(), False{}),
+      Eval.Eval.items(p, G, S, g, restg, kr, sr, inf),
+      Eval.Eval.items(p, G, S, g, Groups.Group{fb, w <> Nil{}} <> restg,
+        kids, sum, inf),
+      wk)
+  Equal.trans(SolveRef.Best,
+    SolveFast.step(1n+p, gs, SolveFast.OneItem{fb, w} <> inner,
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{}),
+    SolveFast.step(1n+p, gs, inner, G, S, inf, g, kr, sr, best,
+      SolveFast.dummy_zero(), False{}),
+    SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+      Eval.Eval.finish_ks(inf, g, S,
+        Eval.Eval.items(p, G, S, g, Groups.Group{fb, w <> Nil{}} <> restg,
+          kids, sum, inf),
+        best),
+      SolveFast.dummy_zero(), False{}),
+    Equal.trans(SolveRef.Best,
+      SolveFast.step(1n+p, gs, SolveFast.OneItem{fb, w} <> inner,
+        G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{}),
+      SolveFast.step(1n+p, gs, inner, G, S, inf, g,
+        Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
+        SolveRef.sat_add(inf, sum, 1n), best,
+        SolveFast.dummy_zero(), False{}),
+      SolveFast.step(1n+p, gs, inner, G, S, inf, g, kr, sr, best,
+        SolveFast.dummy_zero(), False{}),
+      e1, e2),
+    Equal.trans(SolveRef.Best,
+      SolveFast.step(1n+p, gs, inner, G, S, inf, g, kr, sr, best,
+        SolveFast.dummy_zero(), False{}),
+      SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.finish_ks(inf, g, S,
+          Eval.Eval.items(p, G, S, g, restg, kr, sr, inf), best),
+        SolveFast.dummy_zero(), False{}),
+      SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.finish_ks(inf, g, S,
+          Eval.Eval.items(p, G, S, g, Groups.Group{fb, w <> Nil{}} <> restg,
+            kids, sum, inf),
+          best),
+        SolveFast.dummy_zero(), False{}),
+      rec_live, e4))
+
 # Stepping the remaining class items of a live block agrees with `Eval.finish_ks`
-# on `Eval.items`, whether a class triggers mid-guess pruning or searches all
-# remaining classes.
+# on `Eval.items`, whether a class resolves in O(1) as a singleton, triggers
+# mid-guess pruning, or searches recursively.
 def FE.live_groups_eq(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +inf: Nat, +g: +List<Nat>,
     +groups: +List<Groups.Group>, +kids: +List<Tree.Child>, +sum: Nat,
     +best: SolveRef.Best, +rest: +List<SolveFast.Item>,
     bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ag: {FO.FO.all_in_jobs_b(MV.MV.next_groups(groups), G) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     ec: FE.EClass(p, inf, G, groups)) ->
   {SolveFast.step(1n+p, gs,
@@ -460,34 +609,100 @@ def FE.live_groups_eq(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
     case Con{gp, restg}:
       match gp:
         case Groups.Group{+fb, +ws}:
-          (+ble, bt) = bounds
-          (eh, et) = ec
-          MV.MV.use_pair(
-            {SolveFast.step(1n+p, gs,
-               List.append(&2, SolveFast.Item,
-                 SolveFast.group_items(Groups.len_words(S),
-                   Groups.Group{fb, ws} <> restg),
-                 SolveFast.End{} <> rest),
-               G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
-             == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                  Eval.Eval.finish_ks(inf, g, S,
-                    Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
-                      kids, sum, inf),
-                    best),
-                  SolveFast.dummy_zero(), False{})
-             : SolveRef.Best},
-            MV.MV.Bounds(p, MV.MV.next_groups(restg)),
-            MV.MV.Bounds(p, MV.MV.next_groups(restg)),
-            FE.bounds_copy(p, MV.MV.next_groups(restg), bt),
-            bt1 => bt2 =>
-              FE.live_groups_cons(p, gs, G, S, inf, g, fb, ws, restg, kids,
-                sum, best, rest, ble, bt2, hz, hbest, eh,
-                FE.live_groups_eq(p, gs, G, S, inf, g, restg,
-                  Tree.Child{fb, Eval.Eval.tree_of(FS.FS.ref_run_at(p, inf, G, ws))}
-                    <> kids,
-                  SolveRef.sat_add(inf, sum,
-                    Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))),
-                  best, rest, bt1, hz, hbest, et)))
+          match ws:
+            case Nil{}:
+              (+ble, bt) = bounds
+              (eh, et) = ec
+              +ag_rest : {FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G)
+                          == True{} : Bool} =
+                Logic.Proof.and_true_r(FO.FO.all_in_ref(Nil{}, G),
+                  FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G), ag)
+              MV.MV.use_pair(
+                {SolveFast.step(1n+p, gs,
+                   List.append(&2, SolveFast.Item,
+                     SolveFast.group_items(Groups.len_words(S),
+                       Groups.Group{fb, Nil{}} <> restg),
+                     SolveFast.End{} <> rest),
+                   G, S, inf, g, kids, sum, best,
+                   SolveFast.dummy_zero(), False{})
+                 == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                      Eval.Eval.finish_ks(inf, g, S,
+                        Eval.Eval.items(p, G, S, g,
+                          Groups.Group{fb, Nil{}} <> restg, kids, sum, inf),
+                        best),
+                      SolveFast.dummy_zero(), False{})
+                 : SolveRef.Best},
+                MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+                MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+                FE.bounds_copy(p, MV.MV.next_groups(restg), bt),
+                bt1 => bt2 =>
+                  FE.live_groups_cons(p, gs, G, S, inf, g, fb, Nil{}, restg,
+                    kids, sum, best, rest, ble, bt2, hz, hbest, eh,
+                    FE.live_groups_eq(p, gs, G, S, inf, g, restg,
+                      Tree.Child{fb, Eval.Eval.tree_of(
+                        FS.FS.ref_run_at(p, inf, G, Nil{}))} <> kids,
+                      SolveRef.sat_add(inf, sum,
+                        Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, Nil{}))),
+                      best, rest, bt1, hz, h1, ag_rest, hbest, et)))
+            case Con{+w, +wt}:
+              match wt:
+                case Nil{}:
+                  (+ble, bt) = bounds
+                  (eh, et) = ec
+                  +ai_ws : {FO.FO.all_in_ref(w <> Nil{}, G) == True{} : Bool} =
+                    Logic.Proof.and_true_l(FO.FO.all_in_ref(w <> Nil{}, G),
+                      FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G), ag)
+                  +ag_rest : {FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G)
+                              == True{} : Bool} =
+                    Logic.Proof.and_true_r(FO.FO.all_in_ref(w <> Nil{}, G),
+                      FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G), ag)
+                  +win : {Tree.member_word(w, G) == True{} : Bool} =
+                    FO.FO.all_in_head(w, Nil{}, G, ai_ws)
+                  FE.live_groups_one(p, gs, G, S, inf, g, fb, w, restg,
+                    kids, sum, best, rest, ble, h1, win,
+                    FE.live_groups_eq(p, gs, G, S, inf, g, restg,
+                      Tree.Child{fb, Eval.Eval.tree_of(
+                        FS.FS.ref_run_at(p, inf, G, w <> Nil{}))} <> kids,
+                      SolveRef.sat_add(inf, sum,
+                        Eval.Eval.cost_of(
+                          FS.FS.ref_run_at(p, inf, G, w <> Nil{}))),
+                      best, rest, bt, hz, h1, ag_rest, hbest, et))
+                case Con{+w2, +wt2}:
+                  (+ble, bt) = bounds
+                  (eh, et) = ec
+                  +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
+                  +ag_rest : {FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G)
+                              == True{} : Bool} =
+                    Logic.Proof.and_true_r(FO.FO.all_in_ref(ws2, G),
+                      FO.FO.all_in_jobs_b(MV.MV.next_groups(restg), G), ag)
+                  MV.MV.use_pair(
+                    {SolveFast.step(1n+p, gs,
+                       List.append(&2, SolveFast.Item,
+                         SolveFast.group_items(Groups.len_words(S),
+                           Groups.Group{fb, ws2} <> restg),
+                         SolveFast.End{} <> rest),
+                       G, S, inf, g, kids, sum, best,
+                       SolveFast.dummy_zero(), False{})
+                     == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{},
+                          0n, Eval.Eval.finish_ks(inf, g, S,
+                            Eval.Eval.items(p, G, S, g,
+                              Groups.Group{fb, ws2} <> restg, kids, sum, inf),
+                            best),
+                          SolveFast.dummy_zero(), False{})
+                     : SolveRef.Best},
+                    MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+                    MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+                    FE.bounds_copy(p, MV.MV.next_groups(restg), bt),
+                    bt1 => bt2 =>
+                      FE.live_groups_cons(p, gs, G, S, inf, g, fb, ws2, restg,
+                        kids, sum, best, rest, ble, bt2, hz, hbest, eh,
+                        FE.live_groups_eq(p, gs, G, S, inf, g, restg,
+                          Tree.Child{fb, Eval.Eval.tree_of(
+                            FS.FS.ref_run_at(p, inf, G, ws2))} <> kids,
+                          SolveRef.sat_add(inf, sum,
+                            Eval.Eval.cost_of(
+                              FS.FS.ref_run_at(p, inf, G, ws2))),
+                          best, rest, bt1, hz, h1, ag_rest, hbest, et)))
 
 # Stepping the body of a usable guess block after `Begin` agrees with
 # `Eval.block` in both the skipped and the searched mode.
@@ -500,6 +715,8 @@ def FE.block_step_eq(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
     +us: {Groups.groups_smaller(S, groups) == True{} : Bool},
     +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ag: {FO.FO.all_in_jobs_b(MV.MV.next_groups(groups), G) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     ec: FE.EClass(p, inf, G, groups)) ->
   {FS.FS.after_begin(1n+p, gs, G, S, inf, g,
@@ -564,7 +781,7 @@ def FE.block_step_eq(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
         MV.MV.group_bounds(p, S, groups, ele,
           GM.GM.groups_smaller_sound(S, groups, us))
       FE.live_groups_eq(p, gs, G, S, inf, g, groups, Nil{}, 0n, best, rest,
-        bounds, hz, hbest, ec)
+        bounds, hz, h1, ag, hbest, ec)
 
 # Stepping one guess block in `SolveFast` at positive fuel agrees with
 # `Eval.guess_bool`.
@@ -575,6 +792,8 @@ def FE.schedule_guess_step(+p: Nat, +gs: +List<+List<Nat>>,
     +eus: {usable == Groups.groups_smaller(S, groups) : Bool},
     +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ag: {FO.FO.all_in_jobs_b(MV.MV.next_groups(groups), G) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     ecif: FE.EClassIf(usable, p, inf, G, groups)) ->
   {SolveFast.step(1n+p, gs,
@@ -623,7 +842,7 @@ def FE.schedule_guess_step(+p: Nat, +gs: +List<+List<Nat>>,
                   SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
         FE.block_step_eq(p, gs, G, S, inf, g, groups, rest, best, skip, {==},
-          us, ele, hz, hbest, ecif)
+          us, ele, hz, h1, ag, hbest, ecif)
       Equal.trans(SolveRef.Best,
         SolveFast.step(1n+p, gs,
           SolveFast.schedule_guess_ib(g,
@@ -653,6 +872,8 @@ def FE.guess_pop_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
             SolveFast.pre_lb(Groups.len_words(S), g, S)) : Bool},
     +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(S, G) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     ecif: FE.EClassIf(
             Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
@@ -689,6 +910,10 @@ def FE.guess_pop_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
       +egrp : {fgrp == groups : +List<Groups.Group>} =
         FG.FG.groups_build_eq(g, S, Nil{})
       +usable : Bool = Groups.groups_smaller(S, groups)
+      +ag : {FO.FO.all_in_jobs_b(MV.MV.next_groups(groups), G)
+             == True{} : Bool} =
+        FO.FO.all_in_next_groups(groups, S, G,
+          CoverGroups.Cover.all_subseq_nil(g, S), ai)
       +ebody : {SolveFast.step(1n+p, t, SolveFast.guess_body(g, S, n),
                   G, S, inf, Nil{}, Nil{}, 0n, best,
                   SolveFast.dummy_zero(), False{})
@@ -749,7 +974,7 @@ def FE.guess_pop_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                   SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
         FE.schedule_guess_step(p, t, G, S, inf, g, groups, Nil{}, best,
-          usable, {==}, ele, hz, hbest, ecif)
+          usable, {==}, ele, hz, h1, ag, hbest, ecif)
       Equal.trans(SolveRef.Best,
         SolveFast.step(1n+p, t, SolveFast.guess_body(g, S, n),
           G, S, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
@@ -791,6 +1016,8 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +inf: Nat, +gs: +List<+List<Nat>>, +best: SolveRef.Best,
     +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(S, G) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     f: FE.EByGs(p, inf, G, S, gs)) ->
   {SolveFast.step(1n+p, gs, Nil{},
@@ -827,12 +1054,12 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                   next_best, SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
         FE.guess_pop_step(p, G, S, inf, g, t, best, pre_skip, {==}, ele, hz,
-          hbest, ecif)
+          h1, ai, hbest, ecif)
       +e2 : {SolveFast.step(1n+p, t, Nil{}, G, S, inf, Nil{}, Nil{}, 0n,
                next_best, SolveFast.dummy_zero(), False{})
              == Eval.Eval.guesses(1n+p, G, S, inf, t, next_best)
              : SolveRef.Best} =
-        FE.guesses_step(p, G, S, inf, t, next_best, ele, hz, hnext, ft)
+        FE.guesses_step(p, G, S, inf, t, next_best, ele, hz, h1, ai, hnext, ft)
       Equal.trans(SolveRef.Best,
         SolveFast.step(1n+p, g <> t, Nil{}, G, S, inf,
           Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
@@ -855,6 +1082,8 @@ def FE.ejob_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>,
     +ele: {Nat.is_le(Groups.len_words(S), 1n+p) == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(S, G) == True{} : Bool},
     f: FE.EByGs(p, inf, G, S, G)) ->
   FE.EJob(1n+p, inf, G, S):
   +hinit : {Nat.is_le(Eval.Eval.cost_of(SolveFast.dummy_inf(inf)), inf)
@@ -863,8 +1092,8 @@ def FE.ejob_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
   +e1 : {FS.FS.run_at(1n+p, inf, G, S)
          == Eval.Eval.guesses(1n+p, G, S, inf, G, SolveFast.dummy_inf(inf))
          : SolveRef.Best} =
-    FE.guesses_step(p, G, S, inf, G, SolveFast.dummy_inf(inf), ele, hz,
-      hinit, f)
+    FE.guesses_step(p, G, S, inf, G, SolveFast.dummy_inf(inf), ele, hz, h1,
+      ai, hinit, f)
   +e2 : {FS.FS.ref_run_at(1n+p, inf, G, S)
          == Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf))
          : SolveRef.Best} =
@@ -965,28 +1194,38 @@ def FE.eflat_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
     +jobs: +List<+List<+List<Nat>>>,
     bounds: MV.MV.Bounds(1n+p, jobs),
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +aj: {FO.FO.all_in_jobs_b(jobs, G) == True{} : Bool},
     f: FE.EFlat(p, inf, G, MV.MV.next_jobs(G, jobs))) ->
   FE.EFlat(1n+p, inf, G, jobs):
   match jobs:
     case Nil{}:
       Unit{}
-    case Con{S, t}:
+    case Con{+S, +t}:
       (ble, bt) = bounds
+      +ai : {FO.FO.all_in_ref(S, G) == True{} : Bool} =
+        Logic.Proof.and_true_l(FO.FO.all_in_ref(S, G),
+          FO.FO.all_in_jobs_b(t, G), aj)
+      +at : {FO.FO.all_in_jobs_b(t, G) == True{} : Bool} =
+        Logic.Proof.and_true_r(FO.FO.all_in_ref(S, G),
+          FO.FO.all_in_jobs_b(t, G), aj)
       MV.MV.use_pair(FE.EFlat(1n+p, inf, G, S <> t),
         FE.EFlat(p, inf, G, MV.MV.next_guess(G, S)),
         FE.EFlat(p, inf, G, MV.MV.next_jobs(G, t)),
         FE.eflat_append(p, inf, G, MV.MV.next_guess(G, S),
           MV.MV.next_jobs(G, t), f),
         fS => ft =>
-          Tuple{FE.ejob_succ(p, inf, G, S, ble, hz,
+          Tuple{FE.ejob_succ(p, inf, G, S, ble, hz, h1, ai,
                   FE.eby_gs(p, inf, G, S, G, fS)),
-                FE.eflat_step(inf, p, G, t, bt, hz, ft)})
+                FE.eflat_step(inf, p, G, t, bt, hz, h1, at, ft)})
 
 # The fuel induction over all jobs at a level.
 def FE.eflat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +jobs: +List<+List<+List<Nat>>>,
     bounds: MV.MV.Bounds(fuel, jobs),
-    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +aj: {FO.FO.all_in_jobs_b(jobs, G) == True{} : Bool}) ->
   FE.EFlat(fuel, inf, G, jobs):
   match fuel:
     case 0n:
@@ -996,32 +1235,87 @@ def FE.eflat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
         MV.MV.Bounds(1n+p, jobs), MV.MV.Bounds(1n+p, jobs),
         FE.bounds_copy(1n+p, jobs, bounds),
         b1 => b2 =>
-          FE.eflat_step(inf, p, G, jobs, b1, hz,
+          FE.eflat_step(inf, p, G, jobs, b1, hz, h1, aj,
             FE.eflat(p, inf, G, MV.MV.next_jobs(G, jobs),
-              MV.MV.next_bounds(p, G, jobs, b2), hz)))
+              MV.MV.next_bounds(p, G, jobs, b2), hz, h1,
+              FO.FO.all_in_next_jobs(G, jobs, aj))))
 
 # The top-level equality of the pruned and reference search states.
 def FE.main_eq(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>,
     +le: {Nat.is_le(Groups.len_words(S), fuel) == True{} : Bool},
-    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(S, G) == True{} : Bool}) ->
   FE.EJob(fuel, inf, G, S):
+  +aj : {FO.FO.all_in_jobs_b(S <> Nil{}, G) == True{} : Bool} =
+    FO.FO.bool_and_intro(FO.FO.all_in_ref(S, G), True{}, ai, {==})
   MV.MV.use_pair(FE.EJob(fuel, inf, G, S),
     FE.EJob(fuel, inf, G, S), FE.EFlat(fuel, inf, G, Nil{}),
-    FE.eflat(fuel, inf, G, S <> Nil{}, Tuple{le, Unit{}}, hz),
+    FE.eflat(fuel, inf, G, S <> Nil{}, Tuple{le, Unit{}}, hz, h1, aj),
     j => u => j)
+
+def FE.solve_fast_valid_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +ai: {FO.FO.all_in_ref(C, G) == True{} : Bool}) ->
+  {SolveFast.solve_fast_valid(G, C) == SolveRef.solve(G, C)
+   : Maybe<Tree.Tree>}:
+  match C:
+    case Nil{}:
+      Equal.cong(SolveRef.Best, Maybe<Tree.Tree>,
+        b => SolveRef.best_to_maybe(1n, b),
+        FS.FS.run_at(0n, 1n, G, Nil{}),
+        FS.FS.ref_run_at(0n, 1n, G, Nil{}),
+        FE.ejob_nil(1n, G))
+    case Con{+w, +t}:
+      match t:
+        case Nil{}:
+          +win : {Tree.member_word(w, G) == True{} : Bool} =
+            FO.FO.all_in_head(w, Nil{}, G, ai)
+          Equal.cong(SolveRef.Best, Maybe<Tree.Tree>,
+            b => SolveRef.best_to_maybe(2n, b),
+            SolveRef.Best{Tree.Node{w, Nil{}}, 1n},
+            FS.FS.ref_run_at(1n, 2n, G, w <> Nil{}),
+            FO.FO.ref_run_one_eq(1n, 2n, G, w, {==}, {==}, win))
+        case Con{+w2, +t2}:
+          +cs : +List<+List<Nat>> = w <> (w2 <> t2)
+          +n : Nat = Groups.len_words(cs)
+          +inf : Nat = SolveRef.inf_of(n)
+          +hz : {Nat.is_lt(0n, inf) == True{} : Bool} =
+            Ind.OQ.zero_lt_succ_add(Nat.mul(n, n))
+          +h1 : {Nat.is_lt(1n, inf) == True{} : Bool} =
+            FO.FO.one_lt_inf_ge2(w, w2, t2)
+          +le : {Nat.is_le(Groups.len_words(cs), n) == True{} : Bool} =
+            NatProof.Nat.is_le_refl(n)
+          Equal.cong(SolveRef.Best, Maybe<Tree.Tree>,
+            b => SolveRef.best_to_maybe(inf, b),
+            FS.FS.run_at(n, inf, G, cs),
+            FS.FS.ref_run_at(n, inf, G, cs),
+            FE.main_eq(n, inf, G, cs, le, hz, h1, ai))
+
+def FE.solve_fast_checked_eq(ok: Bool, +G: +List<+List<Nat>>,
+    +C: +List<+List<Nat>>,
+    +eok: {ok == SolveFast.all_in_fast(C, G) : Bool}) ->
+  {SolveFast.solve_fast_checked(ok, G, C) == SolveRef.solve(G, C)
+   : Maybe<Tree.Tree>}:
+  match ok:
+    case False{}:
+      +ef : {FO.FO.all_in_ref(C, G) == False{} : Bool} =
+        Equal.trans(Bool, FO.FO.all_in_ref(C, G), SolveFast.all_in_fast(C, G),
+          False{},
+          Equal.sym(Bool, SolveFast.all_in_fast(C, G), FO.FO.all_in_ref(C, G),
+            FO.FO.all_in_fast_eq(C, G)),
+          Equal.sym(Bool, False{}, SolveFast.all_in_fast(C, G), eok))
+      FO.FO.solve_ref_none_of_all_in_false(G, C, ef)
+    case True{}:
+      +ai : {FO.FO.all_in_ref(C, G) == True{} : Bool} =
+        Equal.trans(Bool, FO.FO.all_in_ref(C, G), SolveFast.all_in_fast(C, G),
+          True{},
+          Equal.sym(Bool, SolveFast.all_in_fast(C, G), FO.FO.all_in_ref(C, G),
+            FO.FO.all_in_fast_eq(C, G)),
+          Equal.sym(Bool, True{}, SolveFast.all_in_fast(C, G), eok))
+      FE.solve_fast_valid_eq(G, C, ai)
 
 # The bound-pruned solver returns the exact reference tree for every input.
 def FE.solve_fast_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
   {SolveFast.solve_fast(G, C) == SolveRef.solve(G, C) : Maybe<Tree.Tree>}:
-  +n : Nat = Groups.len_words(C)
-  +inf : Nat = SolveRef.inf_of(n)
-  +hz : {Nat.is_lt(0n, inf) == True{} : Bool} =
-    Ind.OQ.zero_lt_succ_add(Nat.mul(n, n))
-  +le : {Nat.is_le(Groups.len_words(C), n) == True{} : Bool} =
-    NatProof.Nat.is_le_refl(n)
-  Equal.cong(SolveRef.Best, Maybe<Tree.Tree>,
-    b => SolveRef.best_to_maybe(inf, b),
-    FS.FS.run_at(n, inf, G, C),
-    FS.FS.ref_run_at(n, inf, G, C),
-    FE.main_eq(n, inf, G, C, le, hz))
+  FE.solve_fast_checked_eq(SolveFast.all_in_fast(C, G), G, C, {==})

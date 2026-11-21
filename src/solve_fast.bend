@@ -29,12 +29,14 @@ import ./solve_ref.bend as SolveRef
 
 # `Begin` carries the guess and its initial lower bound. `Check` carries the
 # lower bound for the remaining classes (plus `|S|`) so the search can prune
-# mid-guess as soon as `sum + rem_lb >= best_cost(best)`. `ClassItem`, `Add`
-# and `End` are the reference's items.
+# mid-guess as soon as `sum + rem_lb >= best_cost(best)`. `OneItem` resolves a
+# singleton feedback class `[w]` directly in O(1) once the root confirms every
+# candidate is in `G`. `ClassItem`, `Add` and `End` are the reference's items.
 type Item is Data:
   Begin{guess: +List<Nat>, lb: Nat}
   Check{rem_lb: Nat}
   ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>}
+  OneItem{fb: +List<Feedback.Color>, word: +List<Nat>}
   Add{fb: +List<Feedback.Color>}
   End{}
 
@@ -64,6 +66,52 @@ def word_eq_go(+a: +List<Nat>, +b: +List<Nat>, same: Bool) -> Bool:
 
 def word_eq_fast(+a: +List<Nat>, +b: +List<Nat>) -> Bool:
   word_eq_go(a, b, Feedback.next_same(a, b))
+
+# Linear membership and subset checks matching `Tree.member_word`: stop at the
+# first matching guess / first missing candidate.
+def next_word_hit(+w: +List<Nat>, +gs: +List<+List<Nat>>) -> Bool:
+  match gs:
+    case Nil{}:
+      False{}
+    case Con{h, t}:
+      word_eq_fast(w, h)
+
+def member_word_go(+w: +List<Nat>, +gs: +List<+List<Nat>>,
+                   hit: Bool) -> Bool:
+  match gs:
+    case Nil{}:
+      False{}
+    case Con{h, t}:
+      match hit:
+        case True{}:
+          True{}
+        case False{}:
+          member_word_go(w, t, next_word_hit(w, t))
+
+def member_word_fast(+w: +List<Nat>, +gs: +List<+List<Nat>>) -> Bool:
+  member_word_go(w, gs, next_word_hit(w, gs))
+
+def next_in(+S: +List<+List<Nat>>, +G: +List<+List<Nat>>) -> Bool:
+  match S:
+    case Nil{}:
+      True{}
+    case Con{w, t}:
+      member_word_fast(w, G)
+
+def all_in_go(+S: +List<+List<Nat>>, +G: +List<+List<Nat>>,
+              ok: Bool) -> Bool:
+  match S:
+    case Nil{}:
+      True{}
+    case Con{w, t}:
+      match ok:
+        case True{}:
+          all_in_go(t, G, next_in(t, G))
+        case False{}:
+          False{}
+
+def all_in_fast(+S: +List<+List<Nat>>, +G: +List<+List<Nat>>) -> Bool:
+  all_in_go(S, G, next_in(S, G))
 
 def next_fb_same(+a: +List<Feedback.Color>,
                  +b: +List<Feedback.Color>) -> Bool:
@@ -186,8 +234,9 @@ def dummy_inf(+inf: Nat) -> SolveRef.Best:
 def dummy_zero() -> SolveRef.Best:
   SolveRef.Best{Tree.Node{Nil{}, Nil{}}, 0n}
 
-# The class items of one guess, each preceded by a `Check` with the remaining
-# lower bound and followed by the `Add` that consumes it.
+# The class items of one guess: singleton classes `[w]` become a single O(1)
+# `OneItem{f, w}`, and larger classes are preceded by a `Check` with the
+# remaining lower bound and followed by the `Add` that consumes the child.
 def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
   match groups:
     case Nil{}:
@@ -195,12 +244,23 @@ def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
     case Con{gp, rest}:
       match gp:
         case Groups.Group{+f, +ws}:
-          Check{lower_bound(n, Groups.Group{f, ws} <> rest)}
-          <> (ClassItem{f, ws} <> (Add{f} <> group_items(n, rest)))
+          match ws:
+            case Nil{}:
+              Check{lower_bound(n, Groups.Group{f, Nil{}} <> rest)}
+              <> (ClassItem{f, Nil{}} <> (Add{f} <> group_items(n, rest)))
+            case Con{+w, +wt}:
+              match wt:
+                case Nil{}:
+                  OneItem{f, w} <> group_items(n, rest)
+                case Con{+w2, +wt2}:
+                  +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
+                  Check{lower_bound(n, Groups.Group{f, ws2} <> rest)}
+                  <> (ClassItem{f, ws2} <> (Add{f} <> group_items(n, rest)))
 
 # Single-pass construction of a guess's lower bound and schedule items onto
-# `tail`, computing `class_lb(ws)` once per class without a separate
-# `class_words` or `List.append` pass.
+# `tail`, computing `class_lb(ws)` once per multi-word class and using `1`
+# directly for singleton classes without a separate `class_words` or
+# `List.append` pass.
 type ItemsBound is Data:
   ItemsBound{lb: Nat, items: +List<Item>}
 
@@ -212,6 +272,12 @@ def group_items_step(+f: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
       ItemsBound{lb,
         Check{lb} <> (ClassItem{f, ws} <> (Add{f} <> rest_items))}
 
+def group_items_one_step(+f: +List<Feedback.Color>, +w: +List<Nat>,
+                         ib: ItemsBound) -> ItemsBound:
+  match ib:
+    case ItemsBound{+rem_lb, +rest_items}:
+      ItemsBound{Nat.add(1n, rem_lb), OneItem{f, w} <> rest_items}
+
 def group_items_build(+n: Nat, +groups: +List<Groups.Group>,
                       +tail: +List<Item>) -> ItemsBound:
   match groups:
@@ -220,8 +286,19 @@ def group_items_build(+n: Nat, +groups: +List<Groups.Group>,
     case Con{gp, rest}:
       match gp:
         case Groups.Group{+f, +ws}:
-          group_items_step(f, ws, class_lb(ws),
-            group_items_build(n, rest, tail))
+          match ws:
+            case Nil{}:
+              group_items_step(f, Nil{}, 0n,
+                group_items_build(n, rest, tail))
+            case Con{+w, +wt}:
+              match wt:
+                case Nil{}:
+                  group_items_one_step(f, w,
+                    group_items_build(n, rest, tail))
+                case Con{+w2, +wt2}:
+                  +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
+                  group_items_step(f, ws2, class_lb(ws2),
+                    group_items_build(n, rest, tail))
 
 # Linear feedback and group partitioning. In `src/feedback.bend` and
 # `src/groups.bend`, the recursive calls sit inside both branches of
@@ -434,6 +511,8 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                   step(0n, Nil{}, rest, G, S, inf, g, kids, sum, best, pending, skip)
                 case ClassItem{fb, words}:
                   dummy_inf(inf)
+                case OneItem{fb, w}:
+                  dummy_inf(inf)
                 case Add{fb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
@@ -456,6 +535,8 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                 case Check{rem_lb}:
                   step(0n, g2 <> grest, rest, G, S, inf, g, kids, sum, best, pending, skip)
                 case ClassItem{fb, words}:
+                  dummy_inf(inf)
+                case OneItem{fb, w}:
                   dummy_inf(inf)
                 case Add{fb}:
                   match pending:
@@ -496,6 +577,16 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                            step(p, G, Nil{}, G, words, inf,
                                 Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
                            skip)
+                case OneItem{fb, w}:
+                  match skip:
+                    case True{}:
+                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), True{})
+                    case False{}:
+                      step(fuel, Nil{}, rest, G, S, inf, g,
+                           Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
+                           SolveRef.sat_add(inf, sum, 1n), best,
+                           dummy_zero(), False{})
                 case Add{fb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
@@ -541,6 +632,16 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                            step(p, G, Nil{}, G, words, inf,
                                 Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
                            skip)
+                case OneItem{fb, w}:
+                  match skip:
+                    case True{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), True{})
+                    case False{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g,
+                           Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
+                           SolveRef.sat_add(inf, sum, 1n), best,
+                           dummy_zero(), False{})
                 case Add{fb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
@@ -559,14 +660,41 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                              Groups.len_words(S), best),
                            dummy_zero(), False{})
 
-# The pruned search on a guess list and candidate list.
+# The pruned search on a guess list and candidate list. Checks once at the root
+# that every candidate belongs to `guesses`; if not, no valid tree exists and
+# `None{}` is returned immediately. Otherwise every singleton leaf resolves in
+# O(1) to `Tree.Node{w, Nil{}}` of cost 1.
+def solve_fast_valid(+guesses: +List<+List<Nat>>,
+                     +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
+  match candidates:
+    case Nil{}:
+      +inf = SolveRef.inf_of(0n)
+      SolveRef.best_to_maybe(inf,
+        step(0n, guesses, Nil{}, guesses, Nil{}, inf,
+             Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
+    case Con{+w, +t}:
+      match t:
+        case Nil{}:
+          Some{Tree.Node{w, Nil{}}}
+        case Con{+w2, +t2}:
+          +cs : +List<+List<Nat>> = w <> (w2 <> t2)
+          +n = Groups.len_words(cs)
+          +inf = SolveRef.inf_of(n)
+          SolveRef.best_to_maybe(inf,
+            step(n, guesses, Nil{}, guesses, cs, inf,
+                 Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
+
+def solve_fast_checked(ok: Bool, +guesses: +List<+List<Nat>>,
+                       +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
+  match ok:
+    case False{}:
+      None{}
+    case True{}:
+      solve_fast_valid(guesses, candidates)
+
 def solve_fast(+guesses: +List<+List<Nat>>,
                +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
-  +n = Groups.len_words(candidates)
-  +inf = SolveRef.inf_of(n)
-  SolveRef.best_to_maybe(inf,
-    step(n, guesses, Nil{}, guesses, candidates, inf,
-         Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
+  solve_fast_checked(all_in_fast(candidates, guesses), guesses, candidates)
 
 def solve(+guesses: +List<+List<Nat>>,
           +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
