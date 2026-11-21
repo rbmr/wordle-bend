@@ -1,7 +1,8 @@
 # Testing
 
-**Status: scaffolding, in progress.** No tests, laws, or benchmarks exist yet. This document states
-the principle the project is built on, so that the first code added follows it.
+**Status: scaffolding, in progress.** No tests or laws exist yet. The benchmark harness exists in
+`bench/`, but there is no solver for it to measure yet. This document states the principle the
+project is built on, so that the first code added follows it.
 
 ## Correctness is established by laws, not examples
 
@@ -30,7 +31,8 @@ suite never substitutes for a law that has not been stated or proved.
 
 `bench/` measures how long the solver takes on fixed inputs. It answers "how fast", not "is it
 right". A benchmark result is a wall-clock number, and it is reported so that runs are comparable
-across machines and across changes.
+across machines and across changes. The protocol and the result format are described in
+[benchmarking.md](benchmarking.md).
 
 Keeping the two separate matters:
 
