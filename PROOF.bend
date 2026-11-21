@@ -215,3 +215,44 @@ def FeedbackProof.word_eq_refl(+a: +List<Nat>) -> {Feedback.word_eq(a, a) == Tru
       %Equal.sym(Bool, Feedback.word_eq(t, t), True{}, FeedbackProof.word_eq_refl(t)) : {
         _ == True{} : Bool}
       {==}
+
+def Bool.and_true_l(a: Bool, b: Bool, e: {Bool.and(a, b) == True{} : Bool}) ->
+  {a == True{} : Bool}:
+  match a:
+    case True{}:
+      {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, Bool.false_ne_true(e))
+
+def Bool.and_true_r(a: Bool, b: Bool, e: {Bool.and(a, b) == True{} : Bool}) ->
+  {b == True{} : Bool}:
+  match a:
+    case True{}:
+      e
+    case False{}:
+      Empty.absurd({b == True{} : Bool}, Bool.false_ne_true(e))
+
+def SolveProof.GroupsSmaller(+S: +List<+List<Nat>>, +groups: +List<Solve.Group>) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, rest}:
+      match gp:
+        case Solve.Group{f, ws}:
+          {Nat.is_lt(Solve.len_words(ws), Solve.len_words(S)) == True{} : Bool}
+          & SolveProof.GroupsSmaller(S, rest)
+
+def SolveProof.groups_smaller_sound(+S: +List<+List<Nat>>, +groups: +List<Solve.Group>,
+    +e: {Solve.groups_smaller(S, groups) == True{} : Bool}) ->
+  SolveProof.GroupsSmaller(S, groups):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, rest}:
+      match gp:
+        case Solve.Group{+f, +ws}:
+          (Bool.and_true_l(Nat.is_lt(Solve.len_words(ws), Solve.len_words(S)),
+                            Solve.groups_smaller(S, rest), e),
+           SolveProof.groups_smaller_sound(S, rest,
+             Bool.and_true_r(Nat.is_lt(Solve.len_words(ws), Solve.len_words(S)),
+                             Solve.groups_smaller(S, rest), e)))
