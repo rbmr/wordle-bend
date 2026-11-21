@@ -40,6 +40,7 @@ import ./proofs/lb_capacity.bend as LBProof3
 import ./src/solve_fast.bend as SolveFast
 import ./proofs/fast_step.bend as FSProof
 import ./proofs/fast_better.bend as FSPrune
+import ./proofs/fast_groups.bend as FSGroups
 import ./proofs/fast_lb.bend as FSLB
 import ./proofs/fast_eq.bend as FSEq
 import ./src/solve_par.bend as SolvePar

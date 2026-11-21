@@ -75,6 +75,126 @@ def group_items(+groups: +List<Groups.Group>) -> +List<Item>:
         case Groups.Group{+f, +ws}:
           ClassItem{f, ws} <> (Add{f} <> group_items(rest))
 
+# Linear feedback and group partitioning. In `src/feedback.bend` and
+# `src/groups.bend`, the recursive calls sit inside both branches of
+# `Feedback.Bool.case`, which evaluates both arguments at every step. Matching
+# on the `Bool` parameter instead makes one recursive call per step while
+# returning the exact same lists (`proofs/fast_groups.bend`).
+def non_green_pick(+a: Nat, +rest: +List<Nat>, same: Bool) -> +List<Nat>:
+  match same:
+    case True{}:
+      rest
+    case False{}:
+      a <> rest
+
+def non_green_fast(+guess: +List<Nat>, +answer: +List<Nat>) -> +List<Nat>:
+  match guess:
+    case Nil{}:
+      Nil{}
+    case Con{+g, +t}:
+      match answer:
+        case Nil{}:
+          Nil{}
+        case Con{+a, +at}:
+          non_green_pick(a, non_green_fast(t, at), Nat.is_eq(g, a))
+
+def consume_color_fast(+x: Nat, +pool: +List<Nat>,
+                       same: Bool) -> Feedback.Color:
+  match pool:
+    case Nil{}:
+      Feedback.Gray{}
+    case Con{+h, +t}:
+      match same:
+        case True{}:
+          Feedback.Yellow{}
+        case False{}:
+          consume_color_fast(x, t, Feedback.next_letter_same(x, t))
+
+def consume_pool_fast(+x: Nat, +pool: +List<Nat>, same: Bool) -> +List<Nat>:
+  match pool:
+    case Nil{}:
+      Nil{}
+    case Con{+h, +t}:
+      match same:
+        case True{}:
+          t
+        case False{}:
+          h <> consume_pool_fast(x, t, Feedback.next_letter_same(x, t))
+
+def feedback_go_fast(+guess: +List<Nat>, +answer: +List<Nat>,
+                     +pool: +List<Nat>, same: Bool) -> +List<Feedback.Color>:
+  match guess:
+    case Nil{}:
+      Nil{}
+    case Con{+g, +t}:
+      match answer:
+        case Nil{}:
+          Feedback.Gray{} <> feedback_go_fast(t, Nil{}, Nil{}, False{})
+        case Con{+a, +at}:
+          match same:
+            case True{}:
+              Feedback.Green{}
+              <> feedback_go_fast(t, at, pool, Feedback.next_same(t, at))
+            case False{}:
+              consume_color_fast(g, pool, Feedback.next_letter_same(g, pool))
+              <> feedback_go_fast(t, at,
+                   consume_pool_fast(g, pool,
+                     Feedback.next_letter_same(g, pool)),
+                   Feedback.next_same(t, at))
+
+def feedback_fast(+guess: +List<Nat>,
+                  +answer: +List<Nat>) -> +List<Feedback.Color>:
+  feedback_go_fast(guess, answer, non_green_fast(guess, answer),
+                   Feedback.next_same(guess, answer))
+
+def next_group_hit(+fb: +List<Feedback.Color>,
+                   +groups: +List<Groups.Group>) -> Bool:
+  match groups:
+    case Nil{}:
+      False{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Feedback.feedback_eq(fb, f)
+
+def group_add_go(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+                 +groups: +List<Groups.Group>,
+                 hit: Bool) -> +List<Groups.Group>:
+  match groups:
+    case Nil{}:
+      Groups.Group{fb, [w]} <> Nil{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{+f, +ws}:
+          match hit:
+            case True{}:
+              Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])} <> rest
+            case False{}:
+              Groups.Group{f, ws}
+              <> group_add_go(w, fb, rest, next_group_hit(fb, rest))
+
+def group_add_fast(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+                   +groups: +List<Groups.Group>) -> +List<Groups.Group>:
+  group_add_go(w, fb, groups, next_group_hit(fb, groups))
+
+def groups_next_acc(+g: +List<Nat>, +w: +List<Nat>,
+                    +acc: +List<Groups.Group>,
+                    same: Bool) -> +List<Groups.Group>:
+  match same:
+    case True{}:
+      acc
+    case False{}:
+      group_add_fast(w, feedback_fast(g, w), acc)
+
+def groups_build_fast(+g: +List<Nat>, +S: +List<+List<Nat>>,
+                      +acc: +List<Groups.Group>) -> +List<Groups.Group>:
+  match S:
+    case Nil{}:
+      acc
+    case Con{+w, +rest}:
+      groups_build_fast(g, rest,
+        groups_next_acc(g, w, acc, Feedback.word_eq(g, w)))
+
 # The block of one guess, followed by the rest of the schedule. The usability
 # decision is a parameter so the recursive call builds the rest exactly once:
 # both branches of a strict `case` would build it twice.
@@ -92,7 +212,7 @@ def schedule_go(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>, +n: Nat) -> +List<
     case Nil{}:
       Nil{}
     case Con{+g, +rest}:
-      +groups = Groups.groups_build(g, S, Nil{})
+      +groups = groups_build_fast(g, S, Nil{})
       schedule_guess(g, groups, n, schedule_go(rest, S, n),
                      Groups.groups_smaller(S, groups))
 
