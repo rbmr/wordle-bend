@@ -35,12 +35,75 @@ type Item is Data:
   Add{fb: +List<Feedback.Color>}
   End{}
 
+# Single-pass word and feedback equality. `Feedback.word_eq` and
+# `Feedback.feedback_eq` compute both list lengths and allocate a zipped pair
+# list before comparing elements. Walking both lists in lockstep with a `Bool`
+# head-equality parameter returns the same boolean (`proofs/fast_groups.bend`)
+# without allocating and stops at the first mismatch.
+def word_eq_go(+a: +List<Nat>, +b: +List<Nat>, same: Bool) -> Bool:
+  match a:
+    case Nil{}:
+      match b:
+        case Nil{}:
+          True{}
+        case Con{bh, bt}:
+          False{}
+    case Con{ah, at}:
+      match b:
+        case Nil{}:
+          False{}
+        case Con{bh, bt}:
+          match same:
+            case True{}:
+              word_eq_go(at, bt, Feedback.next_same(at, bt))
+            case False{}:
+              False{}
+
+def word_eq_fast(+a: +List<Nat>, +b: +List<Nat>) -> Bool:
+  word_eq_go(a, b, Feedback.next_same(a, b))
+
+def next_fb_same(+a: +List<Feedback.Color>,
+                 +b: +List<Feedback.Color>) -> Bool:
+  match a:
+    case Nil{}:
+      False{}
+    case Con{ah, at}:
+      match b:
+        case Nil{}:
+          False{}
+        case Con{bh, bt}:
+          Feedback.Color.eq(ah, bh)
+
+def feedback_eq_go(+a: +List<Feedback.Color>,
+                   +b: +List<Feedback.Color>, same: Bool) -> Bool:
+  match a:
+    case Nil{}:
+      match b:
+        case Nil{}:
+          True{}
+        case Con{bh, bt}:
+          False{}
+    case Con{ah, at}:
+      match b:
+        case Nil{}:
+          False{}
+        case Con{bh, bt}:
+          match same:
+            case True{}:
+              feedback_eq_go(at, bt, next_fb_same(at, bt))
+            case False{}:
+              False{}
+
+def feedback_eq_fast(+a: +List<Feedback.Color>,
+                     +b: +List<Feedback.Color>) -> Bool:
+  feedback_eq_go(a, b, next_fb_same(a, b))
+
 # One when the candidate equals the guess, zero otherwise.
 def hit_bool(b: Bool) -> Nat:
   Feedback.Bool.case(Nat, b, 1n, 0n)
 
 def hit_word(+g: +List<Nat>, +w: +List<Nat>) -> Nat:
-  hit_bool(Feedback.word_eq(g, w))
+  hit_bool(word_eq_fast(g, w))
 
 # The number of candidates in `S` equal to `g`, duplicates counted.
 def word_mult(+g: +List<Nat>, +S: +List<+List<Nat>>) -> Nat:
@@ -184,7 +247,7 @@ def next_group_hit(+fb: +List<Feedback.Color>,
     case Con{gp, rest}:
       match gp:
         case Groups.Group{f, ws}:
-          Feedback.feedback_eq(fb, f)
+          feedback_eq_fast(fb, f)
 
 def group_add_go(+w: +List<Nat>, +fb: +List<Feedback.Color>,
                  +groups: +List<Groups.Group>,
@@ -222,7 +285,17 @@ def groups_build_fast(+g: +List<Nat>, +S: +List<+List<Nat>>,
       acc
     case Con{+w, +rest}:
       groups_build_fast(g, rest,
-        groups_next_acc(g, w, acc, Feedback.word_eq(g, w)))
+        groups_next_acc(g, w, acc, word_eq_fast(g, w)))
+
+def groups_smaller_fast(+n: Nat, +groups: +List<Groups.Group>) -> Bool:
+  match groups:
+    case Nil{}:
+      True{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Bool.and(Nat.is_lt(Groups.len_words(ws), n),
+                   groups_smaller_fast(n, rest))
 
 # The block of one guess, followed by the rest of the schedule. The usability
 # decision is a parameter so the recursive call builds the rest exactly once:
@@ -243,7 +316,7 @@ def schedule_go(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>, +n: Nat) -> +List<
     case Con{+g, +rest}:
       +groups = groups_build_fast(g, S, Nil{})
       schedule_guess(g, groups, n, schedule_go(rest, S, n),
-                     Groups.groups_smaller(S, groups))
+                     groups_smaller_fast(n, groups))
 
 # The schedule for a guess list: one block per usable guess, in G order.
 def schedule(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) -> +List<Item>:

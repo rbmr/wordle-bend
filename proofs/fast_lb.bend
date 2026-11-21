@@ -35,8 +35,16 @@ import ./optcost.bend as OC
 import ./lb_twice.bend as LBProof2
 import ./lb_capacity.bend as CapProof
 import ./fast_step.bend as FStep
+import ./fast_groups.bend as FG
 import ./fast_better.bend as FB
 import ./par_elt.bend as ParElt
+
+# `SolveFast.hit_word` agrees with `LBProof2.LB.hit`.
+def FS.hit_word_eq(+g: +List<Nat>, +w: +List<Nat>) ->
+  {SolveFast.hit_word(g, w) == LBProof2.LB.hit(g, w) : Nat}:
+  Equal.cong(Bool, Nat, SolveFast.hit_bool,
+    SolveFast.word_eq_fast(g, w), Feedback.word_eq(g, w),
+    FG.FG.word_eq_fast_eq(g, w))
 
 # `SolveFast.word_mult` agrees with `LBProof2.LB.mult`.
 def FS.word_mult_eq(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
@@ -45,9 +53,16 @@ def FS.word_mult_eq(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
     case Nil{}:
       {==}
     case Con{+h, +t}:
-      Equal.cong(Nat, Nat, x => Nat.add(SolveFast.hit_word(g, h), x),
-        SolveFast.word_mult(g, t), LBProof2.LB.mult(g, t),
-        FS.word_mult_eq(g, t))
+      Equal.trans(Nat,
+        Nat.add(SolveFast.hit_word(g, h), SolveFast.word_mult(g, t)),
+        Nat.add(LBProof2.LB.hit(g, h), SolveFast.word_mult(g, t)),
+        Nat.add(LBProof2.LB.hit(g, h), LBProof2.LB.mult(g, t)),
+        Equal.cong(Nat, Nat, x => Nat.add(x, SolveFast.word_mult(g, t)),
+          SolveFast.hit_word(g, h), LBProof2.LB.hit(g, h),
+          FS.hit_word_eq(g, h)),
+        Equal.cong(Nat, Nat, x => Nat.add(LBProof2.LB.hit(g, h), x),
+          SolveFast.word_mult(g, t), LBProof2.LB.mult(g, t),
+          FS.word_mult_eq(g, t)))
 
 # Helper to combine both arguments of `Nat.max`.
 def FS.max_cong(+a1: Nat, +a2: Nat, +b1: Nat, +b2: Nat,

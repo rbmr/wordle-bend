@@ -16,6 +16,151 @@ import ../src/solve_fast.bend as SolveFast
 import ../src/groups.bend as Groups
 import ../src/feedback.bend as Feedback
 
+# `False` is a right absorber for `Bool.and`.
+def FG.and_false_r(x: Bool) -> {Bool.and(x, False{}) == False{} : Bool}:
+  match x:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def FG.word_step_rhs(+at: +List<Nat>, +bt: +List<Nat>, same: Bool) -> Bool:
+  Bool.and(
+    Nat.is_eq(List.length(&2, Nat, at), List.length(&2, Nat, bt)),
+    List.all.if(
+      u => List.all(&1, Nat & Nat, Feedback.pair_nat_eq,
+             List.zip(&2, Nat, &2, Nat, at, bt)),
+      same))
+
+# `word_eq_go` agrees with `Feedback.word_eq`.
+def FG.word_eq_go_eq(+a: +List<Nat>, +b: +List<Nat>, same: Bool,
+    +es: {same == Feedback.next_same(a, b) : Bool}) ->
+  {SolveFast.word_eq_go(a, b, same) == Feedback.word_eq(a, b) : Bool}:
+  match a:
+    case Nil{}:
+      match b:
+        case Nil{}:
+          {==}
+        case Con{bh, bt}:
+          {==}
+    case Con{+ah, +at}:
+      match b:
+        case Nil{}:
+          {==}
+        case Con{+bh, +bt}:
+          match same:
+            case True{}:
+              +e1 : {SolveFast.word_eq_go(at, bt, Feedback.next_same(at, bt))
+                     == Feedback.word_eq(at, bt) : Bool} =
+                FG.word_eq_go_eq(at, bt, Feedback.next_same(at, bt), {==})
+              +e2 : {FG.word_step_rhs(at, bt, True{})
+                     == FG.word_step_rhs(at, bt, Nat.is_eq(ah, bh)) : Bool} =
+                Equal.cong(Bool, Bool,
+                  s => FG.word_step_rhs(at, bt, s),
+                  True{}, Nat.is_eq(ah, bh), es)
+              Equal.trans(Bool,
+                SolveFast.word_eq_go(at, bt, Feedback.next_same(at, bt)),
+                Feedback.word_eq(at, bt),
+                Feedback.word_eq(ah <> at, bh <> bt),
+                e1, e2)
+            case False{}:
+              +e1 : {False{} == FG.word_step_rhs(at, bt, False{}) : Bool} =
+                Equal.sym(Bool,
+                  FG.word_step_rhs(at, bt, False{}),
+                  False{},
+                  FG.and_false_r(
+                    Nat.is_eq(List.length(&2, Nat, at),
+                      List.length(&2, Nat, bt))))
+              +e2 : {FG.word_step_rhs(at, bt, False{})
+                     == FG.word_step_rhs(at, bt, Nat.is_eq(ah, bh)) : Bool} =
+                Equal.cong(Bool, Bool,
+                  s => FG.word_step_rhs(at, bt, s),
+                  False{}, Nat.is_eq(ah, bh), es)
+              Equal.trans(Bool,
+                False{},
+                FG.word_step_rhs(at, bt, False{}),
+                Feedback.word_eq(ah <> at, bh <> bt),
+                e1, e2)
+
+# `word_eq_fast` agrees with `Feedback.word_eq`.
+def FG.word_eq_fast_eq(+a: +List<Nat>, +b: +List<Nat>) ->
+  {SolveFast.word_eq_fast(a, b) == Feedback.word_eq(a, b) : Bool}:
+  FG.word_eq_go_eq(a, b, Feedback.next_same(a, b), {==})
+
+def FG.fb_step_rhs(+at: +List<Feedback.Color>, +bt: +List<Feedback.Color>,
+    same: Bool) -> Bool:
+  Bool.and(
+    Nat.is_eq(List.length(&2, Feedback.Color, at),
+      List.length(&2, Feedback.Color, bt)),
+    List.all.if(
+      u => List.all(&1, Feedback.Color & Feedback.Color,
+             Feedback.pair_color_eq,
+             List.zip(&2, Feedback.Color, &2, Feedback.Color, at, bt)),
+      same))
+
+# `feedback_eq_go` agrees with `Feedback.feedback_eq`.
+def FG.feedback_eq_go_eq(+a: +List<Feedback.Color>,
+    +b: +List<Feedback.Color>, same: Bool,
+    +es: {same == SolveFast.next_fb_same(a, b) : Bool}) ->
+  {SolveFast.feedback_eq_go(a, b, same)
+   == Feedback.feedback_eq(a, b) : Bool}:
+  match a:
+    case Nil{}:
+      match b:
+        case Nil{}:
+          {==}
+        case Con{bh, bt}:
+          {==}
+    case Con{+ah, +at}:
+      match b:
+        case Nil{}:
+          {==}
+        case Con{+bh, +bt}:
+          match same:
+            case True{}:
+              +e1 : {SolveFast.feedback_eq_go(at, bt,
+                       SolveFast.next_fb_same(at, bt))
+                     == Feedback.feedback_eq(at, bt) : Bool} =
+                FG.feedback_eq_go_eq(at, bt,
+                  SolveFast.next_fb_same(at, bt), {==})
+              +e2 : {FG.fb_step_rhs(at, bt, True{})
+                     == FG.fb_step_rhs(at, bt, Feedback.Color.eq(ah, bh))
+                     : Bool} =
+                Equal.cong(Bool, Bool,
+                  s => FG.fb_step_rhs(at, bt, s),
+                  True{}, Feedback.Color.eq(ah, bh), es)
+              Equal.trans(Bool,
+                SolveFast.feedback_eq_go(at, bt,
+                  SolveFast.next_fb_same(at, bt)),
+                Feedback.feedback_eq(at, bt),
+                Feedback.feedback_eq(ah <> at, bh <> bt),
+                e1, e2)
+            case False{}:
+              +e1 : {False{} == FG.fb_step_rhs(at, bt, False{}) : Bool} =
+                Equal.sym(Bool,
+                  FG.fb_step_rhs(at, bt, False{}),
+                  False{},
+                  FG.and_false_r(
+                    Nat.is_eq(List.length(&2, Feedback.Color, at),
+                      List.length(&2, Feedback.Color, bt))))
+              +e2 : {FG.fb_step_rhs(at, bt, False{})
+                     == FG.fb_step_rhs(at, bt, Feedback.Color.eq(ah, bh))
+                     : Bool} =
+                Equal.cong(Bool, Bool,
+                  s => FG.fb_step_rhs(at, bt, s),
+                  False{}, Feedback.Color.eq(ah, bh), es)
+              Equal.trans(Bool,
+                False{},
+                FG.fb_step_rhs(at, bt, False{}),
+                Feedback.feedback_eq(ah <> at, bh <> bt),
+                e1, e2)
+
+# `feedback_eq_fast` agrees with `Feedback.feedback_eq`.
+def FG.feedback_eq_fast_eq(+a: +List<Feedback.Color>,
+    +b: +List<Feedback.Color>) ->
+  {SolveFast.feedback_eq_fast(a, b) == Feedback.feedback_eq(a, b) : Bool}:
+  FG.feedback_eq_go_eq(a, b, SolveFast.next_fb_same(a, b), {==})
+
 # `non_green_pick` agrees with `Bool.case` when the recursive tails agree.
 def FG.non_green_pick_eq(+a: Nat, +r1: +List<Nat>, +r2: +List<Nat>,
     same: Bool, er: {r1 == r2 : +List<Nat>}) ->
@@ -200,13 +345,23 @@ def FG.group_add_go_eq(+w: +List<Nat>, +fb: +List<Feedback.Color>,
         case Groups.Group{+f, +ws}:
           match hit:
             case True{}:
+              +eh_ref : {True{} == Feedback.feedback_eq(fb, f) : Bool} =
+                Equal.trans(Bool, True{},
+                  SolveFast.feedback_eq_fast(fb, f),
+                  Feedback.feedback_eq(fb, f),
+                  eh, FG.feedback_eq_fast_eq(fb, f))
               Equal.cong(Bool, +List<Groups.Group>,
                 b => Feedback.Bool.case(+List<Groups.Group>, b,
                        Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])}
                          <> rest,
                        Groups.Group{f, ws} <> Groups.group_add(w, fb, rest)),
-                True{}, Feedback.feedback_eq(fb, f), eh)
+                True{}, Feedback.feedback_eq(fb, f), eh_ref)
             case False{}:
+              +eh_ref : {False{} == Feedback.feedback_eq(fb, f) : Bool} =
+                Equal.trans(Bool, False{},
+                  SolveFast.feedback_eq_fast(fb, f),
+                  Feedback.feedback_eq(fb, f),
+                  eh, FG.feedback_eq_fast_eq(fb, f))
               +e1 : {Groups.Group{f, ws}
                      <> SolveFast.group_add_go(w, fb, rest,
                           SolveFast.next_group_hit(fb, rest))
@@ -231,7 +386,7 @@ def FG.group_add_go_eq(+w: +List<Nat>, +fb: +List<Feedback.Color>,
                          Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])}
                            <> rest,
                          Groups.Group{f, ws} <> Groups.group_add(w, fb, rest)),
-                  False{}, Feedback.feedback_eq(fb, f), eh)
+                  False{}, Feedback.feedback_eq(fb, f), eh_ref)
               Equal.trans(+List<Groups.Group>,
                 Groups.Group{f, ws}
                 <> SolveFast.group_add_go(w, fb, rest,
@@ -299,15 +454,53 @@ def FG.groups_build_eq(+g: +List<Nat>, +S: +List<+List<Nat>>,
     case Nil{}:
       {==}
     case Con{+w, +rest}:
+      +ew : {Groups.groups_build(g, rest,
+               SolveFast.groups_next_acc(g, w, acc,
+                 SolveFast.word_eq_fast(g, w)))
+             == Groups.groups_build(g, rest,
+                  SolveFast.groups_next_acc(g, w, acc,
+                    Feedback.word_eq(g, w)))
+             : +List<Groups.Group>} =
+        Equal.cong(Bool, +List<Groups.Group>,
+          b => Groups.groups_build(g, rest,
+                 SolveFast.groups_next_acc(g, w, acc, b)),
+          SolveFast.word_eq_fast(g, w), Feedback.word_eq(g, w),
+          FG.word_eq_fast_eq(g, w))
       Equal.trans(+List<Groups.Group>,
         SolveFast.groups_build_fast(g, rest,
-          SolveFast.groups_next_acc(g, w, acc, Feedback.word_eq(g, w))),
+          SolveFast.groups_next_acc(g, w, acc, SolveFast.word_eq_fast(g, w))),
         Groups.groups_build(g, rest,
           SolveFast.groups_next_acc(g, w, acc, Feedback.word_eq(g, w))),
         Feedback.Bool.case(+List<Groups.Group>, Feedback.word_eq(g, w),
           Groups.groups_build(g, rest, acc),
           Groups.groups_build(g, rest,
             Groups.group_add(w, Feedback.feedback(g, w), acc))),
-        FG.groups_build_eq(g, rest,
-          SolveFast.groups_next_acc(g, w, acc, Feedback.word_eq(g, w))),
+        Equal.trans(+List<Groups.Group>,
+          SolveFast.groups_build_fast(g, rest,
+            SolveFast.groups_next_acc(g, w, acc, SolveFast.word_eq_fast(g, w))),
+          Groups.groups_build(g, rest,
+            SolveFast.groups_next_acc(g, w, acc, SolveFast.word_eq_fast(g, w))),
+          Groups.groups_build(g, rest,
+            SolveFast.groups_next_acc(g, w, acc, Feedback.word_eq(g, w))),
+          FG.groups_build_eq(g, rest,
+            SolveFast.groups_next_acc(g, w, acc, SolveFast.word_eq_fast(g, w))),
+          ew),
         FG.groups_step_eq(g, w, rest, acc, Feedback.word_eq(g, w)))
+
+# `groups_smaller_fast` with `len_words(S)` agrees with `Groups.groups_smaller`.
+def FG.groups_smaller_fast_eq(+S: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>) ->
+  {SolveFast.groups_smaller_fast(Groups.len_words(S), groups)
+   == Groups.groups_smaller(S, groups) : Bool}:
+  match groups:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Equal.cong(Bool, Bool,
+            b => Bool.and(
+                   Nat.is_lt(Groups.len_words(ws), Groups.len_words(S)), b),
+            SolveFast.groups_smaller_fast(Groups.len_words(S), rest),
+            Groups.groups_smaller(S, rest),
+            FG.groups_smaller_fast_eq(S, rest))
