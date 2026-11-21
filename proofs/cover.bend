@@ -24,11 +24,13 @@ import ./cover_maybe.bend as CoverMaybe
 import ./cover_list.bend as CoverList
 import ./cover_oracle.bend as CoverOracle
 import ./cover_groups.bend as CoverGroups
+import ./cover_kids.bend as CoverKids
 
 # The bound for one tree, with the value already computed from the oracle.
 def Cover.Stmt(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +entries: +List<+List<Maybe<&2, Nat>>>, T: Tree.Tree) -> Type:
-  Tree.Valid(T, G, S)
+  CoverOracle.Cover.Oracle(G, S, G, entries)
+  -> Tree.Valid(T, G, S)
   -> CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
                           Some{Tree.cost(T, S)})
 
@@ -319,9 +321,9 @@ def Cover.cover_unusable_kid(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +entries: +List<+List<Maybe<&2, Nat>>>, +g: +List<Nat>,
     +kids: +List<Tree.Child>, +groups: +List<Groups.Group>,
     +eg3: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
     +fb: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
     +ws_eq: {ws == S : +List<+List<Nat>>},
-    kidsin: Tree.KidsIn(kids, G),
     depths: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
     all: Cover.AllCover(G, S, entries, kids),
     kid: CoverOracle.Cover.GroupKid(G, kids, Groups.Group{fb, ws}),
@@ -336,7 +338,7 @@ def Cover.cover_unusable_kid(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         Cover.valid_transport(G, T, ws, S, ws_eq, valid_ws)
       stmt = Cover.pick(G, S, entries, fb, kids, all, T, e_look)
       ih : CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
-             Some{Tree.cost(T, S)}) = stmt(valid_S)
+             Some{Tree.cost(T, S)}) = stmt(oracle)(valid_S)
       Cover.cover_unusable_cost(G, S, entries, g, kids, groups, eg3, fb, ws,
         ws_eq, T, e_look, depths, total_le, ih)
 
@@ -344,8 +346,8 @@ def Cover.cover_unusable_bad(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +entries: +List<+List<Maybe<&2, Nat>>>, +g: +List<Nat>,
     +kids: +List<Tree.Child>, +groups: +List<Groups.Group>,
     +eg3: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
     kidsok: CoverOracle.Cover.GroupKids(G, kids, groups),
-    kidsin: Tree.KidsIn(kids, G),
     depths: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
     all: Cover.AllCover(G, S, entries, kids),
     bad: Sigma<&2, &1, Groups.Group,
@@ -367,7 +369,7 @@ def Cover.cover_unusable_bad(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
             G, kids, groups, Groups.Group{fb, ws}, kidsok, mem,
             kid => total_le =>
               Cover.cover_unusable_kid(G, S, entries, g, kids, groups, eg3,
-                fb, ws, ws_eq, kidsin, depths, all, kid, total_le))
+                oracle, fb, ws, ws_eq, depths, all, kid, total_le))
 
 # Transport per-group depth facts along an equality of group lists.
 def Cover.allgd_transport(+g: +List<Nat>, +kids: +List<Tree.Child>,
@@ -469,8 +471,8 @@ def Cover.cover_unusable_agd(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +eg1: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
     +eg2: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
     +eg3: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
     kidsok: CoverOracle.Cover.GroupKids(G, kids, groups),
-    kidsin: Tree.KidsIn(kids, G),
     depths: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
     agd: Grp.Grp.AllGroupDepths(g, kids, groups),
     all: Cover.AllCover(G, S, entries, kids),
@@ -487,7 +489,7 @@ def Cover.cover_unusable_agd(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
   data : CoverGroups.Cover.ClassData(g, kids, S, groups) =
     CoverGroups.Cover.class_data(g, kids, S, groups, agd, allsub)
   bad = CoverGroups.Cover.find_bad(g, kids, S, groups, data, ef)
-  Cover.cover_unusable_bad(G, S, entries, g, kids, groups, eg3, kidsok, kidsin,
+  Cover.cover_unusable_bad(G, S, entries, g, kids, groups, eg3, oracle, kidsok,
     depths, all, bad)
 
 # The unusable root: a class holds all of `S`, so the node costs at least that
@@ -498,8 +500,8 @@ def Cover.cover_unusable(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +eg1: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
     +eg2: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
     +eg3: {groups == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
     kidsok: CoverOracle.Cover.GroupKids(G, kids, groups),
-    kidsin: Tree.KidsIn(kids, G),
     depths: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
     all: Cover.AllCover(G, S, entries, kids),
     +ef: {Groups.groups_smaller(S, groups) == False{} : Bool}) ->
@@ -511,7 +513,7 @@ def Cover.cover_unusable(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     g, kids, S, Nil{}, depths, Unit{},
     ok => d2 =>
       Cover.cover_unusable_agd(G, S, entries, g, kids, groups, eg1, eg2, eg3,
-        kidsok, kidsin, d2,
+        oracle, kidsok, d2,
         CoverOracle.Cover.allgd_eq(g, kids, Groups.groups_build(g, S, Nil{}),
           groups, Equal.sym(+List<Groups.Group>, groups,
             Groups.groups_build(g, S, Nil{}), eg1), ok),
@@ -582,11 +584,38 @@ def Cover.cover_usable(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
 
 # The node step of the structural induction.
 
+def Cover.cover_node_dispatch(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +entries: +List<+List<Maybe<&2, Nat>>>, +g: +List<Nat>,
+    +kids: +List<Tree.Child>,
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
+    all: Cover.AllCover(G, S, entries, kids),
+    wg: Tree.WordIn(g, G),
+    kidsok: CoverOracle.Cover.GroupKids(G, kids, Groups.groups_build(g, S, Nil{})),
+    depths: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
+    b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool}) ->
+  CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
+    Some{Tree.cost(Tree.Node{g, kids}, S)}):
+  match b:
+    case True{}:
+      +us : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{} : Bool} =
+        Equal.sym(Bool, True{},
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), eb)
+      Cover.cover_usable(G, S, entries, g, kids,
+        Groups.groups_build(g, S, Nil{}), {==}, {==}, {==},
+        oracle, kidsok, wg, depths, us)
+    case False{}:
+      +ef : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == False{} : Bool} =
+        Equal.sym(Bool, False{},
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), eb)
+      Cover.cover_unusable(G, S, entries, g, kids,
+        Groups.groups_build(g, S, Nil{}), {==}, {==}, {==}, oracle, kidsok,
+        depths, all, ef)
+
 def Cover.cover_node_go(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +entries: +List<+List<Maybe<&2, Nat>>>, +g: +List<Nat>,
     +kids: +List<Tree.Child>,
     oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
-    kidsok: CoverOracle.Cover.GroupKids(G, kids, Groups.groups_build(g, S, Nil{})),
     all: Cover.AllCover(G, S, entries, kids),
     v: Tree.Valid(Tree.Node{g, kids}, G, S),
     b: Bool,
@@ -597,30 +626,110 @@ def Cover.cover_node_go(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     case Tuple{ti, depths}:
       match ti:
         case Tuple{wg, kidsin}:
-          match b:
-            case True{}:
-              +us : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{} : Bool} =
-                Equal.sym(Bool, True{},
-                  Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), eb)
-              Cover.cover_usable(G, S, entries, g, kids,
-                Groups.groups_build(g, S, Nil{}), {==}, {==}, {==},
-                oracle, kidsok, wg, depths, us)
-            case False{}:
-              +ef : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == False{} : Bool} =
-                Equal.sym(Bool, False{},
-                  Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), eb)
-              Cover.cover_unusable(G, S, entries, g, kids,
-                Groups.groups_build(g, S, Nil{}), {==}, {==}, {==}, kidsok,
-                kidsin, depths, all, ef)
+          Cover.depths_agd(
+            CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
+              Some{Tree.cost(Tree.Node{g, kids}, S)}),
+            g, kids, S, Nil{}, depths, Unit{},
+            ok => d2 =>
+              +neok : {CoverKids.Cover.all_ne(Groups.groups_build(g, S, Nil{}))
+                       == True{} : Bool} =
+                CoverKids.Cover.groups_build_ne(g, S, Nil{}, {==})
+              +kb : {CoverKids.Cover.kids_in_b(kids, G) == True{} : Bool} =
+                CoverKids.Cover.kids_in_to_b(kids, G, kidsin)
+              CoverKids.Cover.groupkids_from(
+                CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
+                  Some{Tree.cost(Tree.Node{g, kids}, S)}),
+                G, g, kids, Groups.groups_build(g, S, Nil{}), kb, neok, ok,
+                kidsok =>
+                  Cover.cover_node_dispatch(G, S, entries, g, kids, oracle,
+                    all, wg, kidsok, d2, b, eb)))
 
+# The node step of the structural induction.
 def Cover.cover_node(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +entries: +List<+List<Maybe<&2, Nat>>>, +g: +List<Nat>,
     +kids: +List<Tree.Child>,
-    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
-    kidsok: CoverOracle.Cover.GroupKids(G, kids, Groups.groups_build(g, S, Nil{})),
     all: Cover.AllCover(G, S, entries, kids)) ->
   Cover.Stmt(G, S, entries, Tree.Node{g, kids}):
-  valid =>
+  oracle => valid =>
     Cover.cover_node_go(G, S, entries, g, kids,
-      oracle, kidsok, all, valid,
+      oracle, all, valid,
       Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==})
+
+# The cover bound for one tree, uniformly over the candidate list and oracle.
+def Cover.BoundAll(+G: +List<+List<Nat>>, t: Tree.Tree) -> Type:
+  @S: +List<+List<Nat>> -> @entries: +List<+List<Maybe<&2, Nat>>>
+  -> CoverOracle.Cover.Oracle(G, S, G, entries)
+  -> Tree.Valid(t, G, S)
+  -> CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
+                          Some{Tree.cost(t, S)})
+
+# The bound for every child in a list.
+def Cover.AllBound(+G: +List<+List<Nat>>, +kids: +List<Tree.Child>) -> Type:
+  match kids:
+    case Nil{}:
+      Unit
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          Cover.BoundAll(G, child) & Cover.AllBound(G, rest)
+
+def Cover.cover_apply(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +entries: +List<+List<Maybe<&2, Nat>>>,
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries), +t: Tree.Tree,
+    b: Cover.BoundAll(G, t), v: Tree.Valid(t, G, S)) ->
+  CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
+    Some{Tree.cost(t, S)}):
+  b(S, entries, oracle, v)
+
+# Turn the uniform bounds into the fixed-list induction hypothesis.
+def Cover.allcover_of(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +entries: +List<+List<Maybe<&2, Nat>>>,
+    +kids: +List<Tree.Child>, b: Cover.AllBound(G, kids)) ->
+  Cover.AllCover(G, S, entries, kids):
+  match kids:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          (bh, bt) = b
+          (bh(S, entries), Cover.allcover_of(G, S, entries, rest, bt))
+
+# Every child in the list satisfies the bound, by structural recursion.
+def Cover.bounds(+G: +List<+List<Nat>>, +kids: +List<Tree.Child>) ->
+  Cover.AllBound(G, kids):
+  match kids:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, child}:
+          match child:
+            case Tree.Node{g, ckids}:
+              ((S => entries => oracle => v =>
+                  +S2 : +List<+List<Nat>> = S
+                  +entries2 : +List<+List<Maybe<&2, Nat>>> = entries
+                  Cover.cover_node(G, S2, entries2, g, ckids,
+                    Cover.allcover_of(G, S2, entries2, ckids,
+                      Cover.bounds(G, ckids)))(oracle)(v)),
+               Cover.bounds(G, rest))
+
+# The cover lemma: a valid tree costs at least the best guess value.
+def Cover.bound(+G: +List<+List<Nat>>, t: Tree.Tree) -> Cover.BoundAll(G, t):
+  match t:
+    case Tree.Node{g, kids}:
+      S => entries => oracle => v =>
+        +S2 : +List<+List<Nat>> = S
+        +entries2 : +List<+List<Maybe<&2, Nat>>> = entries
+        +kids2 : +List<Tree.Child> = kids
+        Cover.cover_node(G, S2, entries2, g, kids2,
+          Cover.allcover_of(G, S2, entries2, kids2,
+            Cover.bounds(G, kids2)))(oracle)(v)
+
+def Cover.cover(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +entries: +List<+List<Maybe<&2, Nat>>>,
+    oracle: CoverOracle.Cover.Oracle(G, S, G, entries),
+    t: Tree.Tree, v: Tree.Valid(t, G, S)) ->
+  CoverMaybe.Cover.MLe(CoverOracle.Cover.BestValue(G, S, entries),
+    Some{Tree.cost(t, S)}):
+  Cover.bound(G, t)(S, entries, oracle, v)
