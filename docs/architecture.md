@@ -63,24 +63,33 @@ child    = [ feedback, tree ]
 feedback = [ colour, ... ]
 ```
 
-A colour is `0` (Gray), `1` (Yellow) or `2` (Green). The parser is a rejecting stub; law 6 is open.
+A colour is `0` (Gray), `1` (Yellow) or `2` (Green). A letter is a `Nat` written in unary as a
+JSON number: `n` ones followed by a zero, so `0` is `0`, `1` is `10`, `2` is `110`. The trailing
+zero terminates each number, which is what makes the parser easy to invert: every printed token
+is a prefix that ends at a known character. `Json.parse` accepts exactly this grammar and rejects
+anything else, including trailing text.
 
 ### `LAWS.bend` and `PROOF.bend`
 
-`LAWS.bend` states the six claims. `PROOF.bend` proves laws 1 to 3 and leaves 4 to 6 open. Each
-proof is a definition named after the law, `def Laws.<law>`. See [laws.md](laws.md).
+`LAWS.bend` states the six claims. `PROOF.bend` proves laws 1 to 3 and 6 and leaves 4 and 5
+open. Each proof is a definition named after the law, `def Laws.<law>`. See [laws.md](laws.md).
 
 ### `src/main.bend`
 
 The command-line entry point:
 
 ```sh
-bend src/main.bend --guesses words/guesses.txt --candidates words/candidates.txt
+bend src/main.bend -o wordle-bend
+./wordle-bend --guesses words/guesses.txt --candidates words/candidates.txt
 ```
 
-It reads both files (one word per line), maps letters to `Nat` by code point with lower-case ASCII
-folded to upper case, calls `solve`, prints the JSON tree on stdout, or a clear error on stderr when
-`solve` returns `None`. No other flags are accepted.
+It reads the two files named by `--guesses` and `--candidates`, maps letters to `Nat` by code
+point, calls `solve`, and prints the JSON tree on stdout. The whole of each file is read, in
+chunks, so a list is never truncated. Leading and trailing whitespace on a line is ignored, which
+handles CRLF files and blank lines, and letters are left exactly as they are, so any alphabet
+works. `--help` prints the usage. Every error, including a missing or unknown flag, an unreadable
+file, an empty list and a `None` from `solve`, prints one line on stderr and exits non-zero. See
+[cli.md](cli.md) for the full command-line contract.
 
 ## Data flow
 
@@ -102,7 +111,6 @@ LAWS.bend ── checked by PROOF.bend ──► validity and optimality claims
 ## Current limits
 
 - `solve` is a placeholder, so laws 4 and 5 are open.
-- The JSON parser is not implemented, so law 6 is open.
 - `depth` is total and structurally recursive, but the validity and optimality proofs are still to
   be written.
 - There is no benchmark harness yet.

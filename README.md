@@ -28,12 +28,12 @@ guarantee that the earlier work could not give.
 
 **Core code and laws, in progress.** The feedback function, the tree structure,
 the validity and cost definitions, the JSON printer, the command-line entry
-point, and the bundled word lists are present. Laws 1 to 3 are proved. Laws 4
-to 6 are stated and still open. The solver itself is a placeholder that returns
-`None`; Phase 4 replaces it with the search.
+point, and the bundled word lists are present. Laws 1 to 3 and 6 are proved.
+Laws 4 and 5 are stated and still open, because the solver itself is a
+placeholder that returns `None`; Phase 4 replaces it with the search.
 
-The JSON parser is not implemented yet. `Json.print` works; `Json.parse`
-currently rejects every input, and law 6 is open for that reason.
+`Json.print` writes a tree as one JSON array, and `Json.parse` reads exactly
+that grammar back, so the roundtrip law is proved.
 
 ## Layout
 
@@ -48,6 +48,7 @@ currently rejects every input, and law 6 is open for that reason.
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) — the components and how data flows between them.
+- [docs/cli.md](docs/cli.md) — the command line: flags, input and output formats, exit codes, examples.
 - [docs/laws.md](docs/laws.md) — each law in plain English, with its Bend definition and status.
 - [docs/contributing.md](docs/contributing.md) — branch names, commit format, pull request workflow,
   and repository hygiene rules.
