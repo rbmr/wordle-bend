@@ -244,6 +244,22 @@ def F2.classif_g(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>, +b: Bool,
   %e : F2.StrongClassIf(fuel, inf, G, b, _)
   f
 
+# A filtered strong obligation with a true test is a strong obligation.
+def F2.sclassif_true(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    +us: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{}
+         : Bool},
+    f: F2.StrongClassIf(fuel, inf, G, b, Groups.groups_build(g, S, Nil{}))) ->
+  F2.StrongClass(fuel, inf, G, Groups.groups_build(g, S, Nil{})):
+  match b:
+    case True{}:
+      f
+    case False{}:
+      Empty.absurd(F2.StrongClass(fuel, inf, G, Groups.groups_build(g, S, Nil{})),
+        Logic.Proof.false_ne_true(Equal.trans(Bool, False{},
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), True{}, eb, us)))
+
 # The class obligations of every guess in a guess list.
 def F2.StrongByGs(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>) -> Type:
@@ -528,3 +544,168 @@ def F2.sbygs_at(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
       (fh, ft) = f
       F2.sbygs_head(fuel, inf, G, S, h, t, g, mem, fh, Feedback.word_eq(g, h), {==},
         mt => F2.sbygs_at(fuel, inf, G, S, t, g, mt, ft))
+
+# The node step's guess-fold facts, as the tree's two facts.
+def F2.finish_pack(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +T: Tree.Tree,
+    o: {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+         Eval.Eval.dummy_inf(inf))), Tree.cost(T, S)) == True{} : Bool},
+    fl: {Nat.is_lt(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+          Eval.Eval.dummy_inf(inf))), inf) == True{} : Bool},
+    fr: {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+          Eval.Eval.dummy_inf(inf))),
+          Nat.mul(Groups.len_words(S), Groups.len_words(S))) == True{} : Bool}) ->
+  F2.SF(1n+p, inf, G, S, T):
+  +e : {SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
+       == Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf))
+       : SolveRef.Best} =
+    Eval.Eval.guesses_step(p, G, S, inf, G, Eval.Eval.dummy_inf(inf))
+  +ec : {Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+            inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+            Eval.Eval.dummy_zero()))
+          == Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+               Eval.Eval.dummy_inf(inf))) : Nat} =
+    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+      SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)), e)
+  (Fold.OQ.le_cong_l(
+     Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf,
+       Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+     Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+       Eval.Eval.dummy_inf(inf))), Tree.cost(T, S), ec, o),
+   (CBN.CB.lt_eq_l(inf,
+      Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+        Eval.Eval.dummy_inf(inf))),
+      Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf,
+        Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+      Equal.sym(Nat,
+        Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+          inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+          Eval.Eval.dummy_zero())),
+        Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+          Eval.Eval.dummy_inf(inf))), ec), fl),
+    NatProof.Nat.is_le_eq_l(
+      Nat.mul(Groups.len_words(S), Groups.len_words(S)),
+      Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+        Eval.Eval.dummy_inf(inf))),
+      Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf,
+        Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())),
+      Equal.sym(Nat,
+        Eval.Eval.cost_of(SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S,
+          inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+          Eval.Eval.dummy_zero())),
+        Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+          Eval.Eval.dummy_inf(inf))), ec), fr)))
+
+# The node step of the merged induction.
+def F2.strong_at(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, +kids: +List<Tree.Child>,
+    flatS: F2.StrongByGs(p, inf, G, S, G),
+    v: Tree.Valid(Tree.Node{g, kids}, G, S), b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    all: F2.AllStrongBound(p, inf, G, kids),
+    +hz: {Nat.is_lt(Nat.mul(Groups.len_words(S), Groups.len_words(S)), inf)
+          == True{} : Bool}) -> F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}):
+  ((wg, kidsin), depths) = v
+  match b:
+    case True{}:
+      +wgm : {Tree.member_word(g, G) == True{} : Bool} = wg
+      +n : Nat = Groups.len_words(S)
+      +gb : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+      +items : Eval.KS = Eval.Eval.items(p, G, S, g, gb, Nil{}, 0n, inf)
+      +cs : +List<Nat> = Sat.SB.child_costs(p, G, gb, inf)
+      +us : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) == True{}
+             : Bool} =
+        Equal.sym(Bool, b, Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+          eb)
+      sclass : F2.StrongClass(p, inf, G, gb) =
+        F2.sclassif_true(p, inf, G, S, g,
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, us,
+          F2.sbygs_at(p, inf, G, S, G, g, wgm, flatS))
+      +leg : {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+                  Eval.Eval.dummy_inf(inf))),
+                  Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool} =
+        Guess.OQ.guesses_le_cand(p, G, S, inf, G, g, Eval.Eval.dummy_inf(inf),
+          wgm, us)
+      Cover.Cover.depths_agd(
+        F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}),
+        g, kids, S, Nil{}, depths, Unit{},
+        ok => d2 =>
+          Cover.Cover.depths_agd(
+            F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}),
+            g, kids, S, Nil{}, d2, Unit{},
+            ok2 => d3 =>
+              +neokb : {Ckids.Cover.all_ne(gb) == True{} : Bool} =
+                Ckids.Cover.groups_build_ne(g, S, Nil{}, {==})
+              +kb : {Ckids.Cover.kids_in_b(kids, G) == True{} : Bool} =
+                Ckids.Cover.kids_in_to_b(kids, G, kidsin)
+              Ckids.Cover.groupkids_from(
+                F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}),
+                G, g, kids, gb, kb, neokb, ok2,
+                gk =>
+                  sm : GM.GM.GroupsSmaller(S, gb) =
+                    GM.GM.groups_smaller_sound(S, gb, us)
+                  Comp.FC.use_pair(
+                    F2.SF(1n+p, inf, G, S, Tree.Node{g, kids}),
+                    Sums.OQ.ClassLe(p, G, inf, gb, kids),
+                    CBK.CBK.ClassFits(p, G, S, gb, inf, n),
+                    F2.class_both(p, inf, G, S, kids, gb, gk, sclass, sm, hz),
+                    le => fits =>
+                      +bsq : {Nat.is_le(Nat.add(n, CBN.CB.sum(cs)), Nat.mul(n, n))
+                              == True{} : Bool} =
+                        CBK.CBK.node_bound_sq(p, G, S, g, inf, fits)
+                      +leks : {Nat.is_le(Fold.OQ.ks_cost(inf, S, items),
+                                  Nat.add(n, CBN.CB.sum(cs))) == True{} : Bool} =
+                        Fold.OQ.le_cong_l(Fold.OQ.ks_cost(inf, S, items),
+                          SolveRef.sat_add(inf, n, Sat.SB.ks_sum(items)),
+                          Nat.add(n, CBN.CB.sum(cs)),
+                          Node.OQ.ks_cost_unfold(inf, S, items),
+                          NatProof.Nat.is_le_trans(
+                            SolveRef.sat_add(inf, n, Sat.SB.ks_sum(items)),
+                            Nat.add(n, Sat.SB.ks_sum(items)),
+                            Nat.add(n, CBN.CB.sum(cs)),
+                            Sums.OQ.sat_add_le_add(inf, n, Sat.SB.ks_sum(items)),
+                            NatProof.Nat.is_le_add_l(Sat.SB.ks_sum(items),
+                              CBN.CB.sum(cs), n,
+                              Fold.OQ.le_cong_l(Sat.SB.ks_sum(items),
+                                OV.OV.sumL(inf, cs, 0n), CBN.CB.sum(cs),
+                                OV.OV.sum_fold(p, G, S, g, gb, Nil{}, 0n, inf),
+                                Fold.OQ.le_cong_r(OV.OV.sumL(inf, cs, 0n),
+                                  Nat.add(0n, CBN.CB.sum(cs)), CBN.CB.sum(cs), {==},
+                                  Comp.FC.sumL_le(inf, cs, 0n))))))
+                      +f2 : {Nat.is_le(Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G,
+                               S, inf, G, Eval.Eval.dummy_inf(inf))), Nat.mul(n, n))
+                             == True{} : Bool} =
+                        NatProof.Nat.is_le_trans(
+                          Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+                            Eval.Eval.dummy_inf(inf))),
+                          Nat.add(n, CBN.CB.sum(cs)), Nat.mul(n, n),
+                          NatProof.Nat.is_le_trans(
+                            Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+                              Eval.Eval.dummy_inf(inf))),
+                            Fold.OQ.ks_cost(inf, S, items),
+                            Nat.add(n, CBN.CB.sum(cs)), leg, leks),
+                          bsq)
+                      F2.finish_pack(p, G, S, inf, Tree.Node{g, kids},
+                        NatProof.Nat.is_le_trans(
+                          Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+                            Eval.Eval.dummy_inf(inf))),
+                          Fold.OQ.ks_cost(inf, S, items),
+                          Tree.cost(Tree.Node{g, kids}, S), leg,
+                          F2.node_le_pre(p, inf, G, S, g, gb, kids, {==}, d3, le)),
+                        NatProof.Nat.is_le_lt_trans(
+                          Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, S, inf, G,
+                            Eval.Eval.dummy_inf(inf))),
+                          Nat.mul(n, n), inf, f2, hz),
+                        f2)))))
+    case False{}:
+      +ef : {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+             == False{} : Bool} =
+        Equal.sym(Bool, b, Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})),
+          eb)
+      F2.strong_unusable(p, inf, G, S, g, kids,
+        Ind.OQ.unusable_kid(G, S, g, kids, Groups.groups_build(g, S, Nil{})
+          , {==}, depths, kidsin, ef),
+        flatS, all, hz)
