@@ -159,3 +159,19 @@ def FeedbackProof.feedback_eq_sym_bool(+a: +List<Feedback.Color>, +b: +List<Feed
   {Feedback.feedback_eq(a, b) == Feedback.feedback_eq(b, a) : Bool}:
   FbPrf.feedback_eq_sym_bool_go(a, b, Feedback.feedback_eq(a, b),
                                 Feedback.feedback_eq(b, a), {==}, {==})
+
+# Word equality is reflexive.
+def FbPrf.word_eq_refl(+a: +List<Nat>) ->
+  {Feedback.word_eq(a, a) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{+h, +t}:
+      %Equal.sym(Bool, Nat.is_eq(h, h), True{}, NatProof.NatPrf.is_eq_refl(h)) : {
+        Bool.and(Nat.is_eq(List.length(&2, Nat, t), List.length(&2, Nat, t)),
+                 List.all.if(u => List.all(&1, Nat & Nat, Feedback.pair_nat_eq,
+                                            List.zip(&2, Nat, &2, Nat, t, t)), _))
+        == True{} : Bool}
+      %Equal.sym(Bool, Feedback.word_eq(t, t), True{}, FbPrf.word_eq_refl(t)) : {
+        _ == True{} : Bool}
+      {==}
