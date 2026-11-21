@@ -20,10 +20,13 @@ import ./logic.bend as Logic
 import ./feedback.bend as Fb
 import ./groupsdistinct.bend as GD
 import ./nodevalid.bend as NV
+import ./groups.bend as Grp
 import ./children.bend as CH
 import ./eval.bend as Eval
 import ./kids.bend as KidsProof
 import ./nodecost.bend as NodeCost
+import ./sat.bend as Sat
+import ./groupsmeasure.bend as GM
 
 # The depth half of validity.
 def DG.valid_depth(t: Tree.Tree, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
@@ -416,6 +419,128 @@ def DG.AbsentDepthTarget(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                 p, G, S, inf, rest, f <> fs, fb, w,
                 DG.AbsentDepthTarget(p, G, S, inf, rest, f <> fs, fb, w,
                   nfs2, d_tail, k, pt),
+                af => go_rest =>
+                  DG.use_allfalse_cons(
+                    DG.AllFalse(fs, fb)
+                    & {Maybe.is_some(&1, Nat,
+                        Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                          <> CH.CH.children(p, G, S, rest, inf), fb, w)) == True{} : Bool},
+                    f, fs, fb, af,
+                    e_f => afs =>
+                      +e_skip : {Tree.depth.go(
+                            Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                            <> CH.CH.children(p, G, S, rest, inf), fb, w)
+                          == Tree.depth.go(CH.CH.children(p, G, S, rest, inf), fb, w)
+                          : Maybe<Nat>} =
+                        NV.NV.depth_go_skip(w, fb, f, NV.NV.kid_tree(p, G, ws, inf),
+                          CH.CH.children(p, G, S, rest, inf), e_f)
+                      +e_is : {Maybe.is_some(&1, Nat,
+                            Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                              <> CH.CH.children(p, G, S, rest, inf), fb, w))
+                          == Maybe.is_some(&1, Nat,
+                               Tree.depth.go(CH.CH.children(p, G, S, rest, inf), fb, w))
+                          : Bool} =
+                        Equal.cong(Maybe<Nat>, Bool, x => Maybe.is_some(&1, Nat, x),
+                          Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                            <> CH.CH.children(p, G, S, rest, inf), fb, w),
+                          Tree.depth.go(CH.CH.children(p, G, S, rest, inf), fb, w), e_skip)
+                      (afs,
+                       Equal.trans(Bool,
+                         Maybe.is_some(&1, Nat,
+                           Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                             <> CH.CH.children(p, G, S, rest, inf), fb, w)),
+                         Maybe.is_some(&1, Nat,
+                           Tree.depth.go(CH.CH.children(p, G, S, rest, inf), fb, w)),
+                         True{}, e_is, go_rest))))
+
+# The target-group depth traversal carrying the group's size bound and the
+# child's cost bound. Both are consumed once, at the group that contains the
+# candidate.
+def DG.AbsentDepthTargetFull(+p: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +inf: Nat, +gs: +List<Groups.Group>,
+    +fs: +List<+List<Feedback.Color>>, +fb: +List<Feedback.Color>,
+    +w: +List<Nat>,
+    nfs: DG.AllNotFb(fs, gs), d: GD.GD.Distinct(gs),
+    costs: Sat.SB.CostsLt(inf, Sat.SB.child_costs(p, G, gs, inf)),
+    gsm: GM.GM.GroupsSmaller(S, gs),
+    k: @f: +List<Feedback.Color> -> @ws: +List<+List<Nat>> ->
+       {Feedback.feedback_eq(f, fb) == True{} : Bool} ->
+       Grp.Grp.InWords(w, ws) ->
+       {Nat.is_lt(Sat.SB.child_cost(p, G, ws, inf), inf) == True{} : Bool} ->
+       {Nat.is_lt(Groups.len_words(ws), Groups.len_words(S)) == True{} : Bool} ->
+       {Maybe.is_some(&1, Nat, Tree.depth(NV.NV.kid_tree(p, G, ws, inf), w))
+        == True{} : Bool},
+    m: NV.NV.InGroupsFb(w, fb, gs)) ->
+  DG.AllFalse(fs, fb)
+  & {Maybe.is_some(&1, Nat,
+      Tree.depth.go(CH.CH.children(p, G, S, gs, inf), fb, w)) == True{} : Bool}:
+  match gs:
+    case Nil{}:
+      match m:
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (nf_head, d_tail) = d
+          (cost_head, costs_tail) = costs
+          (len_head, gsm_tail) = gsm
+          match m:
+            case Inl{pin}:
+              (iw, e_fb) = pin
+              +e_f : {f == fb : +List<Feedback.Color>} =
+                Equal.sym(+List<Feedback.Color>, fb, f,
+                  Fb.FbPrf.feedback_eq_true(fb, f, e_fb))
+              +e_sym : {Feedback.feedback_eq(f, fb) == True{} : Bool} =
+                Equal.trans(Bool, Feedback.feedback_eq(f, fb), Feedback.feedback_eq(f, f),
+                  True{},
+                  Equal.cong(+List<Feedback.Color>, Bool,
+                    x => Feedback.feedback_eq(f, x), fb, f,
+                    Equal.sym(+List<Feedback.Color>, f, fb, e_f)),
+                  Fb.FbPrf.feedback_eq_refl(f))
+              afs : DG.AllFalse(fs, fb) =
+                DG.all_false_of_not_fb(fs, fb, ws, rest,
+                  DG.allnotfb_transport(fs, Groups.Group{f, ws} <> rest,
+                    Groups.Group{fb, ws} <> rest,
+                    Equal.cong(Groups.Group, +List<Groups.Group>, x => x <> rest,
+                      Groups.Group{f, ws}, Groups.Group{fb, ws},
+                      Equal.cong(+List<Feedback.Color>, Groups.Group,
+                        x => Groups.Group{x, ws}, f, fb, e_f)),
+                    nfs))
+              +e_head : {Tree.depth.go(
+                    Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                    <> CH.CH.children(p, G, S, rest, inf), fb, w)
+                  == Tree.depth(NV.NV.kid_tree(p, G, ws, inf), w) : Maybe<Nat>} =
+                NV.NV.depth_go_head_at(w, fb, f, NV.NV.kid_tree(p, G, ws, inf),
+                  CH.CH.children(p, G, S, rest, inf), e_sym)
+              +e_kid : {Maybe.is_some(&1, Nat,
+                    Tree.depth(NV.NV.kid_tree(p, G, ws, inf), w)) == True{} : Bool} =
+                k(f, ws, e_sym, iw, cost_head, len_head)
+              +e_is : {Maybe.is_some(&1, Nat,
+                    Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                      <> CH.CH.children(p, G, S, rest, inf), fb, w))
+                  == Maybe.is_some(&1, Nat,
+                       Tree.depth(NV.NV.kid_tree(p, G, ws, inf), w)) : Bool} =
+                Equal.cong(Maybe<Nat>, Bool, x => Maybe.is_some(&1, Nat, x),
+                  Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                    <> CH.CH.children(p, G, S, rest, inf), fb, w),
+                  Tree.depth(NV.NV.kid_tree(p, G, ws, inf), w), e_head)
+              (afs,
+               Equal.trans(Bool,
+                 Maybe.is_some(&1, Nat,
+                   Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                     <> CH.CH.children(p, G, S, rest, inf), fb, w)),
+                 Maybe.is_some(&1, Nat, Tree.depth(NV.NV.kid_tree(p, G, ws, inf), w)),
+                 True{}, e_is, e_kid))
+            case Inr{pt}:
+              nfs2 : DG.AllNotFb(f <> fs, rest) =
+                (nf_head, DG.all_not_fb_tail(fs, f, ws, rest, nfs))
+              DG.use_result(
+                DG.AllFalse(fs, fb)
+                & {Maybe.is_some(&1, Nat,
+                    Tree.depth.go(Tree.Child{f, NV.NV.kid_tree(p, G, ws, inf)}
+                      <> CH.CH.children(p, G, S, rest, inf), fb, w)) == True{} : Bool},
+                p, G, S, inf, rest, f <> fs, fb, w,
+                DG.AbsentDepthTargetFull(p, G, S, inf, rest, f <> fs, fb, w,
+                  nfs2, d_tail, costs_tail, gsm_tail, k, pt),
                 af => go_rest =>
                   DG.use_allfalse_cons(
                     DG.AllFalse(fs, fb)

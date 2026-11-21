@@ -74,7 +74,22 @@ type SB.Sched is Data:
   SEnd{b: SB.Block, processed: +List<Groups.Group>, tail: +List<SB.Block>,
        rest: SB.Sched,
        +split: {SB.block_groups(b)
-               == List.append(&2, Groups.Group, processed, Nil{}) : +List<Groups.Group>}}
+               == List.append(&2, Groups.Group, processed, Nil{}) : +List<Groups.Group>},
+       top_ok: {SB.is_top(rest) == True{} : Bool}}
+
+# Whether a schedule is a top-level schedule (empty, or starting a block).
+def SB.is_top(sched: SB.Sched) -> Bool:
+  match sched:
+    case SchedNil{}:
+      True{}
+    case SBegin{b, tail, rest}:
+      True{}
+    case SClass{b, fb, ws, processed, restGroups, rest, split}:
+      False{}
+    case SAdd{b, fb, ws, processed, restGroups, rest, split}:
+      False{}
+    case SEnd{b, processed, tail, rest, split, top_ok}:
+      False{}
 
 # The flat item list.
 def SB.items(sched: SB.Sched) -> +List<SolveRef.Item>:
@@ -87,7 +102,7 @@ def SB.items(sched: SB.Sched) -> +List<SolveRef.Item>:
       SolveRef.ClassItem{fb, ws} <> SB.items(rest)
     case SAdd{b, fb, ws, processed, restGroups, rest, split}:
       SolveRef.Add{fb} <> SB.items(rest)
-    case SEnd{b, processed, tail, rest, split}:
+    case SEnd{b, processed, tail, rest, split, top_ok}:
       SolveRef.End{} <> SB.items(rest)
 
 # `(xs ++ [x]) ++ ys = xs ++ (x :: ys)`.
@@ -129,39 +144,106 @@ def SB.split_after(b: SB.Block, +processed: +List<Groups.Group>, +fb: +List<Feed
       List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> restg),
       SB.group_append(processed, fb, ws, restg)))
 
-# The usable blocks of a guess list, in order. Skipped guesses contribute
-# nothing.
-def SB.blocks_of_head(+S: +List<+List<Nat>>, +G: +List<+List<Nat>>,
-    +g: +List<Nat>, g_in: Tree.WordIn(g, G), b: Bool,
-    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
-    restBlocks: +List<SB.Block>) -> +List<SB.Block>:
+def SB.if_member(+g: +List<Nat>, +h: +List<Nat>,
+    +t: +List<+List<Nat>>, +rest: +List<+List<Nat>>, b: Bool,
+    ih: {Tree.member_word(g, List.append(&2, +List<Nat>, t, g <> rest)) == True{}
+         : Bool}) ->
+  {Feedback.Bool.case(Bool, b, True{},
+      Tree.member_word(g, List.append(&2, +List<Nat>, t, g <> rest))) == True{} : Bool}:
   match b:
     case True{}:
-      Block{G, S, g, g_in,
-        Equal.sym(Bool, b, Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), eb)}
-      <> restBlocks
+      {==}
     case False{}:
-      restBlocks
+      ih
 
-def SB.blocks_of_G(+S: +List<+List<Nat>>, G: +List<+List<Nat>>) -> +List<SB.Block>:
+def SB.list_append_singleton(+xs: +List<+List<Nat>>, +g: +List<Nat>,
+    +ys: +List<+List<Nat>>) ->
+  {List.append(&2, +List<Nat>,
+     List.append(&2, +List<Nat>, xs, g <> Nil{}), ys)
+   == List.append(&2, +List<Nat>, xs, g <> ys)
+   : +List<+List<Nat>>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{h, t}:
+      Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>, l => h <> l,
+        List.append(&2, +List<Nat>,
+          List.append(&2, +List<Nat>, t, g <> Nil{}), ys),
+        List.append(&2, +List<Nat>, t, g <> ys),
+        SB.list_append_singleton(t, g, ys))
+
+def SB.word_in_append_right(+g: +List<Nat>, prefix: +List<+List<Nat>>,
+    rest: +List<+List<Nat>>) ->
+  {Tree.member_word(g, List.append(&2, +List<Nat>, prefix, g <> rest)) == True{}
+   : Bool}:
+  match prefix:
+    case Nil{}:
+      BO.BO.word_in_cons(g, rest)
+    case Con{h, t}:
+      +eq : {Tree.member_word(g, List.append(&2, +List<Nat>, h <> t, g <> rest))
+            == Feedback.Bool.case(Bool, Feedback.word_eq(g, h), True{},
+                 Tree.member_word(g, List.append(&2, +List<Nat>, t, g <> rest)))
+            : Bool} = {==}
+      +ih : {Tree.member_word(g, List.append(&2, +List<Nat>, t, g <> rest)) == True{}
+             : Bool} = SB.word_in_append_right(g, t, rest)
+      +e2 : {Feedback.Bool.case(Bool, Feedback.word_eq(g, h), True{},
+               Tree.member_word(g, List.append(&2, +List<Nat>, t, g <> rest))) == True{}
+             : Bool} =
+        SB.if_member(g, h, t, rest, Feedback.word_eq(g, h), ih)
+      Equal.trans(Bool,
+        Tree.member_word(g, List.append(&2, +List<Nat>, h <> t, g <> rest)),
+        Feedback.Bool.case(Bool, Feedback.word_eq(g, h), True{},
+          Tree.member_word(g, List.append(&2, +List<Nat>, t, g <> rest))),
+        True{}, eq, e2)
+
+# The usable blocks of a guess list, in order. Skipped guesses contribute
+# nothing.
+def SB.blocks_of_G(+S: +List<+List<Nat>>, +Gall: +List<+List<Nat>>,
+    G: +List<+List<Nat>>, prefix: +List<+List<Nat>>,
+    eq: {Gall == List.append(&2, +List<Nat>, prefix, G) : +List<+List<Nat>>})
+    -> List<SB.Block>:
   match G:
     case Nil{}:
       Nil{}
     case Con{+g, +rest}:
-      SB.blocks_of_head(S, G, g, BO.BO.word_in_cons(g, rest),
+      +eq_g : {Gall == List.append(&2, +List<Nat>, prefix, g <> rest)
+               : +List<+List<Nat>>} = eq
+      +g_in0 : {Tree.member_word(g, List.append(&2, +List<Nat>, prefix, g <> rest)) == True{}
+                : Bool} = SB.word_in_append_right(g, prefix, rest)
+      +g_in : {Tree.member_word(g, Gall) == True{} : Bool} =
+        Equal.trans(Bool, Tree.member_word(g, Gall),
+          Tree.member_word(g, List.append(&2, +List<Nat>, prefix, g <> rest)),
+          True{}, Equal.cong(+List<+List<Nat>>, Bool,
+            l => Tree.member_word(g, l), Gall,
+            List.append(&2, +List<Nat>, prefix, g <> rest), eq_g), g_in0)
+      +eq_next : {Gall == List.append(&2, +List<Nat>,
+                    List.append(&2, +List<Nat>, prefix, g <> Nil{}), rest)
+                  : +List<+List<Nat>>} =
+        Equal.trans(+List<+List<Nat>>, Gall,
+          List.append(&2, +List<Nat>, prefix, g <> rest),
+          List.append(&2, +List<Nat>,
+            List.append(&2, +List<Nat>, prefix, g <> Nil{}), rest),
+          eq_g,
+          Equal.sym(+List<+List<Nat>>,
+            List.append(&2, +List<Nat>, List.append(&2, +List<Nat>, prefix, g <> Nil{}), rest),
+            List.append(&2, +List<Nat>, prefix, g <> rest),
+            SB.list_append_singleton(prefix, g, rest)))
+      SB.blocks_of_head(S, Gall, g, g_in,
         Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==},
-        SB.blocks_of_G(S, rest))
+        SB.blocks_of_G(S, Gall, rest,
+          List.append(&2, +List<+List<Nat>>, prefix, g <> Nil{}), eq_next))
 
 # The body of one block: its class/add pairs followed by End. The schedule of
 # the following blocks is already built and is placed after End.
 def SB.sched_groups(+b: SB.Block, remaining: +List<Groups.Group>,
     +processed: +List<Groups.Group>, +tail: +List<SB.Block>, +tailSched: SB.Sched,
+    +top_ok: {SB.is_top(tailSched) == True{} : Bool},
     +split: {SB.block_groups(b)
             == List.append(&2, Groups.Group, processed, remaining) : +List<Groups.Group>})
     -> SB.Sched:
   match remaining:
     case Nil{}:
-      SEnd{b, processed, tail, tailSched, split}
+      SEnd{b, processed, tail, tailSched, split, top_ok}
     case Con{gp, +restg}:
       match gp:
         case Groups.Group{+fb, +ws}:
@@ -169,7 +251,7 @@ def SB.sched_groups(+b: SB.Block, remaining: +List<Groups.Group>,
             SAdd{b, fb, ws, processed, restg,
               SB.sched_groups(b, restg,
                 List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
-                tail, tailSched,
+                tail, tailSched, top_ok,
                 SB.split_after(b, processed, fb, ws, restg, split)),
               split},
             split}
@@ -182,13 +264,20 @@ def SB.sched_of_blocks(+S: +List<+List<Nat>>, blocks: +List<SB.Block>) -> SB.Sch
       SchedNil{}
     case Con{+b, +rest}:
       +tailSched = SB.sched_of_blocks(S, rest)
+      +top_ok : {SB.is_top(tailSched) == True{} : Bool} =
+        match rest:
+          case Nil{}:
+            {==}
+          case Con{b2, rest2}:
+            {==}
       SBegin{b, rest,
-        SB.sched_groups(b, SB.block_groups(b), Nil{}, rest, tailSched, {==})}
+        SB.sched_groups(b, SB.block_groups(b), Nil{}, rest, tailSched, top_ok, {==})}
 
 def SB.sched_cons(+S: +List<+List<Nat>>, +g: +List<Nat>,
     +rest: +List<+List<Nat>>, b: Bool,
     +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
-    +tailSched: SB.Sched) -> SB.Sched:
+    +tailSched: SB.Sched,
+    +top_ok: {SB.is_top(tailSched) == True{} : Bool}) -> SB.Sched:
   match b:
     case True{}:
       +groups : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
@@ -196,7 +285,7 @@ def SB.sched_cons(+S: +List<+List<Nat>>, +g: +List<Nat>,
         Equal.sym(Bool, True{}, Groups.groups_smaller(S, groups), eb)}
       +tail : +List<SB.Block> = SB.blocks_of_G(S, rest)
       SBegin{b0, tail,
-        SB.sched_groups(b0, groups, Nil{}, tail, tailSched, {==})}
+        SB.sched_groups(b0, groups, Nil{}, tail, tailSched, top_ok, {==})}
     case False{}:
       tailSched
 
@@ -206,8 +295,15 @@ def SB.sched_of_G(+S: +List<+List<Nat>>, G: +List<+List<Nat>>) -> SB.Sched:
       SchedNil{}
     case Con{+g, +rest}:
       +tailSched = SB.sched_of_G(S, rest)
+      +top_ok : {SB.is_top(tailSched) == True{} : Bool} =
+        match rest:
+          case Nil{}:
+            {==}
+          case Con{g2, rest2}:
+            {==}
       SB.sched_cons(S, g, rest,
-        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, tailSched)
+        Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==},
+        tailSched, top_ok)
 
 # `(xs ++ [x]) ++ ys = xs ++ (x :: ys)` for item lists.
 def SB.item_append_singleton(+xs: +List<SolveRef.Item>, x: SolveRef.Item,

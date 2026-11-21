@@ -285,3 +285,169 @@ def SV.items_append(+fuel: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                          Groups.Group{fb0, ws0} <> rest, kids, sum, inf)),
                        SV.sum_of(SV.items(fuel, G, S, g, rest, kids0, sum0, inf)),
                        e_old_sum))))))
+
+# Extend the accumulator equality by one class.
+def SV.ItemsEq.append(+fuel: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +fb: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
+    +inf: Nat, +processed: +List<Groups.Group>, +kids: +List<Tree.Child>,
+    +sum: Nat, pending: SolveRef.Best,
+    eq: SV.ItemsEq(fuel, G, S, g, processed, inf, kids, sum),
+    +peq: {pending == SV.classResult(fuel, G, ws, inf) : SolveRef.Best}) ->
+  SV.ItemsEq(fuel, G, S, g,
+    List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}), inf,
+    Tree.Child{fb, Eval.Eval.tree_of(pending)} <> kids,
+    SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(pending))):
+  (e_kids, e_sum) = eq
+  +e_tree : {Eval.Eval.tree_of(pending)
+             == Eval.Eval.tree_of(SV.classResult(fuel, G, ws, inf)) : Tree.Tree} =
+    Equal.cong(SolveRef.Best, Tree.Tree, Eval.Eval.tree_of,
+      pending, SV.classResult(fuel, G, ws, inf), peq)
+  +e_cost : {Eval.Eval.cost_of(pending)
+             == Eval.Eval.cost_of(SV.classResult(fuel, G, ws, inf)) : Nat} =
+    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+      pending, SV.classResult(fuel, G, ws, inf), peq)
+  SV.use_pair(
+    SV.ItemsEq(fuel, G, S, g,
+      List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}), inf,
+      Tree.Child{fb, Eval.Eval.tree_of(pending)} <> kids,
+      SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(pending))),
+    {SV.kids_of(SV.items(fuel, G, S, g,
+       List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+       Nil{}, 0n, inf))
+     == Tree.Child{fb, Eval.Eval.tree_of(SV.classResult(fuel, G, ws, inf))}
+        <> SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf))
+     : +List<Tree.Child>},
+    {SV.sum_of(SV.items(fuel, G, S, g,
+       List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+       Nil{}, 0n, inf))
+     == SolveRef.sat_add(inf,
+          SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+          Eval.Eval.cost_of(SV.classResult(fuel, G, ws, inf)))
+     : Nat},
+    SV.items_append(fuel, G, S, g, fb, ws, inf, processed, Nil{}, 0n),
+    ap_kids => ap_sum =>
+      (Equal.trans(+List<Tree.Child>,
+         Tree.Child{fb, Eval.Eval.tree_of(pending)} <> kids,
+         Tree.Child{fb, Eval.Eval.tree_of(pending)}
+           <> SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+         SV.kids_of(SV.items(fuel, G, S, g,
+           List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+           Nil{}, 0n, inf)),
+         Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
+           l => Tree.Child{fb, Eval.Eval.tree_of(pending)} <> l,
+           kids, SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+           e_kids),
+         Equal.trans(+List<Tree.Child>,
+           Tree.Child{fb, Eval.Eval.tree_of(pending)}
+             <> SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+           Tree.Child{fb, Eval.Eval.tree_of(SV.classResult(fuel, G, ws, inf))}
+             <> SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+           SV.kids_of(SV.items(fuel, G, S, g,
+             List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+             Nil{}, 0n, inf)),
+           Equal.cong(Tree.Tree, +List<Tree.Child>,
+             l => Tree.Child{fb, l} <> SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+             Eval.Eval.tree_of(pending),
+             Eval.Eval.tree_of(SV.classResult(fuel, G, ws, inf)), e_tree),
+           Equal.sym(+List<Tree.Child>,
+             SV.kids_of(SV.items(fuel, G, S, g,
+               List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+               Nil{}, 0n, inf)),
+             Tree.Child{fb, Eval.Eval.tree_of(SV.classResult(fuel, G, ws, inf))}
+               <> SV.kids_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+             ap_kids))),
+       Equal.trans(Nat,
+         SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(pending)),
+         SolveRef.sat_add(inf,
+           SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+           Eval.Eval.cost_of(pending)),
+         SV.sum_of(SV.items(fuel, G, S, g,
+           List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+           Nil{}, 0n, inf)),
+         Equal.cong(Nat, Nat, x => SolveRef.sat_add(inf, x, Eval.Eval.cost_of(pending)),
+           sum, SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)), e_sum),
+         Equal.trans(Nat,
+           SolveRef.sat_add(inf,
+             SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+             Eval.Eval.cost_of(pending)),
+           SolveRef.sat_add(inf,
+             SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+             Eval.Eval.cost_of(SV.classResult(fuel, G, ws, inf))),
+           SV.sum_of(SV.items(fuel, G, S, g,
+             List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+             Nil{}, 0n, inf)),
+           Equal.cong(Nat, Nat,
+             x => SolveRef.sat_add(inf,
+               SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)), x),
+             Eval.Eval.cost_of(pending),
+             Eval.Eval.cost_of(SV.classResult(fuel, G, ws, inf)), e_cost),
+           Equal.sym(Nat,
+             SV.sum_of(SV.items(fuel, G, S, g,
+               List.append(&2, Groups.Group, processed, Groups.Group{fb, ws} <> Nil{}),
+               Nil{}, 0n, inf)),
+             SolveRef.sat_add(inf,
+               SV.sum_of(SV.items(fuel, G, S, g, processed, Nil{}, 0n, inf)),
+               Eval.Eval.cost_of(SV.classResult(fuel, G, ws, inf))),
+             ap_sum)))))
+
+# At positive fuel the machine fold is the specification fold at the
+# predecessor fuel.
+def SV.items_step_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +groups: +List<Groups.Group>, +kids: +List<Tree.Child>,
+    +sum: Nat, +inf: Nat) ->
+  {SV.items((1n + p : Nat), G, S, g, groups, kids, sum, inf)
+   == Eval.Eval.items(p, G, S, g, groups, kids, sum, inf) : Eval.KS}:
+  match groups:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{+fb, +ws}:
+          +cr : SolveRef.Best = SV.classResult((1n + p : Nat), G, ws, inf)
+          +kids0 : +List<Tree.Child> = Tree.Child{fb, Eval.Eval.tree_of(cr)} <> kids
+          +sum0 : Nat = SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(cr))
+          +eq_l : {SV.items((1n + p : Nat), G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf)
+                  == Eval.Eval.with_kid(fb, kids, sum, inf, cr,
+                       k2 => s2 => SV.items((1n + p : Nat), G, S, g, rest, k2, s2, inf)) : Eval.KS} =
+            {==}
+          +eq_r : {Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf)
+                  == Eval.Eval.with_kid(fb, kids, sum, inf, cr,
+                       k2 => s2 => Eval.Eval.items(p, G, S, g, rest, k2, s2, inf)) : Eval.KS} =
+            {==}
+          +lhs_kid : {Eval.Eval.with_kid(fb, kids, sum, inf, cr,
+                       k2 => s2 => SV.items((1n + p : Nat), G, S, g, rest, k2, s2, inf))
+                     == SV.items((1n + p : Nat), G, S, g, rest, kids0, sum0, inf) : Eval.KS} =
+            Eval.Eval.with_kid_eq(fb, kids, sum, inf, cr,
+              k2 => s2 => SV.items((1n + p : Nat), G, S, g, rest, k2, s2, inf))
+          +rhs_kid : {Eval.Eval.with_kid(fb, kids, sum, inf, cr,
+                       k2 => s2 => Eval.Eval.items(p, G, S, g, rest, k2, s2, inf))
+                     == Eval.Eval.items(p, G, S, g, rest, kids0, sum0, inf) : Eval.KS} =
+            Eval.Eval.with_kid_eq(fb, kids, sum, inf, cr,
+              k2 => s2 => Eval.Eval.items(p, G, S, g, rest, k2, s2, inf))
+          +ih : {SV.items((1n + p : Nat), G, S, g, rest, kids0, sum0, inf)
+                == Eval.Eval.items(p, G, S, g, rest, kids0, sum0, inf) : Eval.KS} =
+            SV.items_step_eq(p, G, S, g, rest, kids0, sum0, inf)
+          Equal.trans(Eval.KS,
+            SV.items((1n + p : Nat), G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
+            SV.items((1n + p : Nat), G, S, g, rest, kids0, sum0, inf),
+            Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
+            Equal.trans(Eval.KS,
+              SV.items((1n + p : Nat), G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
+              Eval.Eval.with_kid(fb, kids, sum, inf, cr,
+                k2 => s2 => SV.items((1n + p : Nat), G, S, g, rest, k2, s2, inf)),
+              SV.items((1n + p : Nat), G, S, g, rest, kids0, sum0, inf),
+              eq_l, lhs_kid),
+            Equal.trans(Eval.KS,
+              SV.items((1n + p : Nat), G, S, g, rest, kids0, sum0, inf),
+              Eval.Eval.items(p, G, S, g, rest, kids0, sum0, inf),
+              Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
+              ih,
+              Equal.sym(Eval.KS,
+                Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
+                Eval.Eval.items(p, G, S, g, rest, kids0, sum0, inf),
+                Equal.trans(Eval.KS,
+                  Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
+                  Eval.Eval.with_kid(fb, kids, sum, inf, cr,
+                    k2 => s2 => Eval.Eval.items(p, G, S, g, rest, k2, s2, inf)),
+                  Eval.Eval.items(p, G, S, g, rest, kids0, sum0, inf),
+                  eq_r, rhs_kid))))
