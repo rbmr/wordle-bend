@@ -70,8 +70,9 @@ rejecting anything else, including trailing text.
 
 ### `LAWS.bend` and `PROOF.bend`
 
-`LAWS.bend` states the six claims. `PROOF.bend` proves laws 1 to 3 and 6 and leaves 4 and 5
-open. Each proof is a definition named after the law, `def Laws.<law>`. See [laws.md](laws.md).
+`LAWS.bend` states the eight claims. `PROOF.bend` proves laws 1 to 3, 6 and 8
+and leaves 4, 5 and 7 open. Each proof is a definition named after the law,
+`def Laws.<law>`. See [laws.md](laws.md).
 
 ### `src/main.bend`
 
@@ -110,6 +111,8 @@ LAWS.bend ── checked by PROOF.bend ──► validity and optimality claims
 ## Current limits
 
 - `solve` is a placeholder, so laws 4 and 5 are open.
+- The JSON recogniser law 7 is open; the decimal-letter and array lemmas are in
+  `proofs/json_spec.bend`, and the kids-array step remains.
 - `depth` is total and structurally recursive, but the validity and optimality proofs are still to
   be written.
 - There is no benchmark harness yet.
