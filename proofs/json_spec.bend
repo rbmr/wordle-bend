@@ -6,8 +6,8 @@
 # digit list and `Spec.decimal` are the same numeral, so `Json.show_letter` and
 # `Spec.decimal` agree for every `Nat`. The renderer proof then walks the tree.
 #
-# The recogniser part covers decimal letters, guess arrays and feedback arrays.
-# The kids-array step is still open; see PENDING_LAWS and docs/laws.md.
+# The recogniser part covers decimal letters, guess arrays, feedback arrays,
+# kids arrays and whole trees, which proves the well-formedness law.
 import Base
 import ./decimal.bend as Dec
 import ./nat.bend as NP
@@ -1761,3 +1761,291 @@ def Rec.feedback(+xs: +List<Feedback.Color>, +rest: String, +s: +List<Unit>,
     Spec.recognise.go(String.append(Json.show_nats(FbNat.to_nats(xs)), rest), st, s),
     Spec.recognise.go(rest, Spec.SAfter{}, s),
     e_cong, Rec.nats(FbNat.to_nats(xs), rest, s, st, ok))
+
+# --- the kids array and the whole tree
+
+type KidsMode is Data:
+  KFirst{}
+  KNext{}
+
+def Rec.KidsFirstGoal(+kids: +List<Tree.Child>, +rest: String, +s: +List<Unit>) -> Type:
+  {Spec.recognise.go(String.append(Json.show_kids.body(kids, ""), String.append("]", rest)),
+                       Spec.SOpen{}, Unit{} <> s)
+    == Spec.recognise.go(rest, Spec.SAfter{}, s) : Maybe<String>}
+
+def Rec.KidsNextGoal(+kids: +List<Tree.Child>, +rest: String, +s: +List<Unit>) -> Type:
+  {Spec.recognise.go(String.append(Json.show_kids.body(kids, ","), String.append("]", rest)),
+                       Spec.SAfter{}, Unit{} <> s)
+    == Spec.recognise.go(rest, Spec.SAfter{}, s) : Maybe<String>}
+
+def Rec.KidsGoal(+kids: +List<Tree.Child>, mode: KidsMode, +rest: String, +s: +List<Unit>) -> Type:
+  match mode:
+    case KFirst{}:
+      Rec.KidsFirstGoal(kids, rest, s)
+    case KNext{}:
+      Rec.KidsNextGoal(kids, rest, s)
+
+def Rec.KidsCoreGoal(+f: +List<Feedback.Color>, +g: +List<Nat>,
+    +ckids: +List<Tree.Child>, +restkids: +List<Tree.Child>,
+    +rest: String, +s: +List<Unit>) -> Type:
+  {Spec.recognise.go(
+    String.append(
+      String.append(Json.show_feedback(f),
+        String.append(",", String.append("[",
+          String.append(Json.show_nats(g),
+            String.append(",", String.append("[",
+              String.append(Json.show_kids.body(ckids, ""),
+                String.append("]]]", Json.show_kids.body(restkids, ","))))))))),
+      String.append("]", rest)),
+    Spec.SOpen{}, Unit{} <> Unit{} <> s)
+   == Spec.recognise.go(rest, Spec.SAfter{}, s) : Maybe<String>}
+
+def Rec.kids_core(+f: +List<Feedback.Color>, +g: +List<Nat>,
+    +ckids: +List<Tree.Child>, +restkids: +List<Tree.Child>,
+    +rest: String, +s: +List<Unit>,
+    recK: @r: String -> @s0: +List<Unit> -> Rec.KidsFirstGoal(ckids, r, s0),
+    recR: @r: String -> @s0: +List<Unit> -> Rec.KidsNextGoal(restkids, r, s0)) ->
+  Rec.KidsCoreGoal(f, g, ckids, restkids, rest, s):
+  +Br : String = Json.show_kids.body(restkids, ",")
+  +Bd : String = Json.show_kids.body(ckids, "")
+  +Ss : String = String.append("]]]", Br)
+  +Y3 : String = String.append(Bd, Ss)
+  +Y2tail : String = String.append("[", Y3)
+  +Y2 : String = String.append(",", Y2tail)
+  +Y1tail : String = String.append(Json.show_nats(g), Y2)
+  +Y1 : String = String.append("[", Y1tail)
+  +Y : String = String.append(",", Y1)
+  +Z : String = String.append("]", rest)
+  +Gstr : String = String.append(String.append(Json.show_feedback(f), Y), Z)
+  e_assoc = Str.append_assoc(Json.show_feedback(f), Y, Z)
+  e1 = Equal.cong(String, Maybe<String>,
+         ss => Spec.recognise.go(ss, Spec.SOpen{}, Unit{} <> Unit{} <> s),
+         String.append(String.append(Json.show_feedback(f), Y), Z),
+         String.append(Json.show_feedback(f), String.append(Y, Z)),
+         e_assoc)
+  e_fb = Rec.feedback(f, String.append(Y, Z), Unit{} <> Unit{} <> s,
+                      Spec.SOpen{}, Unit{})
+  e_comma1 = Rec.after_comma(Spec.SAfter{}, Unit{}, String.append(Y1, Z),
+                             Unit{} <> s)
+  e_assoc2 = Str.append_assoc(Json.show_nats(g), Y2, Z)
+  e3 = Equal.cong(String, Maybe<String>,
+         ss => Spec.recognise.go(ss, Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> s),
+         String.append(String.append(Json.show_nats(g), Y2), Z),
+         String.append(Json.show_nats(g), String.append(Y2, Z)),
+         e_assoc2)
+  e_nats = Rec.nats(g, String.append(Y2, Z),
+                    Unit{} <> Unit{} <> Unit{} <> s, Spec.SOpen{}, Unit{})
+  e_comma2 = Rec.after_comma(Spec.SAfter{}, Unit{}, String.append(Y2tail, Z),
+                             Unit{} <> Unit{} <> s)
+  e_assoc3 = Str.append_assoc(Bd, Ss, Z)
+  e4 = Equal.cong(String, Maybe<String>,
+         ss => Spec.recognise.go(ss, Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> Unit{} <> s),
+         String.append(String.append(Bd, Ss), Z),
+         String.append(Bd, String.append(Ss, Z)),
+         e_assoc3)
+  e_kids = recK(String.append("]]", String.append(Br, Z)),
+                Unit{} <> Unit{} <> Unit{} <> s)
+  e_close1 = Rec.after_close(Spec.SAfter{}, Unit{},
+               String.append("]", String.append(Br, Z)),
+               Unit{} <> Unit{} <> s)
+  e_close2 = Rec.after_close(Spec.SAfter{}, Unit{}, String.append(Br, Z),
+                             Unit{} <> s)
+  e_tail = recR(rest, s)
+  Equal.trans(Maybe<String>,
+    Spec.recognise.go(Gstr, Spec.SOpen{}, Unit{} <> Unit{} <> s),
+    Spec.recognise.go(String.append(Json.show_feedback(f), String.append(Y, Z)),
+                      Spec.SOpen{}, Unit{} <> Unit{} <> s),
+    Spec.recognise.go(rest, Spec.SAfter{}, s),
+    e1,
+    Equal.trans(Maybe<String>,
+      Spec.recognise.go(String.append(Json.show_feedback(f), String.append(Y, Z)),
+                        Spec.SOpen{}, Unit{} <> Unit{} <> s),
+      Spec.recognise.go(String.append(Y, Z), Spec.SAfter{}, Unit{} <> Unit{} <> s),
+      Spec.recognise.go(rest, Spec.SAfter{}, s),
+      e_fb,
+      Equal.trans(Maybe<String>,
+        Spec.recognise.go(String.append(Y, Z), Spec.SAfter{}, Unit{} <> Unit{} <> s),
+        Spec.recognise.go(String.append(Y1, Z), Spec.SValue{}, Unit{} <> Unit{} <> s),
+        Spec.recognise.go(rest, Spec.SAfter{}, s),
+        e_comma1,
+        Equal.trans(Maybe<String>,
+          Spec.recognise.go(String.append(Y1, Z), Spec.SValue{}, Unit{} <> Unit{} <> s),
+          Spec.recognise.go(String.append(Y1tail, Z), Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> s),
+          Spec.recognise.go(rest, Spec.SAfter{}, s),
+          {==},
+          Equal.trans(Maybe<String>,
+            Spec.recognise.go(String.append(Y1tail, Z), Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> s),
+            Spec.recognise.go(String.append(Json.show_nats(g), String.append(Y2, Z)),
+                              Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> s),
+            Spec.recognise.go(rest, Spec.SAfter{}, s),
+            e3,
+            Equal.trans(Maybe<String>,
+              Spec.recognise.go(String.append(Json.show_nats(g), String.append(Y2, Z)),
+                                Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> s),
+              Spec.recognise.go(String.append(Y2, Z), Spec.SAfter{}, Unit{} <> Unit{} <> Unit{} <> s),
+              Spec.recognise.go(rest, Spec.SAfter{}, s),
+              e_nats,
+              Equal.trans(Maybe<String>,
+                Spec.recognise.go(String.append(Y2, Z), Spec.SAfter{}, Unit{} <> Unit{} <> Unit{} <> s),
+                Spec.recognise.go(String.append(Y2tail, Z), Spec.SValue{}, Unit{} <> Unit{} <> Unit{} <> s),
+                Spec.recognise.go(rest, Spec.SAfter{}, s),
+                e_comma2,
+                Equal.trans(Maybe<String>,
+                  Spec.recognise.go(String.append(Y2tail, Z), Spec.SValue{}, Unit{} <> Unit{} <> Unit{} <> s),
+                  Spec.recognise.go(String.append(Y3, Z), Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> Unit{} <> s),
+                  Spec.recognise.go(rest, Spec.SAfter{}, s),
+                  {==},
+                  Equal.trans(Maybe<String>,
+                    Spec.recognise.go(String.append(Y3, Z), Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> Unit{} <> s),
+                    Spec.recognise.go(String.append(Bd, String.append(Ss, Z)),
+                                      Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> Unit{} <> s),
+                    Spec.recognise.go(rest, Spec.SAfter{}, s),
+                    e4,
+                    Equal.trans(Maybe<String>,
+                      Spec.recognise.go(String.append(Bd, String.append(Ss, Z)),
+                                        Spec.SOpen{}, Unit{} <> Unit{} <> Unit{} <> Unit{} <> s),
+                      Spec.recognise.go(String.append("]]", String.append(Br, Z)),
+                                        Spec.SAfter{}, Unit{} <> Unit{} <> Unit{} <> s),
+                      Spec.recognise.go(rest, Spec.SAfter{}, s),
+                      e_kids,
+                      Equal.trans(Maybe<String>,
+                        Spec.recognise.go(String.append("]]", String.append(Br, Z)),
+                                          Spec.SAfter{}, Unit{} <> Unit{} <> Unit{} <> s),
+                        Spec.recognise.go(String.append("]", String.append(Br, Z)),
+                                          Spec.SAfter{}, Unit{} <> Unit{} <> s),
+                        Spec.recognise.go(rest, Spec.SAfter{}, s),
+                        e_close1,
+                        Equal.trans(Maybe<String>,
+                          Spec.recognise.go(String.append("]", String.append(Br, Z)),
+                                            Spec.SAfter{}, Unit{} <> Unit{} <> s),
+                          Spec.recognise.go(String.append(Br, Z),
+                                            Spec.SAfter{}, Unit{} <> s),
+                          Spec.recognise.go(rest, Spec.SAfter{}, s),
+                          e_close2,
+                          e_tail))))))))))))
+
+def Rec.kids_run(kids: +List<Tree.Child>, mode: KidsMode, +rest: String, +s: +List<Unit>) ->
+    Rec.KidsGoal(kids, mode, rest, s):
+  match kids:
+    case Nil{}:
+      match mode:
+        case KFirst{}:
+          Rec.close_open(rest, s)
+        case KNext{}:
+          Rec.after_close(Spec.SAfter{}, Unit{}, rest, s)
+    case Con{c, +restkids}:
+      match c:
+        case Tree.Child{f, child}:
+          match child:
+            case Tree.Node{+g, +ckids}:
+              match mode:
+                case KFirst{}:
+                  corev : Rec.KidsCoreGoal(f, g, ckids, restkids, rest, s) =
+                    Rec.kids_core(f, g, ckids, restkids, rest, s,
+                      r => s0 => Rec.kids_run(ckids, KFirst{}, r, s0),
+                      r => s0 => Rec.kids_run(restkids, KNext{}, r, s0))
+                  corev
+                case KNext{}:
+                  corev : Rec.KidsCoreGoal(f, g, ckids, restkids, rest, s) =
+                    Rec.kids_core(f, g, ckids, restkids, rest, s,
+                      r => s0 => Rec.kids_run(ckids, KFirst{}, r, s0),
+                      r => s0 => Rec.kids_run(restkids, KNext{}, r, s0))
+                  corev
+
+def Rec.tree_after_open(+g: +List<Nat>, +kids: +List<Tree.Child>, +rest: String, +s: +List<Unit>) ->
+  {Spec.recognise.go(
+     String.append(
+       String.append(Json.show_nats(g),
+         String.append(",", String.append(Json.show_kids(kids), "]"))),
+       rest),
+     Spec.SOpen{}, Unit{} <> s)
+   == Spec.recognise.go(rest, Spec.SAfter{}, s) : Maybe<String>}:
+  +K : String = Json.show_kids(kids)
+  +body : String = Json.show_kids.body(kids, "")
+  +C : String = String.append(body, "]")
+  +B : String = String.append(K, "]")
+  +A : String = String.append(",", B)
+  +Z : String = String.append("]", rest)
+  +restN : String = String.append(",", String.append(B, rest))
+  e_assoc1 = Str.append_assoc(Json.show_nats(g), A, rest)
+  e1 = Equal.cong(String, Maybe<String>,
+         ss => Spec.recognise.go(ss, Spec.SOpen{}, Unit{} <> s),
+         String.append(String.append(Json.show_nats(g), A), rest),
+         String.append(Json.show_nats(g), String.append(A, rest)),
+         e_assoc1)
+  e_nats = Rec.nats(g, restN, Unit{} <> s, Spec.SOpen{}, Unit{})
+  e_comma = Rec.after_comma(Spec.SAfter{}, Unit{}, String.append(B, rest), s)
+  e_assoc2 = Str.append_assoc(C, "]", rest)
+  e2 = Equal.cong(String, Maybe<String>,
+         ss => Spec.recognise.go(ss, Spec.SOpen{}, Unit{} <> Unit{} <> s),
+         String.append(String.append(C, "]"), rest),
+         String.append(C, String.append("]", rest)),
+         e_assoc2)
+  e_assoc3 = Str.append_assoc(body, "]", String.append("]", rest))
+  e3 = Equal.cong(String, Maybe<String>,
+         ss => Spec.recognise.go(ss, Spec.SOpen{}, Unit{} <> Unit{} <> s),
+         String.append(String.append(body, "]"), String.append("]", rest)),
+         String.append(body, String.append("]", String.append("]", rest))),
+         e_assoc3)
+  e_kids = Rec.kids_run(kids, KFirst{}, Z, Unit{} <> s)
+  e_close = Rec.after_close(Spec.SAfter{}, Unit{}, rest, s)
+  Equal.trans(Maybe<String>,
+    Spec.recognise.go(String.append(String.append(Json.show_nats(g), A), rest),
+                      Spec.SOpen{}, Unit{} <> s),
+    Spec.recognise.go(String.append(Json.show_nats(g), String.append(A, rest)),
+                      Spec.SOpen{}, Unit{} <> s),
+    Spec.recognise.go(rest, Spec.SAfter{}, s),
+    e1,
+    Equal.trans(Maybe<String>,
+      Spec.recognise.go(String.append(Json.show_nats(g), String.append(A, rest)),
+                        Spec.SOpen{}, Unit{} <> s),
+      Spec.recognise.go(restN, Spec.SAfter{}, Unit{} <> s),
+      Spec.recognise.go(rest, Spec.SAfter{}, s),
+      e_nats,
+      Equal.trans(Maybe<String>,
+        Spec.recognise.go(restN, Spec.SAfter{}, Unit{} <> s),
+        Spec.recognise.go(String.append(B, rest), Spec.SValue{}, Unit{} <> s),
+        Spec.recognise.go(rest, Spec.SAfter{}, s),
+        e_comma,
+        Equal.trans(Maybe<String>,
+          Spec.recognise.go(String.append(B, rest), Spec.SValue{}, Unit{} <> s),
+          Spec.recognise.go(String.append(String.append(C, "]"), rest),
+                            Spec.SOpen{}, Unit{} <> Unit{} <> s),
+          Spec.recognise.go(rest, Spec.SAfter{}, s),
+          {==},
+          Equal.trans(Maybe<String>,
+            Spec.recognise.go(String.append(String.append(C, "]"), rest),
+                              Spec.SOpen{}, Unit{} <> Unit{} <> s),
+            Spec.recognise.go(String.append(C, String.append("]", rest)),
+                              Spec.SOpen{}, Unit{} <> Unit{} <> s),
+            Spec.recognise.go(rest, Spec.SAfter{}, s),
+            e2,
+            Equal.trans(Maybe<String>,
+              Spec.recognise.go(String.append(C, String.append("]", rest)),
+                                Spec.SOpen{}, Unit{} <> Unit{} <> s),
+              Spec.recognise.go(String.append(body, String.append("]", String.append("]", rest))),
+                                Spec.SOpen{}, Unit{} <> Unit{} <> s),
+              Spec.recognise.go(rest, Spec.SAfter{}, s),
+              e3,
+              Equal.trans(Maybe<String>,
+                Spec.recognise.go(String.append(body, String.append("]", String.append("]", rest))),
+                                  Spec.SOpen{}, Unit{} <> Unit{} <> s),
+                Spec.recognise.go(Z, Spec.SAfter{}, Unit{} <> s),
+                Spec.recognise.go(rest, Spec.SAfter{}, s),
+                e_kids,
+                e_close)))))))
+
+def Rec.tree(t: Tree.Tree, +rest: String, +s: +List<Unit>, st: Spec.State, ok: Rec.Start(st)) ->
+  {Spec.recognise.go(String.append(Json.print(t), rest), st, s)
+    == Spec.recognise.go(rest, Spec.SAfter{}, s) : Maybe<String>}:
+  match t:
+    case Tree.Node{g, kids}:
+      match st:
+        case Spec.SValue{}:
+          Rec.tree_after_open(g, kids, rest, s)
+        case Spec.SOpen{}:
+          Rec.tree_after_open(g, kids, rest, s)
+        case Spec.SDigits{}:
+          match ok:
+        case Spec.SAfter{}:
+          match ok:
