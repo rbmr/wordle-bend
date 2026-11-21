@@ -27,10 +27,13 @@ import ./tree.bend as Tree
 import ./groups.bend as Groups
 import ./solve_ref.bend as SolveRef
 
-# `Begin` carries the guess and its lower bound. `ClassItem`, `Add` and `End`
-# are the reference's items.
+# `Begin` carries the guess and its initial lower bound. `Check` carries the
+# lower bound for the remaining classes (plus `|S|`) so the search can prune
+# mid-guess as soon as `sum + rem_lb >= best_cost(best)`. `ClassItem`, `Add`
+# and `End` are the reference's items.
 type Item is Data:
   Begin{guess: +List<Nat>, lb: Nat}
+  Check{rem_lb: Nat}
   ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>}
   Add{fb: +List<Feedback.Color>}
   End{}
@@ -158,15 +161,32 @@ def dummy_inf(+inf: Nat) -> SolveRef.Best:
 def dummy_zero() -> SolveRef.Best:
   SolveRef.Best{Tree.Node{Nil{}, Nil{}}, 0n}
 
-# The class items of one guess, each followed by the `Add` that consumes it.
-def group_items(+groups: +List<Groups.Group>) -> +List<Item>:
+# The class items of one guess, each preceded by a `Check` with the remaining
+# lower bound and followed by the `Add` that consumes it.
+def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
   match groups:
     case Nil{}:
       Nil{}
     case Con{gp, rest}:
       match gp:
         case Groups.Group{+f, +ws}:
-          ClassItem{f, ws} <> (Add{f} <> group_items(rest))
+          Check{lower_bound(n, Groups.Group{f, ws} <> rest)}
+          <> (ClassItem{f, ws} <> (Add{f} <> group_items(n, rest)))
+
+# Single-pass construction of `group_items(n, groups)` from `cw = class_words(groups)`,
+# peel-subtracting each class's lower bound instead of resumming `rest`.
+def group_items_go(+n: Nat, +groups: +List<Groups.Group>,
+                   +cw: Nat) -> +List<Item>:
+  match groups:
+    case Nil{}:
+      Nil{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{+f, +ws}:
+          Check{Nat.add(n, cw)}
+          <> (ClassItem{f, ws}
+              <> (Add{f}
+                  <> group_items_go(n, rest, Nat.sub(cw, class_lb(ws)))))
 
 # Linear feedback and group partitioning. In `src/feedback.bend` and
 # `src/groups.bend`, the recursive calls sit inside both branches of
@@ -305,8 +325,9 @@ def schedule_guess(+g: +List<Nat>, +groups: +List<Groups.Group>, +n: Nat,
                    +rest: +List<Item>, usable: Bool) -> +List<Item>:
   match usable:
     case True{}:
-      Begin{g, lower_bound(n, groups)}
-      <> List.append(&2, Item, group_items(groups), End{} <> rest)
+      +cw = class_words(groups)
+      Begin{g, Nat.add(n, cw)}
+      <> List.append(&2, Item, group_items_go(n, groups, cw), End{} <> rest)
     case False{}:
       rest
 
@@ -355,7 +376,7 @@ def schedule(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) -> +List<Item>:
 # `skip` says whether the current block is skipped. A skipped block searches no
 # class and leaves `best` unchanged.
 def step(+fuel: Nat, +cs: +List<Item>, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-         +inf: Nat, +g: +List<Nat>, +kids: +List<Tree.Child>, sum: Nat,
+         +inf: Nat, +g: +List<Nat>, +kids: +List<Tree.Child>, +sum: Nat,
          +best: SolveRef.Best, +pending: SolveRef.Best, skip: Bool) -> SolveRef.Best:
   match fuel:
     case 0n:
@@ -366,6 +387,8 @@ def step(+fuel: Nat, +cs: +List<Item>, +G: +List<+List<Nat>>, +S: +List<+List<Na
           match item:
             case Begin{g2, lb}:
               step(0n, rest, G, S, inf, g2, Nil{}, 0n, best, pending, False{})
+            case Check{rem_lb}:
+              step(0n, rest, G, S, inf, g, kids, sum, best, pending, skip)
             case ClassItem{fb, words}:
               dummy_inf(inf)
             case Add{fb}:
@@ -387,6 +410,14 @@ def step(+fuel: Nat, +cs: +List<Item>, +G: +List<+List<Nat>>, +S: +List<+List<Na
             case Begin{g2, lb}:
               step(fuel, rest, G, S, inf, g2, Nil{}, 0n, best, dummy_zero(),
                    skippable(best, lb))
+            case Check{rem_lb}:
+              match skip:
+                case True{}:
+                  step(fuel, rest, G, S, inf, g, kids, sum, best,
+                       dummy_zero(), True{})
+                case False{}:
+                  step(fuel, rest, G, S, inf, g, kids, sum, best,
+                       dummy_zero(), skippable(best, Nat.add(sum, rem_lb)))
             case ClassItem{fb, words}:
               match skip:
                 case True{}:

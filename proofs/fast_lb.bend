@@ -128,6 +128,40 @@ def FS.add_sub_cancel_l(c: Nat, +b: Nat) ->
     case 1n+cp:
       FS.add_sub_cancel_l(cp, b)
 
+# `group_items_go(n, groups, class_words(groups))` agrees with `group_items(n, groups)`.
+def FS.group_items_go_eq(+n: Nat, +groups: +List<Groups.Group>) ->
+  {SolveFast.group_items_go(n, groups, SolveFast.class_words(groups))
+   == SolveFast.group_items(n, groups) : +List<SolveFast.Item>}:
+  match groups:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{+f, +ws}:
+          +clb : Nat = SolveFast.class_lb(ws)
+          +cwr : Nat = SolveFast.class_words(rest)
+          +e1 : {SolveFast.group_items_go(n, rest, Nat.sub(Nat.add(clb, cwr), clb))
+                 == SolveFast.group_items_go(n, rest, cwr)
+                 : +List<SolveFast.Item>} =
+            Equal.cong(Nat, +List<SolveFast.Item>,
+              c => SolveFast.group_items_go(n, rest, c),
+              Nat.sub(Nat.add(clb, cwr), clb), cwr,
+              FS.add_sub_cancel_l(clb, cwr))
+          +e2 : {SolveFast.group_items_go(n, rest, cwr)
+                 == SolveFast.group_items(n, rest)
+                 : +List<SolveFast.Item>} =
+            FS.group_items_go_eq(n, rest)
+          Equal.cong(+List<SolveFast.Item>, +List<SolveFast.Item>,
+            tl => SolveFast.Check{SolveFast.lower_bound(n, Groups.Group{f, ws} <> rest)}
+                  <> (SolveFast.ClassItem{f, ws} <> (SolveFast.Add{f} <> tl)),
+            SolveFast.group_items_go(n, rest, Nat.sub(Nat.add(clb, cwr), clb)),
+            SolveFast.group_items(n, rest),
+            Equal.trans(+List<SolveFast.Item>,
+              SolveFast.group_items_go(n, rest, Nat.sub(Nat.add(clb, cwr), clb)),
+              SolveFast.group_items_go(n, rest, cwr),
+              SolveFast.group_items(n, rest),
+              e1, e2))
+
 # `(b + c) - c = b`.
 def FS.add_sub_cancel(+b: Nat, +c: Nat) ->
   {Nat.sub(Nat.add(b, c), c) == b : Nat}:
@@ -238,51 +272,72 @@ def FS.classes_size_le(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
             SolveFast.class_words(rest),
             CBN.CB.sum(Sat.SB.child_costs(p, G, rest, inf)), hd, tl)
 
+# Swap the outer two summands of a right-associated triple sum.
+def FS.add_swap_l(+a: Nat, +b: Nat, +c: Nat) ->
+  {Nat.add(a, Nat.add(b, c)) == Nat.add(b, Nat.add(a, c)) : Nat}:
+  +e1 : {Nat.add(a, Nat.add(b, c)) == Nat.add(Nat.add(a, b), c) : Nat} =
+    Equal.sym(Nat, Nat.add(Nat.add(a, b), c), Nat.add(a, Nat.add(b, c)),
+      NatProof.NatPrf.add_assoc(a, b, c))
+  +e2 : {Nat.add(Nat.add(a, b), c) == Nat.add(Nat.add(b, a), c) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.add(x, c),
+      Nat.add(a, b), Nat.add(b, a), NatProof.NatPrf.add_comm(a, b))
+  +e3 : {Nat.add(Nat.add(b, a), c) == Nat.add(b, Nat.add(a, c)) : Nat} =
+    NatProof.NatPrf.add_assoc(b, a, c)
+  Equal.trans(Nat,
+    Nat.add(a, Nat.add(b, c)),
+    Nat.add(Nat.add(a, b), c),
+    Nat.add(b, Nat.add(a, c)),
+    e1,
+    Equal.trans(Nat,
+      Nat.add(Nat.add(a, b), c),
+      Nat.add(Nat.add(b, a), c),
+      Nat.add(b, Nat.add(a, c)),
+      e2, e3))
+
 # Finish the lower-bound comparison once the finite saturating fold is unpacked.
 def FS.lb_le_ks_finish(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +g: +List<Nat>, +groups: +List<Groups.Group>,
+    +kids: +List<Tree.Child>, +sum: Nat,
     bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +eSat: {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S),
-              Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf))),
+              Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, groups, kids, sum, inf))),
               inf) == True{} : Bool},
     +es: {Nat.is_lt(Sat.SB.ks_sum(
-            Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)), inf)
+            Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)), inf)
           == True{} : Bool},
     all: CBS.CU.AllLt(inf, Sat.SB.child_costs(p, G, groups, inf)),
-    +plain: {OV.OV.sumL(inf, Sat.SB.child_costs(p, G, groups, inf), 0n)
-             == Nat.add(0n, CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf)))
+    +plain: {OV.OV.sumL(inf, Sat.SB.child_costs(p, G, groups, inf), sum)
+             == Nat.add(sum, CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf)))
              : Nat}) ->
-  {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups),
+  {Nat.is_le(Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
              Fold.OQ.ks_cost(inf, S,
-               Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)))
+               Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)))
    == True{} : Bool}:
-  +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)
+  +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)
   +cs : +List<Nat> = Sat.SB.child_costs(p, G, groups, inf)
-  +sum_eq : {Sat.SB.ks_sum(items) == CBN.CB.sum(cs) : Nat} =
-    Equal.trans(Nat, Sat.SB.ks_sum(items), OV.OV.sumL(inf, cs, 0n),
-      CBN.CB.sum(cs),
-      OV.OV.sum_fold(p, G, S, g, groups, Nil{}, 0n, inf),
-      Equal.trans(Nat, OV.OV.sumL(inf, cs, 0n),
-        Nat.add(0n, CBN.CB.sum(cs)), CBN.CB.sum(cs), plain, {==}))
+  +sum_eq : {Sat.SB.ks_sum(items) == Nat.add(sum, CBN.CB.sum(cs)) : Nat} =
+    Equal.trans(Nat, Sat.SB.ks_sum(items), OV.OV.sumL(inf, cs, sum),
+      Nat.add(sum, CBN.CB.sum(cs)),
+      OV.OV.sum_fold(p, G, S, g, groups, kids, sum, inf), plain)
   +n_lt : {Nat.is_lt(Groups.len_words(S), inf) == True{} : Bool} =
     Sat.SB.sat_add_lt_l(inf, Groups.len_words(S), Sat.SB.ks_sum(items), eSat)
   +sat_eq : {SolveRef.sat_add(inf, Groups.len_words(S), Sat.SB.ks_sum(items))
-             == Nat.add(Groups.len_words(S), CBN.CB.sum(cs)) : Nat} =
+             == Nat.add(Groups.len_words(S), Nat.add(sum, CBN.CB.sum(cs))) : Nat} =
     Equal.trans(Nat,
       SolveRef.sat_add(inf, Groups.len_words(S), Sat.SB.ks_sum(items)),
       Nat.add(Groups.len_words(S), Sat.SB.ks_sum(items)),
-      Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+      Nat.add(Groups.len_words(S), Nat.add(sum, CBN.CB.sum(cs))),
       OV.OV.sat_fin(inf, Groups.len_words(S), Sat.SB.ks_sum(items),
         OV.OV.ge_false_of_lt(Groups.len_words(S), inf, n_lt),
         OV.OV.ge_false_of_lt(Sat.SB.ks_sum(items), inf, es)),
       Equal.cong(Nat, Nat, x => Nat.add(Groups.len_words(S), x),
-        Sat.SB.ks_sum(items), CBN.CB.sum(cs), sum_eq))
+        Sat.SB.ks_sum(items), Nat.add(sum, CBN.CB.sum(cs)), sum_eq))
   +kc_eq : {Fold.OQ.ks_cost(inf, S, items)
-            == Nat.add(Groups.len_words(S), CBN.CB.sum(cs)) : Nat} =
+            == Nat.add(Groups.len_words(S), Nat.add(sum, CBN.CB.sum(cs))) : Nat} =
     Equal.trans(Nat, Fold.OQ.ks_cost(inf, S, items),
       SolveRef.sat_add(inf, Groups.len_words(S), Sat.SB.ks_sum(items)),
-      Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+      Nat.add(Groups.len_words(S), Nat.add(sum, CBN.CB.sum(cs))),
       Node.OQ.ks_cost_unfold(inf, S, items), sat_eq)
   +cw_le : {Nat.is_le(SolveFast.class_words(groups), CBN.CB.sum(cs))
             == True{} : Bool} =
@@ -292,28 +347,44 @@ def FS.lb_le_ks_finish(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
             == True{} : Bool} =
     NatProof.Nat.is_le_add_l(SolveFast.class_words(groups),
       CBN.CB.sum(cs), Groups.len_words(S), cw_le)
+  +slb_le : {Nat.is_le(
+               Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
+               Nat.add(sum, Nat.add(Groups.len_words(S), CBN.CB.sum(cs))))
+             == True{} : Bool} =
+    NatProof.Nat.is_le_add_l(
+      SolveFast.lower_bound(Groups.len_words(S), groups),
+      Nat.add(Groups.len_words(S), CBN.CB.sum(cs)), sum, lb_le)
+  +rhs_eq : {Nat.add(sum, Nat.add(Groups.len_words(S), CBN.CB.sum(cs)))
+             == Fold.OQ.ks_cost(inf, S, items) : Nat} =
+    Equal.trans(Nat,
+      Nat.add(sum, Nat.add(Groups.len_words(S), CBN.CB.sum(cs))),
+      Nat.add(Groups.len_words(S), Nat.add(sum, CBN.CB.sum(cs))),
+      Fold.OQ.ks_cost(inf, S, items),
+      FS.add_swap_l(sum, Groups.len_words(S), CBN.CB.sum(cs)),
+      Equal.sym(Nat, Fold.OQ.ks_cost(inf, S, items),
+        Nat.add(Groups.len_words(S), Nat.add(sum, CBN.CB.sum(cs))), kc_eq))
   Fold.OQ.le_cong_r(
-    SolveFast.lower_bound(Groups.len_words(S), groups),
-    Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+    Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
+    Nat.add(sum, Nat.add(Groups.len_words(S), CBN.CB.sum(cs))),
     Fold.OQ.ks_cost(inf, S, items),
-    Equal.sym(Nat, Fold.OQ.ks_cost(inf, S, items),
-      Nat.add(Groups.len_words(S), CBN.CB.sum(cs)), kc_eq),
-    lb_le)
+    rhs_eq, slb_le)
 
-# When the guess's candidate cost is below infinity, the saturating class sum
-# is a plain sum and `lower_bound(|S|, groups)` is at most the candidate cost.
+# When the guess's candidate cost from `(kids, sum)` is below infinity, the
+# saturating class sum is a plain sum and `sum + lower_bound(|S|, groups)` is
+# at most the candidate cost.
 def FS.lb_le_ks_cost(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +g: +List<Nat>, +groups: +List<Groups.Group>,
+    +kids: +List<Tree.Child>, +sum: Nat,
     bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +lt: {Nat.is_lt(Fold.OQ.ks_cost(inf, S,
-            Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)), inf)
+            Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)), inf)
           == True{} : Bool}) ->
-  {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups),
+  {Nat.is_le(Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
              Fold.OQ.ks_cost(inf, S,
-               Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)))
+               Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)))
    == True{} : Bool}:
-  +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)
+  +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)
   +cs : +List<Nat> = Sat.SB.child_costs(p, G, groups, inf)
   +eSat : {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S),
              Sat.SB.ks_sum(items)), inf) == True{} : Bool} =
@@ -322,34 +393,34 @@ def FS.lb_le_ks_cost(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
       Node.OQ.ks_cost_unfold(inf, S, items), lt)
   +es : {Nat.is_lt(Sat.SB.ks_sum(items), inf) == True{} : Bool} =
     Sat.SB.sat_add_lt_r(inf, Groups.len_words(S), Sat.SB.ks_sum(items), eSat)
-  +esL : {Nat.is_lt(OV.OV.sumL(inf, cs, 0n), inf) == True{} : Bool} =
-    CBN.CB.lt_eq_l(inf, Sat.SB.ks_sum(items), OV.OV.sumL(inf, cs, 0n),
-      OV.OV.sum_fold(p, G, S, g, groups, Nil{}, 0n, inf), es)
+  +esL : {Nat.is_lt(OV.OV.sumL(inf, cs, sum), inf) == True{} : Bool} =
+    CBN.CB.lt_eq_l(inf, Sat.SB.ks_sum(items), OV.OV.sumL(inf, cs, sum),
+      OV.OV.sum_fold(p, G, S, g, groups, kids, sum, inf), es)
   OC.OC.use_pair(
-    {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups),
+    {Nat.is_le(Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
        Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool},
-    {Nat.is_lt(Nat.add(0n, CBN.CB.sum(cs)), inf) == True{} : Bool},
+    {Nat.is_lt(Nat.add(sum, CBN.CB.sum(cs)), inf) == True{} : Bool},
     CBS.CU.AllLt(inf, cs)
-    & {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat}
-    & {Nat.is_lt(0n, inf) == True{} : Bool},
-    OC.OC.plain_both(inf, cs, 0n, esL),
+    & {OV.OV.sumL(inf, cs, sum) == Nat.add(sum, CBN.CB.sum(cs)) : Nat}
+    & {Nat.is_lt(sum, inf) == True{} : Bool},
+    OC.OC.plain_both(inf, cs, sum, esL),
     tot => r =>
       OC.OC.use_pair(
-        {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups),
+        {Nat.is_le(Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
            Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool},
         CBS.CU.AllLt(inf, cs),
-        {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat}
-        & {Nat.is_lt(0n, inf) == True{} : Bool},
+        {OV.OV.sumL(inf, cs, sum) == Nat.add(sum, CBN.CB.sum(cs)) : Nat}
+        & {Nat.is_lt(sum, inf) == True{} : Bool},
         r,
         all => r2 =>
           OC.OC.use_pair(
-            {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups),
+            {Nat.is_le(Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
                Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool},
-            {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat},
-            {Nat.is_lt(0n, inf) == True{} : Bool},
+            {OV.OV.sumL(inf, cs, sum) == Nat.add(sum, CBN.CB.sum(cs)) : Nat},
+            {Nat.is_lt(sum, inf) == True{} : Bool},
             r2,
-            plain => zlt =>
-              FS.lb_le_ks_finish(p, inf, G, S, g, groups, bounds, hz,
+            plain => slt =>
+              FS.lb_le_ks_finish(p, inf, G, S, g, groups, kids, sum, bounds, hz,
                 eSat, es, all, plain))))
 
 # `SolveFast.best_cost` and `Eval.cost_of` read the same cost field.
@@ -380,43 +451,73 @@ def FS.better_inf_keep(+cc: Nat, +ct: Tree.Tree, best: SolveRef.Best,
         ParElt.ParElt.pick_acc(cc, ct, ta, ca, inf, Nat.is_lt(cc, ca),
           {==}, nf, hbest))
 
-# `better` keeps `best` when `cost_of(best) <= lb`: either the candidate cost is
-# finite (and at least `lb`) or it is at least `inf` (and loses to `best`).
+# `better` keeps `best` when `cost_of(best) <= sum + lb`: either the candidate
+# cost is finite (and at least `sum + lb`) or it is at least `inf` (and loses
+# to `best`).
 def FS.better_skip_case(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +g: +List<Nat>, +groups: +List<Groups.Group>,
-    +best: SolveRef.Best,
+    +kids: +List<Tree.Child>, +sum: Nat, +best: SolveRef.Best,
     bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     +le: {Nat.is_le(Eval.Eval.cost_of(best),
-            SolveFast.lower_bound(Groups.len_words(S), groups)) == True{} : Bool},
+            Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)))
+          == True{} : Bool},
     b: Bool,
     +eb: {b == Nat.is_lt(Fold.OQ.ks_cost(inf, S,
-            Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)), inf) : Bool}) ->
+            Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)), inf) : Bool}) ->
   {SolveRef.better(
-     Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)),
-     Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)),
+     Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)),
+     Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)),
      best)
    == best : SolveRef.Best}:
   match b:
     case True{}:
-      +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)
+      +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)
       +cc : Nat = Fold.OQ.ks_cost(inf, S, items)
       +ct : Tree.Tree = Fold.OQ.ks_tree(g, items)
       +lt : {Nat.is_lt(cc, inf) == True{} : Bool} =
         Equal.sym(Bool, True{}, Nat.is_lt(cc, inf), eb)
-      +bl : {Nat.is_le(SolveFast.lower_bound(Groups.len_words(S), groups), cc)
+      +bl : {Nat.is_le(
+               Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
+               cc)
              == True{} : Bool} =
-        FS.lb_le_ks_cost(p, inf, G, S, g, groups, bounds, hz, lt)
+        FS.lb_le_ks_cost(p, inf, G, S, g, groups, kids, sum, bounds, hz, lt)
       FB.FS.keep(cc, ct, best,
-        SolveFast.lower_bound(Groups.len_words(S), groups), le, bl)
+        Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)),
+        le, bl)
     case False{}:
-      +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)
+      +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)
       +cc : Nat = Fold.OQ.ks_cost(inf, S, items)
       +ct : Tree.Tree = Fold.OQ.ks_tree(g, items)
       +nf : {Nat.is_lt(cc, inf) == False{} : Bool} =
         Equal.sym(Bool, False{}, Nat.is_lt(cc, inf), eb)
       FS.better_inf_keep(cc, ct, best, inf, nf, hbest)
+
+# Finishing the remaining classes from `(kids, sum)` leaves `best` unchanged
+# when `cost_of(best) <= sum + lower_bound(|S|, groups)`.
+def FS.finish_skip_eq(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, +groups: +List<Groups.Group>,
+    +kids: +List<Tree.Child>, +sum: Nat, +best: SolveRef.Best,
+    bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
+    +le: {Nat.is_le(Eval.Eval.cost_of(best),
+            Nat.add(sum, SolveFast.lower_bound(Groups.len_words(S), groups)))
+          == True{} : Bool}) ->
+  {Eval.Eval.finish_ks(inf, g, S,
+     Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best)
+   == best : SolveRef.Best}:
+  +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, kids, sum, inf)
+  +cc : Nat = Fold.OQ.ks_cost(inf, S, items)
+  +ct : Tree.Tree = Fold.OQ.ks_tree(g, items)
+  Equal.trans(SolveRef.Best,
+    Eval.Eval.finish_ks(inf, g, S, items, best),
+    SolveRef.better(cc, ct, best),
+    best,
+    Fold.OQ.block_eq(inf, g, S, items, best),
+    FS.better_skip_case(p, inf, G, S, g, groups, kids, sum, best, bounds,
+      hz, hbest, le, Nat.is_lt(cc, inf), {==}))
 
 # A skipped usable block leaves the reference accumulator unchanged.
 def FS.block_skip_eq(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
@@ -429,16 +530,8 @@ def FS.block_skip_eq(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +le: {Nat.is_le(Eval.Eval.cost_of(best),
             SolveFast.lower_bound(Groups.len_words(S), groups)) == True{} : Bool}) ->
   {Eval.Eval.block(p, G, S, g, inf, groups, best) == best : SolveRef.Best}:
-  +items : Eval.KS = Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)
-  +cc : Nat = Fold.OQ.ks_cost(inf, S, items)
-  +ct : Tree.Tree = Fold.OQ.ks_tree(g, items)
   bounds : MV.MV.Bounds(p, MV.MV.next_groups(groups)) =
     MV.MV.group_bounds(p, S, groups, ele,
       GM.GM.groups_smaller_sound(S, groups, us))
-  Equal.trans(SolveRef.Best,
-    Eval.Eval.block(p, G, S, g, inf, groups, best),
-    SolveRef.better(cc, ct, best),
-    best,
-    Fold.OQ.block_eq(inf, g, S, items, best),
-    FS.better_skip_case(p, inf, G, S, g, groups, best, bounds, hz, hbest, le,
-      Nat.is_lt(cc, inf), {==}))
+  FS.finish_skip_eq(p, inf, G, S, g, groups, Nil{}, 0n, best, bounds,
+    hz, hbest, le)

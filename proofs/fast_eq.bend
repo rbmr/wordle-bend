@@ -19,10 +19,27 @@ import ./nat.bend as NatProof
 import ./eval.bend as Eval
 import ./optfold.bend as Fold
 import ./optind.bend as Ind
+import ./groupsmeasure.bend as GM
 import ./mainvalid.bend as MV
 import ./fast_step.bend as FS
 import ./fast_groups.bend as FG
 import ./fast_lb.bend as FLB
+
+# Copy a `Bounds` witness so it can be used at this level and stepped to the
+# next. Every entry is a `Bool` equality (`Data`), so it duplicates cleanly.
+def FE.bounds_copy(+fuel: Nat, +jobs: +List<+List<+List<Nat>>>,
+    bounds: MV.MV.Bounds(fuel, jobs)) ->
+  MV.MV.Bounds(fuel, jobs) & MV.MV.Bounds(fuel, jobs):
+  match jobs:
+    case Nil{}:
+      Tuple{Unit{}, Unit{}}
+    case Con{S, t}:
+      (+ble, bt) = bounds
+      MV.MV.use_pair(
+        MV.MV.Bounds(fuel, S <> t) & MV.MV.Bounds(fuel, S <> t),
+        MV.MV.Bounds(fuel, t), MV.MV.Bounds(fuel, t),
+        FE.bounds_copy(fuel, t, bt),
+        b1 => b2 => Tuple{Tuple{ble, b1}, Tuple{ble, b2}})
 
 # One job of the equality induction at a given fuel.
 def FE.EJob(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
@@ -129,84 +146,350 @@ def FE.eby_gs(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                   fg),
                 FE.eby_gs(p, inf, G, S, t, ft)})
 
-# When every class search at fuel `p` agrees with the reference, the pruned
-# class fold `FS.items` agrees with `Eval.items`.
-def FE.items_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +g: +List<Nat>, +groups: +List<Groups.Group>, +kids: +List<Tree.Child>,
-    +sum: Nat, +inf: Nat, ec: FE.EClass(p, inf, G, groups)) ->
-  {FS.FS.items(p, G, S, g, groups, kids, sum, inf)
-   == Eval.Eval.items(p, G, S, g, groups, kids, sum, inf) : Eval.KS}:
-  match groups:
-    case Nil{}:
-      {==}
-    case Con{gp, rest}:
-      match gp:
-        case Groups.Group{+fb, +ws}:
-          (eh, et) = ec
-          +fast_c : SolveRef.Best = FS.FS.run_at(p, inf, G, ws)
-          +ref_c : SolveRef.Best = FS.FS.ref_run_at(p, inf, G, ws)
-          +k2 : +List<Tree.Child> =
-            Tree.Child{fb, Eval.Eval.tree_of(ref_c)} <> kids
-          +s2 : Nat = SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(ref_c))
-          +e1 : {Eval.Eval.with_kid(fb, kids, sum, inf, fast_c,
-                   ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf))
-                 == Eval.Eval.with_kid(fb, kids, sum, inf, ref_c,
-                      ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf))
-                 : Eval.KS} =
-            Equal.cong(SolveRef.Best, Eval.KS,
-              b => Eval.Eval.with_kid(fb, kids, sum, inf, b,
-                     ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf)),
-              fast_c, ref_c, eh)
-          +e2 : {Eval.Eval.with_kid(fb, kids, sum, inf, ref_c,
-                   ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf))
-                 == FS.FS.items(p, G, S, g, rest, k2, s2, inf) : Eval.KS} =
-            Eval.Eval.with_kid_eq(fb, kids, sum, inf, ref_c,
-              ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf))
-          +e3 : {FS.FS.items(p, G, S, g, rest, k2, s2, inf)
-                 == Eval.Eval.items(p, G, S, g, rest, k2, s2, inf) : Eval.KS} =
-            FE.items_eq(p, G, S, g, rest, k2, s2, inf, et)
-          +e4 : {Eval.Eval.with_kid(fb, kids, sum, inf, ref_c,
-                   ka => sa => Eval.Eval.items(p, G, S, g, rest, ka, sa, inf))
-                 == Eval.Eval.items(p, G, S, g, rest, k2, s2, inf) : Eval.KS} =
-            Eval.Eval.with_kid_eq(fb, kids, sum, inf, ref_c,
-              ka => sa => Eval.Eval.items(p, G, S, g, rest, ka, sa, inf))
-          Equal.trans(Eval.KS,
-            FS.FS.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
-            FS.FS.items(p, G, S, g, rest, k2, s2, inf),
-            Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> rest, kids, sum, inf),
-            Equal.trans(Eval.KS,
-              Eval.Eval.with_kid(fb, kids, sum, inf, fast_c,
-                ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf)),
-              Eval.Eval.with_kid(fb, kids, sum, inf, ref_c,
-                ka => sa => FS.FS.items(p, G, S, g, rest, ka, sa, inf)),
-              FS.FS.items(p, G, S, g, rest, k2, s2, inf), e1, e2),
-            Equal.trans(Eval.KS,
-              FS.FS.items(p, G, S, g, rest, k2, s2, inf),
-              Eval.Eval.items(p, G, S, g, rest, k2, s2, inf),
-              Eval.Eval.with_kid(fb, kids, sum, inf, ref_c,
-                ka => sa => Eval.Eval.items(p, G, S, g, rest, ka, sa, inf)),
-              e3,
-              Equal.sym(Eval.KS,
-                Eval.Eval.with_kid(fb, kids, sum, inf, ref_c,
-                  ka => sa => Eval.Eval.items(p, G, S, g, rest, ka, sa, inf)),
-                Eval.Eval.items(p, G, S, g, rest, k2, s2, inf), e4)))
-
-# Unfolding `FS.resume` into `Eval.finish_ks`.
-def FE.resume_eq(+fuel: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +inf: Nat, +g: +List<Nat>, ks: Eval.KS, +rest: +List<SolveFast.Item>,
-    +best: SolveRef.Best) ->
-  {FS.FS.resume(fuel, G, S, inf, g, ks, rest, best)
-   == SolveFast.step(fuel, rest, G, S, inf, Nil{}, Nil{}, 0n,
-        Eval.Eval.finish_ks(inf, g, S, ks, best),
+# One class step of a live block after `Check` has set the mode to `sk`.
+def FE.live_group_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +g: +List<Nat>, +fb: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +restg: +List<Groups.Group>,
+    +kids: +List<Tree.Child>, +sum: Nat, +best: SolveRef.Best,
+    +rest: +List<SolveFast.Item>,
+    sk: Bool,
+    +esk: {sk == SolveFast.skippable(best,
+             Nat.add(sum,
+               SolveFast.lower_bound(Groups.len_words(S),
+                 Groups.Group{fb, ws} <> restg))) : Bool},
+    +ble: {Nat.is_le(Groups.len_words(ws), p) == True{} : Bool},
+    bt: MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
+    eh: FE.EJob(p, inf, G, ws),
+    rec_live: {SolveFast.step(1n+p,
+                  List.append(&2, SolveFast.Item,
+                    SolveFast.group_items(Groups.len_words(S), restg),
+                    SolveFast.End{} <> rest),
+                  G, S, inf, g,
+                  Tree.Child{fb, Eval.Eval.tree_of(FS.FS.ref_run_at(p, inf, G, ws))}
+                    <> kids,
+                  SolveRef.sat_add(inf, sum,
+                    Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))),
+                  best, SolveFast.dummy_zero(), False{})
+                == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                     Eval.Eval.finish_ks(inf, g, S,
+                       Eval.Eval.items(p, G, S, g, restg,
+                         Tree.Child{fb, Eval.Eval.tree_of(FS.FS.ref_run_at(p, inf, G, ws))}
+                           <> kids,
+                         SolveRef.sat_add(inf, sum,
+                           Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))),
+                         inf),
+                       best),
+                     SolveFast.dummy_zero(), False{})
+                : SolveRef.Best}) ->
+  {SolveFast.step(1n+p,
+     SolveFast.ClassItem{fb, ws}
+       <> (SolveFast.Add{fb}
+           <> List.append(&2, SolveFast.Item,
+                SolveFast.group_items(Groups.len_words(S), restg),
+                SolveFast.End{} <> rest)),
+     G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), sk)
+   == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.finish_ks(inf, g, S,
+          Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+            kids, sum, inf),
+          best),
         SolveFast.dummy_zero(), False{})
    : SolveRef.Best}:
-  match ks:
-    case Eval.KS{kids, sum}:
-      {==}
+  match sk:
+    case True{}:
+      +n : Nat = Groups.len_words(S)
+      +groups : +List<Groups.Group> = Groups.Group{fb, ws} <> restg
+      +rem_lb : Nat = SolveFast.lower_bound(n, groups)
+      +inner : +List<SolveFast.Item> =
+        List.append(&2, SolveFast.Item, SolveFast.group_items(n, restg),
+          SolveFast.End{} <> rest)
+      +le : {Nat.is_le(Eval.Eval.cost_of(best), Nat.add(sum, rem_lb))
+             == True{} : Bool} =
+        FLB.FS.skippable_to_le(best, Nat.add(sum, rem_lb),
+          Equal.sym(Bool, True{},
+            SolveFast.skippable(best, Nat.add(sum, rem_lb)), esk))
+      +feq : {Eval.Eval.finish_ks(inf, g, S,
+                Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best)
+              == best : SolveRef.Best} =
+        FLB.FS.finish_skip_eq(p, inf, G, S, g, groups, kids, sum, best,
+          Tuple{ble, bt}, hz, hbest, le)
+      +e1 : {SolveFast.step(1n+p,
+               SolveFast.ClassItem{fb, ws} <> (SolveFast.Add{fb} <> inner),
+               G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{})
+             == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        FS.FS.tail_dead(p, G, S, n, inf, g, fb, ws, restg, kids, sum, best, rest)
+      +e2 : {SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+               SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                  Eval.Eval.finish_ks(inf, g, S,
+                    Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best),
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        Equal.cong(SolveRef.Best, SolveRef.Best,
+          b => SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, b,
+                 SolveFast.dummy_zero(), False{}),
+          best,
+          Eval.Eval.finish_ks(inf, g, S,
+            Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best),
+          Equal.sym(SolveRef.Best,
+            Eval.Eval.finish_ks(inf, g, S,
+              Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best),
+            best, feq))
+      Equal.trans(SolveRef.Best,
+        SolveFast.step(1n+p,
+          SolveFast.ClassItem{fb, ws} <> (SolveFast.Add{fb} <> inner),
+          G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
+        SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+          SolveFast.dummy_zero(), False{}),
+        SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+          Eval.Eval.finish_ks(inf, g, S,
+            Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best),
+          SolveFast.dummy_zero(), False{}),
+        e1, e2)
+    case False{}:
+      +n : Nat = Groups.len_words(S)
+      +inner : +List<SolveFast.Item> =
+        List.append(&2, SolveFast.Item, SolveFast.group_items(n, restg),
+          SolveFast.End{} <> rest)
+      +fast_c : SolveRef.Best = FS.FS.run_at(p, inf, G, ws)
+      +ref_c : SolveRef.Best = FS.FS.ref_run_at(p, inf, G, ws)
+      +kf : +List<Tree.Child> =
+        Tree.Child{fb, Eval.Eval.tree_of(fast_c)} <> kids
+      +sf : Nat = SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(fast_c))
+      +kr : +List<Tree.Child> =
+        Tree.Child{fb, Eval.Eval.tree_of(ref_c)} <> kids
+      +sr : Nat = SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(ref_c))
+      +e1 : {SolveFast.step(1n+p,
+               SolveFast.ClassItem{fb, ws} <> (SolveFast.Add{fb} <> inner),
+               G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p, inner, G, S, inf, g, kf, sf, best,
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        FS.FS.class_add_live(p, G, S, inf, g, fb, ws, inner, kids, sum, best)
+      +e2 : {SolveFast.step(1n+p, inner, G, S, inf, g, kf, sf, best,
+               SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p, inner, G, S, inf, g, kr, sr, best,
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        Equal.cong(SolveRef.Best, SolveRef.Best,
+          c => SolveFast.step(1n+p, inner, G, S, inf, g,
+                 Tree.Child{fb, Eval.Eval.tree_of(c)} <> kids,
+                 SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(c)),
+                 best, SolveFast.dummy_zero(), False{}),
+          fast_c, ref_c, eh)
+      +wk : {Eval.Eval.items(p, G, S, g, restg, kr, sr, inf)
+             == Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+                  kids, sum, inf)
+             : Eval.KS} =
+        Equal.sym(Eval.KS,
+          Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+            kids, sum, inf),
+          Eval.Eval.items(p, G, S, g, restg, kr, sr, inf),
+          Eval.Eval.with_kid_eq(fb, kids, sum, inf, ref_c,
+            ka => sa => Eval.Eval.items(p, G, S, g, restg, ka, sa, inf)))
+      +e4 : {SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+               Eval.Eval.finish_ks(inf, g, S,
+                 Eval.Eval.items(p, G, S, g, restg, kr, sr, inf), best),
+               SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                  Eval.Eval.finish_ks(inf, g, S,
+                    Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+                      kids, sum, inf),
+                    best),
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        Equal.cong(Eval.KS, SolveRef.Best,
+          ks => SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                  Eval.Eval.finish_ks(inf, g, S, ks, best),
+                  SolveFast.dummy_zero(), False{}),
+          Eval.Eval.items(p, G, S, g, restg, kr, sr, inf),
+          Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+            kids, sum, inf),
+          wk)
+      Equal.trans(SolveRef.Best,
+        SolveFast.step(1n+p,
+          SolveFast.ClassItem{fb, ws} <> (SolveFast.Add{fb} <> inner),
+          G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{}),
+        SolveFast.step(1n+p, inner, G, S, inf, g, kr, sr, best,
+          SolveFast.dummy_zero(), False{}),
+        SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+          Eval.Eval.finish_ks(inf, g, S,
+            Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+              kids, sum, inf),
+            best),
+          SolveFast.dummy_zero(), False{}),
+        Equal.trans(SolveRef.Best,
+          SolveFast.step(1n+p,
+            SolveFast.ClassItem{fb, ws} <> (SolveFast.Add{fb} <> inner),
+            G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p, inner, G, S, inf, g, kf, sf, best,
+            SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p, inner, G, S, inf, g, kr, sr, best,
+            SolveFast.dummy_zero(), False{}),
+          e1, e2),
+        Equal.trans(SolveRef.Best,
+          SolveFast.step(1n+p, inner, G, S, inf, g, kr, sr, best,
+            SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+            Eval.Eval.finish_ks(inf, g, S,
+              Eval.Eval.items(p, G, S, g, restg, kr, sr, inf), best),
+            SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+            Eval.Eval.finish_ks(inf, g, S,
+              Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+                kids, sum, inf),
+              best),
+            SolveFast.dummy_zero(), False{}),
+          rec_live, e4))
 
-# The outcome of a usable guess block in `SolveFast` agrees with `Eval.block`
-# in both the skipped and the searched mode.
-def FE.block_out_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+# Step `Check` in a live block and hand the resulting mode to `FE.live_group_step`.
+def FE.live_groups_cons(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +g: +List<Nat>, +fb: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +restg: +List<Groups.Group>,
+    +kids: +List<Tree.Child>, +sum: Nat, +best: SolveRef.Best,
+    +rest: +List<SolveFast.Item>,
+    +ble: {Nat.is_le(Groups.len_words(ws), p) == True{} : Bool},
+    bt: MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
+    eh: FE.EJob(p, inf, G, ws),
+    rec_live: {SolveFast.step(1n+p,
+                  List.append(&2, SolveFast.Item,
+                    SolveFast.group_items(Groups.len_words(S), restg),
+                    SolveFast.End{} <> rest),
+                  G, S, inf, g,
+                  Tree.Child{fb, Eval.Eval.tree_of(FS.FS.ref_run_at(p, inf, G, ws))}
+                    <> kids,
+                  SolveRef.sat_add(inf, sum,
+                    Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))),
+                  best, SolveFast.dummy_zero(), False{})
+                == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                     Eval.Eval.finish_ks(inf, g, S,
+                       Eval.Eval.items(p, G, S, g, restg,
+                         Tree.Child{fb, Eval.Eval.tree_of(FS.FS.ref_run_at(p, inf, G, ws))}
+                           <> kids,
+                         SolveRef.sat_add(inf, sum,
+                           Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))),
+                         inf),
+                       best),
+                     SolveFast.dummy_zero(), False{})
+                : SolveRef.Best}) ->
+  {SolveFast.step(1n+p,
+     List.append(&2, SolveFast.Item,
+       SolveFast.group_items(Groups.len_words(S), Groups.Group{fb, ws} <> restg),
+       SolveFast.End{} <> rest),
+     G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+   == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.finish_ks(inf, g, S,
+          Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+            kids, sum, inf),
+          best),
+        SolveFast.dummy_zero(), False{})
+   : SolveRef.Best}:
+  +n : Nat = Groups.len_words(S)
+  +rem_lb : Nat = SolveFast.lower_bound(n, Groups.Group{fb, ws} <> restg)
+  +sk : Bool = SolveFast.skippable(best, Nat.add(sum, rem_lb))
+  +after_check : +List<SolveFast.Item> =
+    SolveFast.ClassItem{fb, ws}
+      <> (SolveFast.Add{fb}
+          <> List.append(&2, SolveFast.Item,
+               SolveFast.group_items(n, restg),
+               SolveFast.End{} <> rest))
+  +e1 : {SolveFast.step(1n+p, SolveFast.Check{rem_lb} <> after_check,
+           G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+         == SolveFast.step(1n+p, after_check, G, S, inf, g, kids, sum, best,
+              SolveFast.dummy_zero(), sk)
+         : SolveRef.Best} =
+    FS.FS.check_live(p, G, S, inf, g, rem_lb, after_check, kids, sum, best,
+      SolveFast.dummy_zero(), sk, {==})
+  +e2 : {SolveFast.step(1n+p, after_check, G, S, inf, g, kids, sum, best,
+           SolveFast.dummy_zero(), sk)
+         == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+              Eval.Eval.finish_ks(inf, g, S,
+                Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+                  kids, sum, inf),
+                best),
+              SolveFast.dummy_zero(), False{})
+         : SolveRef.Best} =
+    FE.live_group_step(p, G, S, inf, g, fb, ws, restg, kids, sum, best, rest,
+      sk, {==}, ble, bt, hz, hbest, eh, rec_live)
+  Equal.trans(SolveRef.Best,
+    SolveFast.step(1n+p, SolveFast.Check{rem_lb} <> after_check,
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{}),
+    SolveFast.step(1n+p, after_check, G, S, inf, g, kids, sum, best,
+      SolveFast.dummy_zero(), sk),
+    SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+      Eval.Eval.finish_ks(inf, g, S,
+        Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+          kids, sum, inf),
+        best),
+      SolveFast.dummy_zero(), False{}),
+    e1, e2)
+
+# Stepping the remaining class items of a live block agrees with `Eval.finish_ks`
+# on `Eval.items`, whether a class triggers mid-guess pruning or searches all
+# remaining classes.
+def FE.live_groups_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +g: +List<Nat>, +groups: +List<Groups.Group>,
+    +kids: +List<Tree.Child>, +sum: Nat, +best: SolveRef.Best,
+    +rest: +List<SolveFast.Item>,
+    bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
+    ec: FE.EClass(p, inf, G, groups)) ->
+  {SolveFast.step(1n+p,
+     List.append(&2, SolveFast.Item,
+       SolveFast.group_items(Groups.len_words(S), groups),
+       SolveFast.End{} <> rest),
+     G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+   == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.finish_ks(inf, g, S,
+          Eval.Eval.items(p, G, S, g, groups, kids, sum, inf), best),
+        SolveFast.dummy_zero(), False{})
+   : SolveRef.Best}:
+  match groups:
+    case Nil{}:
+      FS.FS.end_step(p, G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(),
+        rest, False{})
+    case Con{gp, restg}:
+      match gp:
+        case Groups.Group{+fb, +ws}:
+          (+ble, bt) = bounds
+          (eh, et) = ec
+          MV.MV.use_pair(
+            {SolveFast.step(1n+p,
+               List.append(&2, SolveFast.Item,
+                 SolveFast.group_items(Groups.len_words(S),
+                   Groups.Group{fb, ws} <> restg),
+                 SolveFast.End{} <> rest),
+               G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                  Eval.Eval.finish_ks(inf, g, S,
+                    Eval.Eval.items(p, G, S, g, Groups.Group{fb, ws} <> restg,
+                      kids, sum, inf),
+                    best),
+                  SolveFast.dummy_zero(), False{})
+             : SolveRef.Best},
+            MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+            MV.MV.Bounds(p, MV.MV.next_groups(restg)),
+            FE.bounds_copy(p, MV.MV.next_groups(restg), bt),
+            bt1 => bt2 =>
+              FE.live_groups_cons(p, G, S, inf, g, fb, ws, restg, kids, sum,
+                best, rest, ble, bt2, hz, hbest, eh,
+                FE.live_groups_eq(p, G, S, inf, g, restg,
+                  Tree.Child{fb, Eval.Eval.tree_of(FS.FS.ref_run_at(p, inf, G, ws))}
+                    <> kids,
+                  SolveRef.sat_add(inf, sum,
+                    Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))),
+                  best, rest, bt1, hz, hbest, et)))
+
+# Stepping the body of a usable guess block after `Begin` agrees with
+# `Eval.block` in both the skipped and the searched mode.
+def FE.block_step_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +inf: Nat, +g: +List<Nat>, +groups: +List<Groups.Group>,
     +rest: +List<SolveFast.Item>, +best: SolveRef.Best,
     skip: Bool,
@@ -217,63 +500,69 @@ def FE.block_out_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool},
     ec: FE.EClass(p, inf, G, groups)) ->
-  {FS.FS.block_out(p, G, S, inf, g, groups, Nil{}, 0n, best, rest, skip)
+  {FS.FS.after_begin(1n+p, G, S, inf, g,
+     List.append(&2, SolveFast.Item,
+       SolveFast.group_items(Groups.len_words(S), groups),
+       SolveFast.End{} <> rest),
+     best, skip)
    == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
         Eval.Eval.block(p, G, S, g, inf, groups, best),
         SolveFast.dummy_zero(), False{})
    : SolveRef.Best}:
   match skip:
     case True{}:
+      +n : Nat = Groups.len_words(S)
       +le : {Nat.is_le(Eval.Eval.cost_of(best),
-               SolveFast.lower_bound(Groups.len_words(S), groups))
+               SolveFast.lower_bound(n, groups))
              == True{} : Bool} =
         FLB.FS.skippable_to_le(best,
-          SolveFast.lower_bound(Groups.len_words(S), groups),
+          SolveFast.lower_bound(n, groups),
           Equal.sym(Bool, True{},
             SolveFast.skippable(best,
-              SolveFast.lower_bound(Groups.len_words(S), groups)), esk))
+              SolveFast.lower_bound(n, groups)), esk))
       +beq : {Eval.Eval.block(p, G, S, g, inf, groups, best) == best
               : SolveRef.Best} =
         FLB.FS.block_skip_eq(p, inf, G, S, g, groups, best, us, ele, hz,
           hbest, le)
-      Equal.cong(SolveRef.Best, SolveRef.Best,
-        b => SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, b,
-               SolveFast.dummy_zero(), False{}),
-        best, Eval.Eval.block(p, G, S, g, inf, groups, best),
-        Equal.sym(SolveRef.Best,
-          Eval.Eval.block(p, G, S, g, inf, groups, best), best, beq))
-    case False{}:
-      +ieq : {FS.FS.items(p, G, S, g, groups, Nil{}, 0n, inf)
-              == Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf)
-              : Eval.KS} =
-        FE.items_eq(p, G, S, g, groups, Nil{}, 0n, inf, ec)
-      +e1 : {FS.FS.resume(1n+p, G, S, inf, g,
-               FS.FS.items(p, G, S, g, groups, Nil{}, 0n, inf), rest, best)
-             == FS.FS.resume(1n+p, G, S, inf, g,
-                  Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf),
-                  rest, best)
+      +e1 : {FS.FS.after_begin(1n+p, G, S, inf, g,
+               List.append(&2, SolveFast.Item,
+                 SolveFast.group_items(n, groups),
+                 SolveFast.End{} <> rest),
+               best, True{})
+             == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+                  SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
-        Equal.cong(Eval.KS, SolveRef.Best,
-          ks => FS.FS.resume(1n+p, G, S, inf, g, ks, rest, best),
-          FS.FS.items(p, G, S, g, groups, Nil{}, 0n, inf),
-          Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf), ieq)
-      +e2 : {FS.FS.resume(1n+p, G, S, inf, g,
-               Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf), rest, best)
+        FS.FS.block_dead(p, G, S, n, inf, g, groups, Nil{}, 0n, best, rest)
+      +e2 : {SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+               SolveFast.dummy_zero(), False{})
              == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
                   Eval.Eval.block(p, G, S, g, inf, groups, best),
                   SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
-        FE.resume_eq(1n+p, G, S, inf, g,
-          Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf), rest, best)
+        Equal.cong(SolveRef.Best, SolveRef.Best,
+          b => SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, b,
+                 SolveFast.dummy_zero(), False{}),
+          best, Eval.Eval.block(p, G, S, g, inf, groups, best),
+          Equal.sym(SolveRef.Best,
+            Eval.Eval.block(p, G, S, g, inf, groups, best), best, beq))
       Equal.trans(SolveRef.Best,
-        FS.FS.resume(1n+p, G, S, inf, g,
-          FS.FS.items(p, G, S, g, groups, Nil{}, 0n, inf), rest, best),
-        FS.FS.resume(1n+p, G, S, inf, g,
-          Eval.Eval.items(p, G, S, g, groups, Nil{}, 0n, inf), rest, best),
+        FS.FS.after_begin(1n+p, G, S, inf, g,
+          List.append(&2, SolveFast.Item,
+            SolveFast.group_items(n, groups),
+            SolveFast.End{} <> rest),
+          best, True{}),
+        SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+          SolveFast.dummy_zero(), False{}),
         SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
           Eval.Eval.block(p, G, S, g, inf, groups, best),
           SolveFast.dummy_zero(), False{}),
         e1, e2)
+    case False{}:
+      bounds : MV.MV.Bounds(p, MV.MV.next_groups(groups)) =
+        MV.MV.group_bounds(p, S, groups, ele,
+          GM.GM.groups_smaller_sound(S, groups, us))
+      FE.live_groups_eq(p, G, S, inf, g, groups, Nil{}, 0n, best, rest,
+        bounds, hz, hbest, ec)
 
 # Stepping one guess block in `SolveFast` at positive fuel agrees with
 # `Eval.guess_bool`.
@@ -297,13 +586,34 @@ def FE.schedule_guess_step(+p: Nat, +G: +List<+List<Nat>>,
     case False{}:
       {==}
     case True{}:
-      +lb : Nat = SolveFast.lower_bound(Groups.len_words(S), groups)
+      +n : Nat = Groups.len_words(S)
+      +lb : Nat = SolveFast.lower_bound(n, groups)
       +skip : Bool = SolveFast.skippable(best, lb)
+      +body_go : +List<SolveFast.Item> =
+        List.append(&2, SolveFast.Item,
+          SolveFast.group_items_go(n, groups, SolveFast.class_words(groups)),
+          SolveFast.End{} <> rest)
       +body : +List<SolveFast.Item> =
-        List.append(&2, SolveFast.Item, SolveFast.group_items(groups),
+        List.append(&2, SolveFast.Item,
+          SolveFast.group_items(n, groups),
           SolveFast.End{} <> rest)
       +us : {Groups.groups_smaller(S, groups) == True{} : Bool} =
         Equal.sym(Bool, True{}, Groups.groups_smaller(S, groups), eus)
+      +e0 : {SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body_go, G, S, inf,
+               Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
+             == SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
+                  Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
+             : SolveRef.Best} =
+        Equal.cong(+List<SolveFast.Item>, SolveRef.Best,
+          gi => SolveFast.step(1n+p,
+                  SolveFast.Begin{g, lb}
+                  <> List.append(&2, SolveFast.Item, gi,
+                       SolveFast.End{} <> rest),
+                  G, S, inf, Nil{}, Nil{}, 0n, best,
+                  SolveFast.dummy_zero(), False{}),
+          SolveFast.group_items_go(n, groups, SolveFast.class_words(groups)),
+          SolveFast.group_items(n, groups),
+          FLB.FS.group_items_go_eq(n, groups))
       +e1 : {SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
                Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{})
              == FS.FS.after_begin(1n+p, G, S, inf, g, body, best, skip)
@@ -311,32 +621,29 @@ def FE.schedule_guess_step(+p: Nat, +G: +List<+List<Nat>>,
         FS.FS.begin_succ(p, G, S, inf, Nil{}, g, lb, Nil{}, 0n, best,
           SolveFast.dummy_zero(), False{}, body, skip, {==})
       +e2 : {FS.FS.after_begin(1n+p, G, S, inf, g, body, best, skip)
-             == FS.FS.block_out(p, G, S, inf, g, groups, Nil{}, 0n, best,
-                  rest, skip)
-             : SolveRef.Best} =
-        FS.FS.block(p, G, S, inf, g, groups, Nil{}, 0n, best, rest, skip)
-      +e3 : {FS.FS.block_out(p, G, S, inf, g, groups, Nil{}, 0n, best,
-               rest, skip)
              == SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
                   Eval.Eval.block(p, G, S, g, inf, groups, best),
                   SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
-        FE.block_out_eq(p, G, S, inf, g, groups, rest, best, skip, {==},
+        FE.block_step_eq(p, G, S, inf, g, groups, rest, best, skip, {==},
           us, ele, hz, hbest, ecif)
       Equal.trans(SolveRef.Best,
+        SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body_go, G, S, inf,
+          Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
         SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
           Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
-        FS.FS.block_out(p, G, S, inf, g, groups, Nil{}, 0n, best, rest, skip),
         SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
           Eval.Eval.block(p, G, S, g, inf, groups, best),
           SolveFast.dummy_zero(), False{}),
+        e0,
         Equal.trans(SolveRef.Best,
           SolveFast.step(1n+p, SolveFast.Begin{g, lb} <> body, G, S, inf,
             Nil{}, Nil{}, 0n, best, SolveFast.dummy_zero(), False{}),
           FS.FS.after_begin(1n+p, G, S, inf, g, body, best, skip),
-          FS.FS.block_out(p, G, S, inf, g, groups, Nil{}, 0n, best, rest, skip),
-          e1, e2),
-        e3)
+          SolveFast.step(1n+p, rest, G, S, inf, Nil{}, Nil{}, 0n,
+            Eval.Eval.block(p, G, S, g, inf, groups, best),
+            SolveFast.dummy_zero(), False{}),
+          e1, e2))
 
 # Folding the pruned schedule over a guess list at positive fuel equals
 # `Eval.guesses`.
@@ -596,22 +903,6 @@ def FE.eflat_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
           Tuple{FE.ejob_succ(p, inf, G, S, ble, hz,
                   FE.eby_gs(p, inf, G, S, G, fS)),
                 FE.eflat_step(inf, p, G, t, bt, hz, ft)})
-
-# Copy a `Bounds` witness so it can be used at this level and stepped to the
-# next. Every entry is a `Bool` equality (`Data`), so it duplicates cleanly.
-def FE.bounds_copy(+fuel: Nat, +jobs: +List<+List<+List<Nat>>>,
-    bounds: MV.MV.Bounds(fuel, jobs)) ->
-  MV.MV.Bounds(fuel, jobs) & MV.MV.Bounds(fuel, jobs):
-  match jobs:
-    case Nil{}:
-      Tuple{Unit{}, Unit{}}
-    case Con{S, t}:
-      (+ble, bt) = bounds
-      MV.MV.use_pair(
-        MV.MV.Bounds(fuel, S <> t) & MV.MV.Bounds(fuel, S <> t),
-        MV.MV.Bounds(fuel, t), MV.MV.Bounds(fuel, t),
-        FE.bounds_copy(fuel, t, bt),
-        b1 => b2 => Tuple{Tuple{ble, b1}, Tuple{ble, b2}})
 
 # The fuel induction over all jobs at a level.
 def FE.eflat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
