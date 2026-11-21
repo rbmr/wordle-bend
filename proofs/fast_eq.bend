@@ -476,7 +476,22 @@ def FE.ejob_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
   +hinit : {Nat.is_le(Eval.Eval.cost_of(SolveFast.dummy_inf(inf)), inf)
             == True{} : Bool} =
     NatProof.Nat.is_le_refl(inf)
-  +e1 : {FS.FS.run_at(1n+p, inf, G, S)
+  +e0 : {FS.FS.run_at(1n+p, inf, G, S)
+         == SolveFast.step(1n+p,
+              SolveFast.schedule_go(G, S, Groups.len_words(S)),
+              G, S, inf, Nil{}, Nil{}, 0n, SolveFast.dummy_inf(inf),
+              SolveFast.dummy_zero(), False{})
+         : SolveRef.Best} =
+    Equal.cong(+List<SolveFast.Item>, SolveRef.Best,
+      cs => SolveFast.step(1n+p, cs, G, S, inf, Nil{}, Nil{}, 0n,
+              SolveFast.dummy_inf(inf), SolveFast.dummy_zero(), False{}),
+      SolveFast.schedule(G, S),
+      SolveFast.schedule_go(G, S, Groups.len_words(S)),
+      FG.FG.schedule_eq(G, S))
+  +e1 : {SolveFast.step(1n+p,
+           SolveFast.schedule_go(G, S, Groups.len_words(S)),
+           G, S, inf, Nil{}, Nil{}, 0n, SolveFast.dummy_inf(inf),
+           SolveFast.dummy_zero(), False{})
          == Eval.Eval.guesses(1n+p, G, S, inf, G, SolveFast.dummy_inf(inf))
          : SolveRef.Best} =
     FE.guesses_step(p, G, S, inf, G, SolveFast.dummy_inf(inf), ele, hz,
@@ -489,7 +504,14 @@ def FE.ejob_succ(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     FS.FS.run_at(1n+p, inf, G, S),
     Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)),
     FS.FS.ref_run_at(1n+p, inf, G, S),
-    e1,
+    Equal.trans(SolveRef.Best,
+      FS.FS.run_at(1n+p, inf, G, S),
+      SolveFast.step(1n+p,
+        SolveFast.schedule_go(G, S, Groups.len_words(S)),
+        G, S, inf, Nil{}, Nil{}, 0n, SolveFast.dummy_inf(inf),
+        SolveFast.dummy_zero(), False{}),
+      Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)),
+      e0, e1),
     Equal.sym(SolveRef.Best,
       FS.FS.ref_run_at(1n+p, inf, G, S),
       Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)),
