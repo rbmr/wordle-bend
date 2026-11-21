@@ -27,17 +27,18 @@ import ./tree.bend as Tree
 import ./groups.bend as Groups
 import ./solve_ref.bend as SolveRef
 
-# `Begin` carries the guess and its initial lower bound. `Check` carries the
-# lower bound for the remaining classes (plus `|S|`) so the search can prune
-# mid-guess as soon as `sum + rem_lb >= best_cost(best)`. `OneItem` resolves a
-# singleton feedback class `[w]` directly in O(1) once the root confirms every
-# candidate is in `G`. `ClassItem`, `Add` and `End` are the reference's items.
+# `Begin` carries the guess and its initial lower bound. `ClassItem` and `Add`
+# carry `tail_lb`, the lower bound of the remaining classes plus `|S|`: each
+# recursive child search runs with tight upper-bound cutoff
+# `best_cost(best) - (sum + tail_lb)`, and `Add` immediately switches to
+# `skip = True{}` whenever the updated `sum + tail_lb` can no longer beat
+# `best`. `OneItem` resolves a singleton feedback class `[w]` directly in O(1)
+# once the root confirms every candidate is in `G`.
 type Item is Data:
   Begin{guess: +List<Nat>, lb: Nat}
-  Check{rem_lb: Nat}
-  ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>}
+  ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>, tail_lb: Nat}
   OneItem{fb: +List<Feedback.Color>, word: +List<Nat>}
-  Add{fb: +List<Feedback.Color>}
+  Add{fb: +List<Feedback.Color>, tail_lb: Nat}
   End{}
 
 # Single-pass word and feedback equality. `Feedback.word_eq` and
@@ -235,8 +236,9 @@ def dummy_zero() -> SolveRef.Best:
   SolveRef.Best{Tree.Node{Nil{}, Nil{}}, 0n}
 
 # The class items of one guess: singleton classes `[w]` become a single O(1)
-# `OneItem{f, w}`, and larger classes are preceded by a `Check` with the
-# remaining lower bound and followed by the `Add` that consumes the child.
+# `OneItem{f, w}`, and larger classes carry `tail_lb = lower_bound(n, rest)`
+# on both `ClassItem` (to compute the recursive child cutoff) and `Add` (to
+# trigger mid-guess pruning after consuming the child).
 def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
   match groups:
     case Nil{}:
@@ -246,16 +248,16 @@ def group_items(+n: Nat, +groups: +List<Groups.Group>) -> +List<Item>:
         case Groups.Group{+f, +ws}:
           match ws:
             case Nil{}:
-              Check{lower_bound(n, Groups.Group{f, Nil{}} <> rest)}
-              <> (ClassItem{f, Nil{}} <> (Add{f} <> group_items(n, rest)))
+              +tlb = lower_bound(n, rest)
+              ClassItem{f, Nil{}, tlb} <> (Add{f, tlb} <> group_items(n, rest))
             case Con{+w, +wt}:
               match wt:
                 case Nil{}:
                   OneItem{f, w} <> group_items(n, rest)
                 case Con{+w2, +wt2}:
                   +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
-                  Check{lower_bound(n, Groups.Group{f, ws2} <> rest)}
-                  <> (ClassItem{f, ws2} <> (Add{f} <> group_items(n, rest)))
+                  +tlb = lower_bound(n, rest)
+                  ClassItem{f, ws2, tlb} <> (Add{f, tlb} <> group_items(n, rest))
 
 # Single-pass construction of a guess's lower bound and schedule items onto
 # `tail`, computing `class_lb(ws)` once per multi-word class and using `1`
@@ -268,9 +270,8 @@ def group_items_step(+f: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
                      +clb: Nat, ib: ItemsBound) -> ItemsBound:
   match ib:
     case ItemsBound{+rem_lb, +rest_items}:
-      +lb = Nat.add(clb, rem_lb)
-      ItemsBound{lb,
-        Check{lb} <> (ClassItem{f, ws} <> (Add{f} <> rest_items))}
+      ItemsBound{Nat.add(clb, rem_lb),
+        ClassItem{f, ws, rem_lb} <> (Add{f, rem_lb} <> rest_items)}
 
 def group_items_one_step(+f: +List<Feedback.Color>, +w: +List<Nat>,
                          ib: ItemsBound) -> ItemsBound:
@@ -507,13 +508,11 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
               match item:
                 case Begin{g2, lb}:
                   step(0n, Nil{}, rest, G, S, inf, g2, Nil{}, 0n, best, pending, False{})
-                case Check{rem_lb}:
-                  step(0n, Nil{}, rest, G, S, inf, g, kids, sum, best, pending, skip)
-                case ClassItem{fb, words}:
+                case ClassItem{fb, words, tail_lb}:
                   dummy_inf(inf)
                 case OneItem{fb, w}:
                   dummy_inf(inf)
-                case Add{fb}:
+                case Add{fb, tail_lb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
                       step(0n, Nil{}, rest, G, S, inf, g,
@@ -532,13 +531,11 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
               match item:
                 case Begin{g3, lb}:
                   step(0n, g2 <> grest, rest, G, S, inf, g3, Nil{}, 0n, best, pending, False{})
-                case Check{rem_lb}:
-                  step(0n, g2 <> grest, rest, G, S, inf, g, kids, sum, best, pending, skip)
-                case ClassItem{fb, words}:
+                case ClassItem{fb, words, tail_lb}:
                   dummy_inf(inf)
                 case OneItem{fb, w}:
                   dummy_inf(inf)
-                case Add{fb}:
+                case Add{fb, tail_lb}:
                   match pending:
                     case SolveRef.Best{tree, cost}:
                       step(0n, g2 <> grest, rest, G, S, inf, g,
@@ -559,24 +556,18 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                 case Begin{g2, lb}:
                   step(fuel, Nil{}, rest, G, S, inf, g2, Nil{}, 0n, best, dummy_zero(),
                        skippable(best, lb))
-                case Check{+rem_lb}:
+                case ClassItem{fb, words, +tail_lb}:
                   match skip:
                     case True{}:
                       step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
                            dummy_zero(), True{})
                     case False{}:
                       step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), skippable(best, Nat.add(sum, rem_lb)))
-                case ClassItem{fb, words}:
-                  match skip:
-                    case True{}:
-                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), skip)
-                    case False{}:
-                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
                            step(p, G, Nil{}, G, words, inf,
-                                Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
-                           skip)
+                                Nil{}, Nil{}, 0n,
+                                dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb))),
+                                dummy_zero(), False{}),
+                           False{})
                 case OneItem{fb, w}:
                   match skip:
                     case True{}:
@@ -587,13 +578,19 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                            Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                            SolveRef.sat_add(inf, sum, 1n), best,
                            dummy_zero(), False{})
-                case Add{fb}:
+                case Add{fb, +tail_lb}:
                   match pending:
-                    case SolveRef.Best{tree, cost}:
-                      step(fuel, Nil{}, rest, G, S, inf, g,
-                           Tree.Child{fb, tree} <> kids,
-                           SolveRef.sat_add(inf, sum, cost), best,
-                           dummy_zero(), skip)
+                    case SolveRef.Best{tree, +cost}:
+                      match skip:
+                        case True{}:
+                          step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
+                               dummy_zero(), True{})
+                        case False{}:
+                          +sum2 = SolveRef.sat_add(inf, sum, cost)
+                          step(fuel, Nil{}, rest, G, S, inf, g,
+                               Tree.Child{fb, tree} <> kids,
+                               sum2, best, dummy_zero(),
+                               skippable(best, Nat.add(sum2, tail_lb)))
                 case End{}:
                   match skip:
                     case True{}:
@@ -614,24 +611,18 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                 case Begin{g3, lb}:
                   step(fuel, g2 <> grest, rest, G, S, inf, g3, Nil{}, 0n, best, dummy_zero(),
                        skippable(best, lb))
-                case Check{+rem_lb}:
+                case ClassItem{fb, words, +tail_lb}:
                   match skip:
                     case True{}:
                       step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
                            dummy_zero(), True{})
                     case False{}:
                       step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), skippable(best, Nat.add(sum, rem_lb)))
-                case ClassItem{fb, words}:
-                  match skip:
-                    case True{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
-                           dummy_zero(), skip)
-                    case False{}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
                            step(p, G, Nil{}, G, words, inf,
-                                Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
-                           skip)
+                                Nil{}, Nil{}, 0n,
+                                dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb))),
+                                dummy_zero(), False{}),
+                           False{})
                 case OneItem{fb, w}:
                   match skip:
                     case True{}:
@@ -642,13 +633,19 @@ def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
                            Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                            SolveRef.sat_add(inf, sum, 1n), best,
                            dummy_zero(), False{})
-                case Add{fb}:
+                case Add{fb, +tail_lb}:
                   match pending:
-                    case SolveRef.Best{tree, cost}:
-                      step(fuel, g2 <> grest, rest, G, S, inf, g,
-                           Tree.Child{fb, tree} <> kids,
-                           SolveRef.sat_add(inf, sum, cost), best,
-                           dummy_zero(), skip)
+                    case SolveRef.Best{tree, +cost}:
+                      match skip:
+                        case True{}:
+                          step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
+                               dummy_zero(), True{})
+                        case False{}:
+                          +sum2 = SolveRef.sat_add(inf, sum, cost)
+                          step(fuel, g2 <> grest, rest, G, S, inf, g,
+                               Tree.Child{fb, tree} <> kids,
+                               sum2, best, dummy_zero(),
+                               skippable(best, Nat.add(sum2, tail_lb)))
                 case End{}:
                   match skip:
                     case True{}:
