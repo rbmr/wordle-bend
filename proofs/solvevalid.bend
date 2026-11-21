@@ -27,6 +27,7 @@ import ./depthgroups.bend as DG
 import ./nodevalid.bend as NV
 import ./groupsdistinct.bend as GD
 import ./groups.bend as Grp
+import ./validbag.bend as VB
 
 # A cost that is below infinity cannot also be at least infinity.
 def SV.lt_ge_absurd_go(+a: Nat, +b: Nat, c: Cmp,
@@ -106,3 +107,850 @@ def SV.better_cond(+inf: Nat, +candCost: Nat, +candTree: Tree.Tree,
     case SolveRef.Best{tree, +cost}:
       SV.better_cond_go(inf, candCost, candTree, G, S, tree, cost,
         Nat.is_lt(candCost, cost), {==}, cond, ok)
+
+# The feedbacks of a group list, in order. The scan over a node's children
+# needs exactly these, because a child's feedback is its group's feedback.
+def SV.Fbs(+gs: +List<Groups.Group>) -> +List<+List<Feedback.Color>>:
+  match gs:
+    case Nil{}:
+      Nil{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          f <> SV.Fbs(t)
+
+# A membership in a suffix is a membership in any list ending with it.
+def SV.in_groups_weaken(+prefix: +List<Groups.Group>, +suffix: +List<Groups.Group>,
+    +w: +List<Nat>, +fb: +List<Feedback.Color>,
+    m: NV.NV.InGroupsFb(w, fb, suffix)) ->
+  NV.NV.InGroupsFb(w, fb, List.append(&2, Groups.Group, prefix, suffix)):
+  match prefix:
+    case Nil{}:
+      m
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Inr{SV.in_groups_weaken(t, suffix, w, fb, m)}
+
+# The children of an appended group list are the appended children.
+def SV.children_append(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +xs: +List<Groups.Group>, +ys: +List<Groups.Group>, +inf: Nat) ->
+  {CH.CH.children(p, G, S, List.append(&2, Groups.Group, xs, ys), inf)
+   == List.append(&2, Tree.Child,
+        CH.CH.children(p, G, S, xs, inf), CH.CH.children(p, G, S, ys, inf))
+   : +List<Tree.Child>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
+            l => CH.CH.kid(p, G, S, f, ws, inf) <> l,
+            CH.CH.children(p, G, S, List.append(&2, Groups.Group, t, ys), inf),
+            List.append(&2, Tree.Child,
+              CH.CH.children(p, G, S, t, inf), CH.CH.children(p, G, S, ys, inf)),
+            SV.children_append(p, G, S, t, ys, inf))
+
+# A list with no matching feedback in the groups before the target is skipped.
+def SV.skip_children(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +before: +List<Groups.Group>, +suffix: +List<Groups.Group>,
+    +fb: +List<Feedback.Color>, +w: +List<Nat>,
+    afs: DG.DG.AllFalse(SV.Fbs(before), fb)) ->
+  {Tree.depth.go(List.append(&2, Tree.Child,
+      CH.CH.children(p, G, S, before, inf), CH.CH.children(p, G, S, suffix, inf)), fb, w)
+   == Tree.depth.go(CH.CH.children(p, G, S, suffix, inf), fb, w) : Maybe<Nat>}:
+  match before:
+    case Nil{}:
+      {==}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (h, afs2) = afs
+          Equal.trans(Maybe<Nat>,
+            Tree.depth.go(List.append(&2, Tree.Child,
+              CH.CH.children(p, G, S, Groups.Group{f, ws} <> t, inf),
+              CH.CH.children(p, G, S, suffix, inf)), fb, w),
+            Tree.depth.go(List.append(&2, Tree.Child,
+              CH.CH.children(p, G, S, t, inf),
+              CH.CH.children(p, G, S, suffix, inf)), fb, w),
+            Tree.depth.go(CH.CH.children(p, G, S, suffix, inf), fb, w),
+            NV.NV.depth_go_skip(w, fb, f, NV.NV.kid_tree(p, G, ws, inf),
+              List.append(&2, Tree.Child,
+                CH.CH.children(p, G, S, t, inf),
+                CH.CH.children(p, G, S, suffix, inf)), h),
+            SV.skip_children(p, G, S, inf, t, suffix, fb, w, afs2))
+
+# Membership of a word at the end of a word prefix.
+def SV.in_words_at(+wpre: +List<+List<Nat>>, +w: +List<Nat>,
+    +wt: +List<+List<Nat>>) ->
+  Grp.Grp.InWords(w, List.append(&2, +List<Nat>, wpre, w <> wt)):
+  match wpre:
+    case Nil{}:
+      Inl{{==}}
+    case Con{h, t}:
+      Inr{SV.in_words_at(t, w, wt)}
+
+# A membership of the word at the end of a word prefix, inside the group at the
+# end of a group prefix.
+def SV.mem_at(+prefix: +List<Groups.Group>, +f: +List<Feedback.Color>,
+    +gws: +List<+List<Nat>>, +wpre: +List<+List<Nat>>, +w: +List<Nat>,
+    +wt: +List<+List<Nat>>, +rest: +List<Groups.Group>,
+    +fb: +List<Feedback.Color>,
+    +efb: {Feedback.feedback_eq(fb, f) == True{} : Bool},
+    +eGws: {gws == List.append(&2, +List<Nat>, wpre, w <> wt) : +List<+List<Nat>>}) ->
+  NV.NV.InGroupsFb(w, fb,
+    List.append(&2, Groups.Group, prefix, Groups.Group{f, gws} <> rest)):
+  match prefix:
+    case Nil{}:
+      iw : Grp.Grp.InWords(w, gws) =
+        %Equal.sym(+List<+List<Nat>>, gws,
+           List.append(&2, +List<Nat>, wpre, w <> wt), eGws)
+        : Grp.Grp.InWords(w, _)
+        SV.in_words_at(wpre, w, wt)
+      Inl{(iw, efb)}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f2, ws2}:
+          Inr{SV.mem_at(t, f, gws, wpre, w, wt, rest, fb, efb, eGws)}
+
+# The groups before the target all have a different feedback, for a word at the
+# end of a word prefix of the target group.
+def SV.prefix_false(+before: +List<Groups.Group>, +f: +List<Feedback.Color>,
+    +gws: +List<+List<Nat>>, +wpre: +List<+List<Nat>>, +w: +List<Nat>,
+    +wt: +List<+List<Nat>>, +rest: +List<Groups.Group>,
+    +fb: +List<Feedback.Color>,
+    +efb: {Feedback.feedback_eq(fb, f) == True{} : Bool},
+    +eGws: {gws == List.append(&2, +List<Nat>, wpre, w <> wt) : +List<+List<Nat>>},
+    d: GD.GD.Distinct(List.append(&2, Groups.Group, before,
+         Groups.Group{f, gws} <> rest))) ->
+  DG.DG.AllFalse(SV.Fbs(before), fb):
+  match before:
+    case Nil{}:
+      Unit{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f2, ws2}:
+          (nf, dt) = d
+          (NV.NV.not_fb_value(f2, fb,
+             List.append(&2, Groups.Group, t, Groups.Group{f, gws} <> rest), w, nf,
+             SV.mem_at(t, f, gws, wpre, w, wt, rest, fb, efb, eGws)),
+           SV.prefix_false(t, f, gws, wpre, w, wt, rest, fb, efb, eGws, dt))
+
+# Rewrite the group list under a distinctness proof.
+def SV.distinct_transport(+a: +List<Groups.Group>, +b: +List<Groups.Group>,
+    e: {a == b : +List<Groups.Group>}, d: GD.GD.Distinct(a)) ->
+  GD.GD.Distinct(b):
+  %e : GD.GD.Distinct(_)
+  d
+
+# `wpre ++ (w :: wt)` is `(wpre ++ [w]) ++ wt`.
+def SV.append_singleton(+wpre: +List<+List<Nat>>, +w: +List<Nat>,
+    +wt: +List<+List<Nat>>) ->
+  {List.append(&2, +List<Nat>, wpre, w <> wt)
+   == List.append(&2, +List<Nat>,
+        List.append(&2, +List<Nat>, wpre, w <> Nil{}), wt)
+   : +List<+List<Nat>>}:
+  match wpre:
+    case Nil{}:
+      {==}
+    case Con{h, t}:
+      Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>, l => h <> l,
+        List.append(&2, +List<Nat>, t, w <> wt),
+        List.append(&2, +List<Nat>,
+          List.append(&2, +List<Nat>, t, w <> Nil{}), wt),
+        SV.append_singleton(t, w, wt))
+
+# The children of the full group list split at a group.
+def SV.children_full(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +full: +List<Groups.Group>, +before: +List<Groups.Group>,
+    +f: +List<Feedback.Color>, +gws: +List<+List<Nat>>, +rest: +List<Groups.Group>,
+    +eFull: {full == List.append(&2, Groups.Group, before,
+               Groups.Group{f, gws} <> rest) : +List<Groups.Group>}) ->
+  {CH.CH.children(p, G, S, full, inf)
+   == List.append(&2, Tree.Child, CH.CH.children(p, G, S, before, inf),
+        CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf))
+   : List<&2, Tree.Child>}:
+  Equal.trans(List<&2, Tree.Child>, CH.CH.children(p, G, S, full, inf),
+    CH.CH.children(p, G, S,
+      List.append(&2, Groups.Group, before, Groups.Group{f, gws} <> rest), inf),
+    List.append(&2, Tree.Child, CH.CH.children(p, G, S, before, inf),
+      CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf)),
+    Equal.cong(List<&2, Groups.Group>, List<&2, Tree.Child>,
+      l => CH.CH.children(p, G, S, l, inf), full,
+      List.append(&2, Groups.Group, before, Groups.Group{f, gws} <> rest), eFull),
+    SV.children_append(p, G, S, before, Groups.Group{f, gws} <> rest, inf))
+
+# The words of a group all produce the group's feedback.
+def SV.WsFb(+g: +List<Nat>, +f: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>) -> Type:
+  match ws:
+    case Nil{}:
+      Unit
+    case Con{w, t}:
+      {Feedback.feedback_eq(Feedback.feedback(g, w), f) == True{} : Bool}
+      & SV.WsFb(g, f, t)
+
+def SV.WordsFb(+g: +List<Nat>, +gs: +List<Groups.Group>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          SV.WsFb(g, fb, ws) & SV.WordsFb(g, t)
+
+def SV.wsfb_append(+g: +List<Nat>, +f: +List<Feedback.Color>,
+    +xs: +List<+List<Nat>>, +ys: +List<+List<Nat>>,
+    px: SV.WsFb(g, f, xs), py: SV.WsFb(g, f, ys)) ->
+  SV.WsFb(g, f, List.append(&2, +List<Nat>, xs, ys)):
+  match xs:
+    case Nil{}:
+      py
+    case Con{h, t}:
+      (ph, pt) = px
+      (ph, SV.wsfb_append(g, f, t, ys, pt, py))
+
+# Branch of `words_fb_add`, split on the feedback test.
+def SV.words_fb_add_branch(+g: +List<Nat>, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +t: +List<Groups.Group>, b: Bool,
+    +eb: {b == Feedback.feedback_eq(fb, f) : Bool},
+    +local: {Feedback.feedback_eq(Feedback.feedback(g, w), fb) == True{} : Bool},
+    a_w: SV.WsFb(g, f, ws), a_t: SV.WordsFb(g, t),
+    k: SV.WordsFb(g, t) -> SV.WordsFb(g, Groups.group_add(w, fb, t))) ->
+  SV.WordsFb(g, Feedback.Bool.case(+List<Groups.Group>, b,
+    Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])} <> t,
+    Groups.Group{f, ws} <> Groups.group_add(w, fb, t))):
+  match b:
+    case True{}:
+      e_list : {fb == f : List<&2, Feedback.Color>} =
+        Fb.FbPrf.feedback_eq_true(fb, f,
+          Equal.sym(Bool, b, Feedback.feedback_eq(fb, f), eb))
+      e_w : {Feedback.feedback_eq(Feedback.feedback(g, w), f) == True{} : Bool} =
+        Equal.trans(Bool,
+          Feedback.feedback_eq(Feedback.feedback(g, w), f),
+          Feedback.feedback_eq(Feedback.feedback(g, w), fb),
+          True{}, Equal.sym(Bool,
+            Feedback.feedback_eq(Feedback.feedback(g, w), fb),
+            Feedback.feedback_eq(Feedback.feedback(g, w), f),
+            Equal.cong(+List<Feedback.Color>, Bool,
+              x => Feedback.feedback_eq(Feedback.feedback(g, w), x), fb, f, e_list)),
+          local)
+      (SV.wsfb_append(g, f, ws, [w], a_w, (e_w, Unit{})), a_t)
+    case False{}:
+      (a_w, k(a_t))
+
+# Adding a word keeps the word-feedback invariant of the groups.
+def SV.words_fb_add(+g: +List<Nat>, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, +t: +List<Groups.Group>,
+    +local: {Feedback.feedback_eq(Feedback.feedback(g, w), fb) == True{} : Bool},
+    acc: SV.WordsFb(g, t)) ->
+  SV.WordsFb(g, Groups.group_add(w, fb, t)):
+  match t:
+    case Nil{}:
+      ((local, Unit{}), Unit{})
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (a_w, a_t) = acc
+          SV.words_fb_add_branch(g, w, fb, f, ws, rest,
+            Feedback.feedback_eq(fb, f), {==}, local, a_w, a_t,
+            a => SV.words_fb_add(g, w, fb, rest, local, a))
+
+# Branch of `words_fb_build`, split on the word test.
+def SV.words_fb_build_branch(+g: +List<Nat>, +w: +List<Nat>,
+    +t: +List<+List<Nat>>, +acc: +List<Groups.Group>, b: Bool,
+    +eb: {b == Feedback.word_eq(g, w) : Bool},
+    acc_ok: SV.WordsFb(g, acc),
+    k_t: SV.WordsFb(g, acc) -> SV.WordsFb(g, Groups.groups_build(g, t, acc)),
+    k_f: SV.WordsFb(g, acc) -> SV.WordsFb(g, Groups.groups_build(g, t,
+      Groups.group_add(w, Feedback.feedback(g, w), acc)))) ->
+  SV.WordsFb(g, Feedback.Bool.case(+List<Groups.Group>, b,
+    Groups.groups_build(g, t, acc),
+    Groups.groups_build(g, t,
+      Groups.group_add(w, Feedback.feedback(g, w), acc)))):
+  match b:
+    case True{}:
+      k_t(acc_ok)
+    case False{}:
+      k_f(acc_ok)
+
+def SV.words_fb_build(+g: +List<Nat>, +S: +List<+List<Nat>>,
+    +acc: +List<Groups.Group>, acc_ok: SV.WordsFb(g, acc)) ->
+  SV.WordsFb(g, Groups.groups_build(g, S, acc)):
+  match S:
+    case Nil{}:
+      acc_ok
+    case Con{w, t}:
+      SV.words_fb_build_branch(g, w, t, acc, Feedback.word_eq(g, w), {==}, acc_ok,
+        aok => SV.words_fb_build(g, t, acc, aok),
+        aok => SV.words_fb_build(g, t,
+          Groups.group_add(w, Feedback.feedback(g, w), acc),
+          SV.words_fb_add(g, w, Feedback.feedback(g, w), acc,
+            Fb.FbPrf.feedback_eq_refl(Feedback.feedback(g, w)), aok)))
+
+def SV.words_fb(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
+  SV.WordsFb(g, Groups.groups_build(g, S, Nil{})):
+  SV.words_fb_build(g, S, Nil{}, Unit{})
+
+# Drop the groups before the wanted one.
+def SV.words_fb_skip(+g: +List<Nat>, +before: +List<Groups.Group>,
+    +rest: +List<Groups.Group>,
+    wfb: SV.WordsFb(g, List.append(&2, Groups.Group, before, rest))) ->
+  SV.WordsFb(g, rest):
+  match before:
+    case Nil{}:
+      wfb
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          (_, wfb2) = wfb
+          SV.words_fb_skip(g, t, rest, wfb2)
+
+# The head group's word-feedback facts.
+def SV.words_fb_head(+g: +List<Nat>, +f: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +t: +List<Groups.Group>,
+    wfb: SV.WordsFb(g, Groups.Group{f, ws} <> t)) -> SV.WsFb(g, f, ws):
+  (w, _) = wfb
+  w
+
+# The depth fact of one candidate at its group.
+def SV.cand_at_group(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +full: +List<Groups.Group>,
+    +before: +List<Groups.Group>, +f: +List<Feedback.Color>,
+    +gws: +List<+List<Nat>>, +wpre: +List<+List<Nat>>, +w: +List<Nat>,
+    +wt: +List<+List<Nat>>, +rest: +List<Groups.Group>,
+    +eGws: {gws == List.append(&2, +List<Nat>, wpre, w <> wt) : +List<+List<Nat>>},
+    +eFull: {full == List.append(&2, Groups.Group, before,
+               Groups.Group{f, gws} <> rest) : +List<Groups.Group>},
+    +eFull0: {full == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    +efb: {Feedback.feedback_eq(Feedback.feedback(g, w), f) == True{} : Bool},
+    dk: {Maybe.is_some(&1, Nat, Tree.depth(NV.NV.kid_tree(p, G, gws, inf), w))
+         == True{} : Bool}) ->
+  {Maybe.is_some(&1, Nat,
+     Tree.depth(Tree.Node{g, CH.CH.children(p, G, S, full, inf)}, w)) == True{} : Bool}:
+  d : GD.GD.Distinct(List.append(&2, Groups.Group, before,
+         Groups.Group{f, gws} <> rest)) =
+    SV.distinct_transport(Groups.groups_build(g, S, Nil{}),
+      List.append(&2, Groups.Group, before, Groups.Group{f, gws} <> rest),
+      Equal.trans(+List<Groups.Group>, Groups.groups_build(g, S, Nil{}), full,
+        List.append(&2, Groups.Group, before, Groups.Group{f, gws} <> rest),
+        Equal.sym(+List<Groups.Group>, full, Groups.groups_build(g, S, Nil{}), eFull0),
+        eFull),
+      GD.GD.groups_distinct(g, S))
+  +fbw : +List<Feedback.Color> = Feedback.feedback(g, w)
+  eCh = SV.children_full(p, G, S, inf, full, before, f, gws, rest, eFull)
+  eSkip = SV.skip_children(p, G, S, inf, before, Groups.Group{f, gws} <> rest,
+    Feedback.feedback(g, w), w,
+    SV.prefix_false(before, f, gws, wpre, w, wt, rest,
+      Feedback.feedback(g, w), efb, eGws, d))
+  eHead = NV.NV.depth_go_head_at(w, Feedback.feedback(g, w), f,
+    NV.NV.kid_tree(p, G, gws, inf), CH.CH.children(p, G, S, rest, inf),
+    Fb.FeedbackProof.feedback_eq_sym(Feedback.feedback(g, w), f, efb))
+  c1 = Equal.cong(List<&2, Tree.Child>, Bool,
+    x => Maybe.is_some(&1, Nat, Tree.depth.go(x, Feedback.feedback(g, w), w)),
+    CH.CH.children(p, G, S, full, inf),
+    List.append(&2, Tree.Child, CH.CH.children(p, G, S, before, inf),
+      CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf)),
+    eCh)
+  c2 = Equal.cong(Maybe<Nat>, Bool, x => Maybe.is_some(&1, Nat, x),
+    Tree.depth.go(List.append(&2, Tree.Child,
+      CH.CH.children(p, G, S, before, inf),
+      CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf)),
+      Feedback.feedback(g, w), w),
+    Tree.depth.go(CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf),
+      Feedback.feedback(g, w), w), eSkip)
+  c3 = Equal.cong(Maybe<Nat>, Bool, x => Maybe.is_some(&1, Nat, x),
+    Tree.depth.go(CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf),
+      Feedback.feedback(g, w), w),
+    Tree.depth(NV.NV.kid_tree(p, G, gws, inf), w), eHead)
+  go = Equal.trans(Bool,
+    Maybe.is_some(&1, Nat, Tree.depth.go(CH.CH.children(p, G, S, full, inf),
+      Feedback.feedback(g, w), w)),
+    Maybe.is_some(&1, Nat, Tree.depth(NV.NV.kid_tree(p, G, gws, inf), w)),
+    True{},
+    Equal.trans(Bool,
+      Maybe.is_some(&1, Nat, Tree.depth.go(CH.CH.children(p, G, S, full, inf),
+        Feedback.feedback(g, w), w)),
+      Maybe.is_some(&1, Nat, Tree.depth.go(CH.CH.children(p, G, S,
+        Groups.Group{f, gws} <> rest, inf), Feedback.feedback(g, w), w)),
+      Maybe.is_some(&1, Nat, Tree.depth(NV.NV.kid_tree(p, G, gws, inf), w)),
+      Equal.trans(Bool,
+        Maybe.is_some(&1, Nat, Tree.depth.go(CH.CH.children(p, G, S, full, inf),
+          Feedback.feedback(g, w), w)),
+        Maybe.is_some(&1, Nat, Tree.depth.go(List.append(&2, Tree.Child,
+          CH.CH.children(p, G, S, before, inf),
+          CH.CH.children(p, G, S, Groups.Group{f, gws} <> rest, inf)),
+          Feedback.feedback(g, w), w)),
+        Maybe.is_some(&1, Nat, Tree.depth.go(CH.CH.children(p, G, S,
+          Groups.Group{f, gws} <> rest, inf), Feedback.feedback(g, w), w)),
+        c1, c2),
+      c3),
+    dk)
+  DG.DG.node_depth_bool(g, CH.CH.children(p, G, S, full, inf), w,
+    Feedback.word_eq(g, w), {==}, go)
+
+# The node depth of every word of one group, from its child's depths.
+def SV.group_depths(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +full: +List<Groups.Group>,
+    +before: +List<Groups.Group>, +f: +List<Feedback.Color>,
+    +gws: +List<+List<Nat>>, +ws: +List<+List<Nat>>, +wpre: +List<+List<Nat>>,
+    +rest: +List<Groups.Group>,
+    +eGws: {gws == List.append(&2, +List<Nat>, wpre, ws) : +List<+List<Nat>>},
+    +eFull: {full == List.append(&2, Groups.Group, before,
+               Groups.Group{f, gws} <> rest) : +List<Groups.Group>},
+    +eFull0: {full == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    wsfb: SV.WsFb(g, f, ws),
+    kidAd: Tree.AllHaveDepth(NV.NV.kid_tree(p, G, gws, inf), ws)) ->
+  Tree.AllHaveDepth(Tree.Node{g, CH.CH.children(p, G, S, full, inf)}, ws):
+  match ws:
+    case Nil{}:
+      Unit{}
+    case Con{w, wt}:
+      (efb, wsfb2) = wsfb
+      (dk, kidAd2) = kidAd
+      +eGws2 : {gws == List.append(&2, +List<Nat>,
+                   List.append(&2, +List<Nat>, wpre, w <> Nil{}), wt)
+                : +List<+List<Nat>>} =
+        Equal.trans(+List<+List<Nat>>, gws,
+          List.append(&2, +List<Nat>, wpre, w <> wt),
+          List.append(&2, +List<Nat>,
+            List.append(&2, +List<Nat>, wpre, w <> Nil{}), wt),
+          eGws, SV.append_singleton(wpre, w, wt))
+      (SV.cand_at_group(p, G, S, g, inf, full, before, f, gws, wpre, w, wt, rest,
+         eGws, eFull, eFull0, efb, dk),
+       SV.group_depths(p, G, S, g, inf, full, before, f, gws, wt,
+         List.append(&2, +List<Nat>, wpre, w <> Nil{}), rest,
+         eGws2, eFull, eFull0, wsfb2, kidAd2))
+
+# The conjunction of the class results of a group list, in order.
+def SV.Oks(+p: Nat, +G: +List<+List<Nat>>, +inf: Nat,
+    +groups: +List<Groups.Group>) -> Type:
+  match groups:
+    case Nil{}:
+      Unit
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          BO.BO.BestOK(inf,
+            SolveRef.step(p, SolveRef.mk_schedule(G, ws), G, ws, inf,
+              Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+            G, ws)
+          & SV.Oks(p, G, inf, rest)
+
+# The words of the groups, concatenated.
+def SV.flatWords(+groups: +List<Groups.Group>) -> +List<+List<Nat>>:
+  match groups:
+    case Nil{}:
+      Nil{}
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          List.append(&2, +List<Nat>, ws, SV.flatWords(t))
+
+# A word in the right summand is in the append.
+def SV.in_words_right(+w: +List<Nat>, +xs: +List<+List<Nat>>,
+    +ys: +List<+List<Nat>>, m: Grp.Grp.InWords(w, ys)) ->
+  Grp.Grp.InWords(w, List.append(&2, +List<Nat>, xs, ys)):
+  match xs:
+    case Nil{}:
+      m
+    case Con{h, t}:
+      Inr{SV.in_words_right(w, t, ys, m)}
+
+# A group membership is a membership in the concatenation.
+def SV.flat_mem(+groups: +List<Groups.Group>, +w: +List<Nat>,
+    m: Grp.Grp.InGroups(w, groups)) -> Grp.Grp.InWords(w, SV.flatWords(groups)):
+  match groups:
+    case Nil{}:
+      Empty.absurd(Grp.Grp.InWords(w, Nil{}), m)
+    case Con{gp, t}:
+      match gp:
+        case Groups.Group{f, ws}:
+          match m:
+            case Inl{iw}:
+              Grp.Grp.in_words_append_l(w, ws, SV.flatWords(t), iw)
+            case Inr{m2}:
+              SV.in_words_right(w, ws, SV.flatWords(t), SV.flat_mem(t, w, m2))
+
+# A guess candidate has depth one.
+def SV.fact_guess(+g: +List<Nat>, +kids: +List<Tree.Child>, +w: +List<Nat>,
+    e: {Feedback.word_eq(g, w) == True{} : Bool}) -> VB.VB.Fact(g, kids, w):
+  +e_d : {Tree.depth(Tree.Node{g, kids}, w)
+          == Feedback.Bool.case(Maybe<Nat>, True{}, Some{1n},
+               Tree.depth.bump(Tree.depth.go(kids, Feedback.feedback(g, w), w)))
+          : Maybe<Nat>} =
+    Equal.cong(Bool, Maybe<Nat>,
+      b => Feedback.Bool.case(Maybe<Nat>, b, Some{1n},
+        Tree.depth.bump(Tree.depth.go(kids, Feedback.feedback(g, w), w))),
+      Feedback.word_eq(g, w), True{}, e)
+  +e_s : {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w))
+          == Maybe.is_some(&1, Nat, Some{1n}) : Bool} =
+    Equal.cong(Maybe<Nat>, Bool, x => Maybe.is_some(&1, Nat, x),
+      Tree.depth(Tree.Node{g, kids}, w),
+      Feedback.Bool.case(Maybe<Nat>, True{}, Some{1n},
+        Tree.depth.bump(Tree.depth.go(kids, Feedback.feedback(g, w), w))), e_d)
+  Equal.trans(Bool, Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)),
+    Maybe.is_some(&1, Nat, Some{1n}), True{}, e_s, {==})
+
+# A bag of facts for a list of words with their depths.
+def SV.bag_of_cons(+g: +List<Nat>, +kids: +List<Tree.Child>, +w: +List<Nat>,
+    f: VB.VB.Fact(g, kids, w), +t: +List<+List<Nat>>,
+    s: &bag: VB.VB.Bag(g, kids) ->
+       {VB.VB.words(g, kids, bag) == t : +List<+List<Nat>>}) ->
+  &bag: VB.VB.Bag(g, kids) ->
+    {VB.VB.words(g, kids, bag) == w <> t : +List<+List<Nat>>}:
+  match s:
+    case Tuple{bt, et}:
+      (VB.VB.entry(g, kids, w, f) <> bt,
+       Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>, l => w <> l,
+         VB.VB.words(g, kids, bt), t, et))
+
+def SV.bag_of(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +ws: +List<+List<Nat>>, ad: Tree.AllHaveDepth(Tree.Node{g, kids}, ws)) ->
+  &bag: VB.VB.Bag(g, kids) ->
+    {VB.VB.words(g, kids, bag) == ws : +List<+List<Nat>>}:
+  match ws:
+    case Nil{}:
+      (Nil{}, {==})
+    case Con{w, t}:
+      (f, ad2) = ad
+      SV.bag_of_cons(g, kids, w, f, t, SV.bag_of(g, kids, t, ad2))
+
+# The word-feedback fact of one group of a built group list.
+def SV.group_wsfb(+g: +List<Nat>, +S: +List<+List<Nat>>,
+    +before: +List<Groups.Group>, +f: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>,
+    +full: +List<Groups.Group>,
+    +eFull0: {full == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    +eFull: {full == List.append(&2, Groups.Group, before,
+               Groups.Group{f, ws} <> rest) : +List<Groups.Group>}) ->
+  SV.WsFb(g, f, ws):
+  e : {Groups.groups_build(g, S, Nil{})
+       == List.append(&2, Groups.Group, before, Groups.Group{f, ws} <> rest)
+       : +List<Groups.Group>} =
+    Equal.trans(+List<Groups.Group>, Groups.groups_build(g, S, Nil{}), full,
+      List.append(&2, Groups.Group, before, Groups.Group{f, ws} <> rest),
+      Equal.sym(+List<Groups.Group>, full, Groups.groups_build(g, S, Nil{}), eFull0),
+      eFull)
+  wfb : SV.WordsFb(g, List.append(&2, Groups.Group, before,
+          Groups.Group{f, ws} <> rest)) =
+    %e : SV.WordsFb(g, _)
+    SV.words_fb(g, S)
+  SV.words_fb_head(g, f, ws, rest,
+    SV.words_fb_skip(g, before, Groups.Group{f, ws} <> rest, wfb))
+
+# Split a validity proof into its two halves.
+def SV.use_valid(-R: Type, +kid: Tree.Tree, +G: +List<+List<Nat>>,
+    +ws: +List<+List<Nat>>, v: Tree.Valid(kid, G, ws),
+    k: Tree.TreeIn(kid, G) -> Tree.AllHaveDepth(kid, ws) -> R) -> R:
+  match v:
+    case (ti, ad):
+      k(ti, ad)
+
+# Split the bag-of-facts existential.
+def SV.use_bagof(-R: Type, +g: +List<Nat>, +kids: +List<Tree.Child>,
+    +ws: +List<+List<Nat>>,
+    s: &bag: VB.VB.Bag(g, kids) ->
+       {VB.VB.words(g, kids, bag) == ws : +List<+List<Nat>>},
+    k: @bag: VB.VB.Bag(g, kids) ->
+       {VB.VB.words(g, kids, bag) == ws : +List<+List<Nat>>} -> R) -> R:
+  match s:
+    case Tuple{bag, e}:
+      k(bag, e)
+
+# `before ++ (gp :: rest)` is `(before ++ [gp]) ++ rest`.
+def SV.group_assoc(+before: +List<Groups.Group>, gp: Groups.Group,
+    +rest: +List<Groups.Group>) ->
+  {List.append(&2, Groups.Group, before, gp <> rest)
+   == List.append(&2, Groups.Group,
+        List.append(&2, Groups.Group, before, gp <> Nil{}), rest)
+   : +List<Groups.Group>}:
+  match before:
+    case Nil{}:
+      {==}
+    case Con{h, t}:
+      Equal.cong(+List<Groups.Group>, +List<Groups.Group>, l => h <> l,
+        List.append(&2, Groups.Group, t, gp <> rest),
+        List.append(&2, Groups.Group,
+          List.append(&2, Groups.Group, t, gp <> Nil{}), rest),
+        SV.group_assoc(t, gp, rest))
+
+# The class search result of a group.
+def SV.classResult(+p: Nat, +G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
+    +inf: Nat) -> SolveRef.Best:
+  SolveRef.step(p, SolveRef.mk_schedule(G, ws), G, ws, inf,
+    Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())
+
+
+# Join the head group's bag with the rest of the walk.
+def SV.epi_join(-R: Type, +p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +fb: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>,
+    +kids: +List<Tree.Child>,
+    ti: Tree.TreeIn(NV.NV.kid_tree(p, G, ws, inf), G),
+    kik_rest: Tree.KidsIn(CH.CH.children(p, G, S, rest, inf), G),
+    bh: VB.VB.Bag(g, kids), bag_rest: VB.VB.Bag(g, kids),
+    eh: {VB.VB.words(g, kids, bh) == ws : +List<+List<Nat>>},
+    eq_rest: {VB.VB.words(g, kids, bag_rest) == SV.flatWords(rest)
+              : +List<+List<Nat>>},
+    k: Tree.KidsIn(CH.CH.children(p, G, S, Groups.Group{fb, ws} <> rest, inf), G) ->
+       @bag: VB.VB.Bag(g, kids) ->
+       {VB.VB.words(g, kids, bag)
+        == SV.flatWords(Groups.Group{fb, ws} <> rest) : +List<+List<Nat>>} -> R) -> R:
+  +br : List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>> = VB.VB.copy(g, kids, bag_rest)
+  +bh2 : List<&2, Sigma<&2, &2, +List<Nat>, w => {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}>> = VB.VB.copy(g, kids, bh)
+  bagAll : VB.VB.Bag(g, kids) = VB.VB.app(g, kids, bh2, br)
+  eAll : {VB.VB.words(g, kids, bagAll)
+          == SV.flatWords(Groups.Group{fb, ws} <> rest) : +List<+List<Nat>>} =
+    Equal.trans(+List<+List<Nat>>,
+      VB.VB.words(g, kids, bagAll),
+      List.append(&2, +List<Nat>, VB.VB.words(g, kids, bh2),
+        VB.VB.words(g, kids, br)),
+      List.append(&2, +List<Nat>, ws, SV.flatWords(rest)),
+      VB.VB.words_append(g, kids, bh2, br),
+      Equal.trans(+List<+List<Nat>>,
+        List.append(&2, +List<Nat>, VB.VB.words(g, kids, bh2),
+          VB.VB.words(g, kids, br)),
+        List.append(&2, +List<Nat>, ws, VB.VB.words(g, kids, br)),
+        List.append(&2, +List<Nat>, ws, SV.flatWords(rest)),
+        Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
+          l => List.append(&2, +List<Nat>, l, VB.VB.words(g, kids, br)),
+          VB.VB.words(g, kids, bh2), ws, eh),
+        Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
+          l => List.append(&2, +List<Nat>, ws, l),
+          VB.VB.words(g, kids, br), SV.flatWords(rest), eq_rest)))
+  k((ti, kik_rest), bagAll, eAll)
+
+# One pass over the groups: the class children, and the bag of every candidate's
+# depth fact. The results are handed to a continuation so the existential bag is
+# opened exactly once.
+def SV.epi(-R: Type, +p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +groups: +List<Groups.Group>,
+    +before: +List<Groups.Group>, +full: +List<Groups.Group>,
+    +eFull0: {full == Groups.groups_build(g, S, Nil{}) : +List<Groups.Group>},
+    +eFull: {full == List.append(&2, Groups.Group, before, groups)
+             : +List<Groups.Group>},
+    costs: Sat.SB.CostsLt(inf, Sat.SB.child_costs(p, G, groups, inf)),
+    oks: SV.Oks(p, G, inf, groups),
+    k: Tree.KidsIn(CH.CH.children(p, G, S, groups, inf), G) ->
+       @bag: VB.VB.Bag(g, CH.CH.children(p, G, S, full, inf)) ->
+       {VB.VB.words(g, CH.CH.children(p, G, S, full, inf), bag)
+        == SV.flatWords(groups) : +List<+List<Nat>>} -> R) -> R:
+  match groups:
+    case Nil{}:
+      k(Unit{}, Nil{}, {==})
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          (cost_head, costs_tail) = costs
+          (ok_head, oks_tail) = oks
+          SV.use_valid(R, NV.NV.kid_tree(p, G, ws, inf), G, ws,
+            SV.valid_of_ok_lt(inf, SV.classResult(p, G, ws, inf), G, ws,
+              cost_head, ok_head),
+            ti => ad =>
+              wsfb = SV.group_wsfb(g, S, before, fb, ws, rest, full, eFull0, eFull)
+              fd : Tree.AllHaveDepth(
+                     Tree.Node{g, CH.CH.children(p, G, S, full, inf)}, ws) =
+                SV.group_depths(p, G, S, g, inf, full, before, fb, ws, ws, Nil{},
+                  rest, {==}, eFull, eFull0, wsfb, ad)
+              split : {full == List.append(&2, Groups.Group,
+                          List.append(&2, Groups.Group, before,
+                            Groups.Group{fb, ws} <> Nil{}), rest)
+                       : +List<Groups.Group>} =
+                Equal.trans(+List<Groups.Group>, full,
+                  List.append(&2, Groups.Group, before, Groups.Group{fb, ws} <> rest),
+                  List.append(&2, Groups.Group,
+                    List.append(&2, Groups.Group, before,
+                      Groups.Group{fb, ws} <> Nil{}), rest),
+                  eFull, SV.group_assoc(before, Groups.Group{fb, ws}, rest))
+              SV.use_bagof(R, g, CH.CH.children(p, G, S, full, inf), ws,
+                SV.bag_of(g, CH.CH.children(p, G, S, full, inf), ws, fd),
+                bh => eh =>
+                  SV.epi(R, p, G, S, g, inf, rest,
+                    List.append(&2, Groups.Group, before, Groups.Group{fb, ws} <> Nil{}),
+                    full, eFull0, split, costs_tail, oks_tail,
+                    kik_rest => bag_rest => eq_rest =>
+                      SV.epi_join(R, p, G, S, g, inf, fb, ws, rest,
+                        CH.CH.children(p, G, S, full, inf),
+                        ti, kik_rest, bh, bag_rest, eh, eq_rest, k))))
+
+# Transport a group membership along an equality of group lists.
+def SV.in_groups_transport(+a: +List<Groups.Group>, +b: +List<Groups.Group>,
+    e: {a == b : +List<Groups.Group>}, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, m: Grp.Grp.InGroups(w, a)) -> Grp.Grp.InGroups(w, b):
+  %e : Grp.Grp.InGroups(w, _)
+  m
+
+# Transport a word membership along an equality of word lists.
+def SV.in_words_transport(+a: +List<+List<Nat>>, +b: +List<+List<Nat>>,
+    e: {a == b : +List<+List<Nat>>}, +w: +List<Nat>, m: Grp.Grp.InWords(w, a)) ->
+  Grp.Grp.InWords(w, b):
+  %e : Grp.Grp.InWords(w, _)
+  m
+
+# The fact half of a bag lookup.
+def SV.first(+g: +List<Nat>, +kids: +List<Tree.Child>, +w: +List<Nat>,
+    r: VB.VB.Fact(g, kids, w) & VB.VB.Bag(g, kids)) -> VB.VB.Fact(g, kids, w):
+  (a, b) = r
+  a
+
+# The fact of one candidate, from the bag.
+def SV.cand_fact_go(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +w: +List<Nat>, b: Bool, +eb: {b == Feedback.word_eq(g, w) : Bool},
+    +groups: +List<Groups.Group>, +S0: +List<+List<Nat>>, +pre: +List<+List<Nat>>,
+    +t: +List<+List<Nat>>,
+    +ePre: {S0 == List.append(&2, +List<Nat>, pre, w <> t) : +List<+List<Nat>>},
+    +eG: {groups == Groups.groups_build(g, S0, Nil{}) : +List<Groups.Group>},
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, x =>
+      {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, x)) == True{} : Bool}>>,
+    +eWords: {VB.VB.words(g, kids, bag) == SV.flatWords(groups) : +List<+List<Nat>>}) ->
+  VB.VB.Fact(g, kids, w):
+  match b:
+    case True{}:
+      SV.fact_guess(g, kids, w, Equal.sym(Bool, b, Feedback.word_eq(g, w), eb))
+    case False{}:
+      iw : Grp.Grp.InWords(w, S0) =
+        %Equal.sym(+List<+List<Nat>>, S0,
+           List.append(&2, +List<Nat>, pre, w <> t), ePre)
+        : Grp.Grp.InWords(w, _)
+        SV.in_words_at(pre, w, t)
+      inG : Grp.Grp.InGroups(w, groups) =
+        SV.in_groups_transport(Groups.groups_build(g, S0, Nil{}), groups,
+          Equal.sym(+List<Groups.Group>, groups, Groups.groups_build(g, S0, Nil{}), eG),
+          w, Feedback.feedback(g, w),
+          Grp.Grp.groups_build_contains(g, S0, w, iw,
+            Equal.sym(Bool, b, Feedback.word_eq(g, w), eb)))
+      eW : {VB.VB.words(g, kids, bag) == SV.flatWords(groups) : +List<+List<Nat>>} = eWords
+      SV.first(g, kids, w,
+        VB.VB.take(g, kids, bag, w,
+          SV.in_words_transport(SV.flatWords(groups), VB.VB.words(g, kids, bag),
+            Equal.sym(+List<+List<Nat>>, VB.VB.words(g, kids, bag),
+              SV.flatWords(groups), eW),
+            w, SV.flat_mem(groups, w, inG))))
+
+# Every candidate has a depth in the node.
+def SV.all_depth(+p: Nat, +G: +List<+List<Nat>>, +S0: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +groups: +List<Groups.Group>,
+    +kids: +List<Tree.Child>,
+    +bag: List<&2, Sigma<&2, &2, +List<Nat>, x =>
+      {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, x)) == True{} : Bool}>>,
+    +eWords: {VB.VB.words(g, kids, bag) == SV.flatWords(groups) : +List<+List<Nat>>},
+    +eG: {groups == Groups.groups_build(g, S0, Nil{}) : +List<Groups.Group>},
+    +S: +List<+List<Nat>>, +pre: +List<+List<Nat>>,
+    +ePre: {S0 == List.append(&2, +List<Nat>, pre, S) : +List<+List<Nat>>}) ->
+  Tree.AllHaveDepth(Tree.Node{g, kids}, S):
+  match S:
+    case Nil{}:
+      Unit{}
+    case Con{w, t}:
+      (SV.cand_fact_go(g, kids, w, Feedback.word_eq(g, w), {==},
+         groups, S0, pre, t, ePre, eG, bag, eWords),
+       SV.all_depth(p, G, S0, g, inf, groups, kids, bag, eWords, eG, t,
+          List.append(&2, +List<Nat>, pre, w <> Nil{}),
+          Equal.trans(+List<+List<Nat>>, S0,
+            List.append(&2, +List<Nat>, pre, w <> t),
+            List.append(&2, +List<Nat>,
+              List.append(&2, +List<Nat>, pre, w <> Nil{}), t),
+            ePre, SV.append_singleton(pre, w, t))))
+
+# Split a pair of a bound and a product.
+def SV.use_costs(-R: Type, +inf: Nat,
+    p: {Nat.is_lt(0n, inf) == True{} : Bool}
+       & Sat.SB.CostsLt(inf, Nil{}),
+    k: Sat.SB.CostsLt(inf, Nil{}) -> R) -> R:
+  match p:
+    case (a, b):
+      k(b)
+
+# Split the result of `items_lt`.
+def SV.split_items(-R: Type,
+    r: {Nat.is_lt(0n, 0n) == True{} : Bool} & R, k: R -> R) -> R:
+  match r:
+    case (a, b):
+      k(b)
+
+# Transport a validity proof along an equality of trees.
+def SV.valid_transport(+t1: Tree.Tree, +t2: Tree.Tree,
+    e: {t1 == t2 : Tree.Tree}, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    v: Tree.Valid(t1, G, S)) -> Tree.Valid(t2, G, S):
+  %e : Tree.Valid(_, G, S)
+  v
+
+# Open the bound-and-costs pair of `items_lt`.
+def SV.items_go(-R: Type, +inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    r: {Nat.is_lt(0n, inf) == True{} : Bool}
+       & Sat.SB.CostsLt(inf, Sat.SB.child_costs(p, G, groups, inf)),
+    k: Sat.SB.CostsLt(inf, Sat.SB.child_costs(p, G, groups, inf)) -> R) -> R:
+  match r:
+    case (a, b):
+      k(b)
+
+# The node of a finished guess is valid when its cost is finite.
+def SV.end_valid(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +kids: +List<Tree.Child>, sum: Nat,
+    +lt: {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S), sum), inf) == True{}
+          : Bool},
+    oks: SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{})),
+    +eSum: {sum == Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+    +eKids: {kids == SolveRef.rev_kids(
+               CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{})
+             : +List<Tree.Child>},
+    gin: Tree.WordIn(g, G)) ->
+  Tree.Valid(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S):
+  +eSumLt : {Nat.is_lt(sum, inf) == True{} : Bool} =
+    Sat.SB.sat_add_lt_r(inf, Groups.len_words(S), sum, lt)
+  SV.items_go(Tree.Valid(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S),
+    inf, p, G, Groups.groups_build(g, S, Nil{}),
+    Sat.SB.items_lt(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+    Nil{}, 0n, inf,
+    Equal.trans(Bool,
+      Nat.is_lt(Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), inf),
+      Nat.is_lt(sum, inf), True{},
+      Equal.sym(Bool, Nat.is_lt(sum, inf),
+        Nat.is_lt(Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), inf),
+        Equal.cong(Nat, Bool, x => Nat.is_lt(x, inf), sum,
+          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), eSum)),
+      eSumLt)),
+    costs =>
+  SV.epi(
+    Tree.Valid(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S),
+    p, G, S, g, inf, Groups.groups_build(g, S, Nil{}), Nil{},
+    Groups.groups_build(g, S, Nil{}), {==}, {==}, costs, oks,
+    kik => bag => eWords =>
+      SV.valid_transport(
+        Tree.Node{g, CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)},
+        Tree.Node{g, SolveRef.rev_kids(kids, Nil{})},
+        Equal.cong(+List<Tree.Child>, Tree.Tree,
+          l => Tree.Node{g, l},
+          CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+          SolveRef.rev_kids(kids, Nil{}),
+          Equal.trans(+List<Tree.Child>,
+            CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+            SolveRef.rev_kids(SolveRef.rev_kids(
+              CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+            SolveRef.rev_kids(kids, Nil{}),
+            Equal.sym(+List<Tree.Child>,
+              SolveRef.rev_kids(SolveRef.rev_kids(
+                CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+              CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+              CH.CH.rev_rev(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf))),
+            Equal.sym(+List<Tree.Child>,
+              SolveRef.rev_kids(kids, Nil{}),
+              SolveRef.rev_kids(SolveRef.rev_kids(
+                CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
+              Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
+                l => SolveRef.rev_kids(l, Nil{}), kids,
+                SolveRef.rev_kids(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), Nil{}),
+                eKids)))),
+        G, S,
+        (((gin, kik)),
+         SV.all_depth(p, G, S, g, inf, Groups.groups_build(g, S, Nil{}),
+           CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
+           bag, eWords, {==}, S, Nil{}, {==})))))
