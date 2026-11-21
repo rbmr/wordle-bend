@@ -242,3 +242,55 @@ def Cover.subseq_eq(+xs: +List<+List<Nat>>, +ys: +List<+List<Nat>>,
               lt)
           Empty.absurd({h <> t == y <> r : +List<+List<Nat>>},
             Cover.not_le_succ_self(List.length(&2, +List<Nat>, r), eq2))
+
+# A subsequence that does not shrink the length is the whole list.
+def Cover.subseq_eq_of_not_lt(+xs: +List<+List<Nat>>,
+    +ys: +List<+List<Nat>>, p: Cover.Subseq(xs, ys),
+    +nlt: {Nat.is_lt(List.length(&2, +List<Nat>, xs),
+                     List.length(&2, +List<Nat>, ys)) == False{} : Bool}) ->
+  {xs == ys : +List<+List<Nat>>}:
+  match xs ys:
+    case Nil{} Nil{}:
+      {==}
+    case Nil{} Con{y, r}:
+      Empty.absurd({Nil{} == y <> r : +List<+List<Nat>>},
+        Logic.Proof.true_ne_false(nlt))
+    case Con{h, t} Nil{}:
+      match p:
+    case Con{h, t} Con{y, r}:
+      match p:
+        case Inl{q}:
+          (e, pt) = q
+          +nlt_t : {Nat.is_lt(List.length(&2, +List<Nat>, t),
+                              List.length(&2, +List<Nat>, r)) == False{} : Bool} =
+            nlt
+          +et : {t == r : +List<+List<Nat>>} =
+            Cover.subseq_eq_of_not_lt(t, r, pt, nlt_t)
+          +e1 : {h <> t == y <> t : +List<+List<Nat>>} =
+            Equal.cong(+List<Nat>, +List<+List<Nat>>, x => x <> t, h, y, e)
+          +e2 : {y <> t == y <> r : +List<+List<Nat>>} =
+            Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>, x => y <> x, t, r, et)
+          Equal.trans(+List<+List<Nat>>, h <> t, y <> t, y <> r, e1, e2)
+        case Inr{q}:
+          +lt : {Nat.is_le(List.length(&2, +List<Nat>, h <> t),
+                           List.length(&2, +List<Nat>, r)) == True{} : Bool} =
+            Cover.subseq_length(h <> t, r, q)
+          +ltb : {Nat.is_lt(List.length(&2, +List<Nat>, r),
+                            Nat.add(1n, List.length(&2, +List<Nat>, r))) == True{} : Bool} =
+            NatProof.Nat.is_lt_succ_self(List.length(&2, +List<Nat>, r))
+          +islt : {Nat.is_lt(List.length(&2, +List<Nat>, h <> t),
+                             Nat.add(1n, List.length(&2, +List<Nat>, r))) == True{} : Bool} =
+            NatProof.Nat.is_le_lt_trans(List.length(&2, +List<Nat>, h <> t),
+              List.length(&2, +List<Nat>, r),
+              Nat.add(1n, List.length(&2, +List<Nat>, r)), lt, ltb)
+          Empty.absurd({h <> t == y <> r : +List<+List<Nat>>},
+            Logic.Proof.true_ne_false(
+              Equal.trans(Bool, True{},
+                Nat.is_lt(List.length(&2, +List<Nat>, h <> t),
+                  Nat.add(1n, List.length(&2, +List<Nat>, r))),
+                False{},
+                Equal.sym(Bool,
+                  Nat.is_lt(List.length(&2, +List<Nat>, h <> t),
+                    Nat.add(1n, List.length(&2, +List<Nat>, r))),
+                  True{}, islt),
+                nlt)))
