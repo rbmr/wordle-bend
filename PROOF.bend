@@ -386,3 +386,33 @@ def SolveProof.best_to_maybe_some(+inf: Nat, best: Solve.Best, T: Tree.Tree,
   match best:
     case Solve.Best{+tree, +cost}:
       SolveProof.best_to_maybe_some_bool(inf, tree, cost, T, Nat.is_ge(cost, inf), {==}, e)
+
+def Color.eq_true(a: Feedback.Color, b: Feedback.Color,
+    e: {Feedback.Color.eq(a, b) == True{} : Bool}) -> {a == b : Feedback.Color}:
+  match a b:
+    case Feedback.Gray{} Feedback.Gray{}:
+      {==}
+    case Feedback.Gray{} Feedback.Yellow{}:
+      Empty.absurd({Feedback.Gray{} == Feedback.Yellow{} : Feedback.Color}, Bool.false_ne_true(e))
+    case Feedback.Gray{} Feedback.Green{}:
+      Empty.absurd({Feedback.Gray{} == Feedback.Green{} : Feedback.Color}, Bool.false_ne_true(e))
+    case Feedback.Yellow{} Feedback.Gray{}:
+      Empty.absurd({Feedback.Yellow{} == Feedback.Gray{} : Feedback.Color}, Bool.false_ne_true(e))
+    case Feedback.Yellow{} Feedback.Yellow{}:
+      {==}
+    case Feedback.Yellow{} Feedback.Green{}:
+      Empty.absurd({Feedback.Yellow{} == Feedback.Green{} : Feedback.Color}, Bool.false_ne_true(e))
+    case Feedback.Green{} Feedback.Gray{}:
+      Empty.absurd({Feedback.Green{} == Feedback.Gray{} : Feedback.Color}, Bool.false_ne_true(e))
+    case Feedback.Green{} Feedback.Yellow{}:
+      Empty.absurd({Feedback.Green{} == Feedback.Yellow{} : Feedback.Color}, Bool.false_ne_true(e))
+    case Feedback.Green{} Feedback.Green{}:
+      {==}
+
+def Color.eq_trans(+a: Feedback.Color, +b: Feedback.Color, +c: Feedback.Color,
+    +eab: {Feedback.Color.eq(a, b) == True{} : Bool},
+    +ebc: {Feedback.Color.eq(b, c) == True{} : Bool}) ->
+  {Feedback.Color.eq(a, c) == True{} : Bool}:
+  eac = Equal.trans(Feedback.Color, a, b, c, Color.eq_true(a, b, eab), Color.eq_true(b, c, ebc))
+  %eac : {Feedback.Color.eq(a, _) == True{} : Bool}
+  Color.eq_refl(a)
