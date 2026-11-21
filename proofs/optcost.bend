@@ -26,6 +26,9 @@ import ./classbound.bend as CBProof
 import ./classbound_nat.bend as CBN
 import ./classbound_sum.bend as CBS
 import ./classbound_kids.bend as CBK
+import ./groupcost.bend as GC
+import ./nodecost.bend as NodeCost
+import ./depth.bend as DepthProof
 import ./optimalvalue.bend as OV
 import ./optsum.bend as Sums
 import ./optfold.bend as Fold
@@ -242,10 +245,11 @@ def OC.plain_both(+inf: Nat, +cs: +List<Nat>, +acc: Nat,
                 r3,
                 sumL_t => sat_lt =>
                   OC.plain_step(inf, c, t, acc, sat_lt, plain_t, all_t, sumL_t))))
-# The stored cost of a result is the cost of its tree, when the cost is finite.
+# The tree of a result costs at most the stored cost, when the cost is finite.
 def OC.CostOK(+inf: Nat, best: SolveRef.Best, +S: +List<+List<Nat>>) -> Type:
   @e: {Nat.is_lt(Eval.Eval.cost_of(best), inf) == True{} : Bool}
-  -> {Tree.cost(Eval.Eval.tree_of(best), S) == Eval.Eval.cost_of(best) : Nat}
+  -> {Nat.is_le(Tree.cost(Eval.Eval.tree_of(best), S), Eval.Eval.cost_of(best))
+      == True{} : Bool}
 
 # A result moved along an equality of results.
 def OC.transport(+inf: Nat, +b1: SolveRef.Best, +b2: SolveRef.Best,
@@ -291,13 +295,108 @@ def OC.CClass(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
             Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()), ws)
           & OC.CClass(p, inf, G, rest)
 
-# The stored cost field of a class result is the cost of its tree, one class at
-# a time.
-def OC.cost_eqs(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+# A bumped default is at most one plus the default.
+def OC.bump_default_le(m: Maybe<Nat>) ->
+  {Nat.is_le(Maybe.default(&1, Nat, Tree.depth.bump(m), 0n),
+             Nat.add(1n, Maybe.default(&1, Nat, m, 0n))) == True{} : Bool}:
+  match m:
+    case None{}:
+      {==}
+    case Some{n}:
+      NatProof.Nat.is_le_refl(Nat.add(1n, n))
+
+# One candidate's depth at a node is at most one plus its child's cost.
+def OC.depth_le_kid(+g: +List<Nat>, +kids: +List<Tree.Child>, +w: +List<Nat>,
+    b: Bool, +eb: {b == Feedback.word_eq(g, w) : Bool}) ->
+  {Nat.is_le(Maybe.default(&1, Nat, NodeCost.NodeCost.node_depth_of(g, kids, w, b), 0n),
+             Nat.add(1n, NodeCost.NodeCost.kid_cost_of(g, kids, w, b))) == True{}
+   : Bool}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      +fb : +List<Feedback.Color> = Feedback.feedback(g, w)
+      +e_go : {Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n)
+               == NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w) : Nat} =
+        Equal.trans(Nat, Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n),
+          Maybe.default(&1, Nat,
+            DepthProof.DepthProof.lookup_depth(Tree.lookup(fb, kids), w), 0n),
+          NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w),
+          Equal.cong(Maybe<Nat>, Nat, x => Maybe.default(&1, Nat, x, 0n),
+            Tree.depth.go(kids, fb, w),
+            DepthProof.DepthProof.lookup_depth(Tree.lookup(fb, kids), w),
+            DepthProof.DepthProof.depth_go_lookup(kids, fb, w)),
+          Equal.sym(Nat, NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w),
+            Maybe.default(&1, Nat,
+              DepthProof.DepthProof.lookup_depth(Tree.lookup(fb, kids), w), 0n),
+            NodeCost.NodeCost.maybe_depth_default(Tree.lookup(fb, kids), w)))
+      +le_go : {Nat.is_le(Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n),
+                   NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w))
+                 == True{} : Bool} =
+        NatProof.Nat.is_le_eq_r(
+          Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n),
+          Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n),
+          NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w), e_go,
+          NatProof.Nat.is_le_refl(Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n)))
+      +e_add : {Nat.is_le(
+                  Nat.add(1n, Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n)),
+                  Nat.add(1n, NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w)))
+                == True{} : Bool} =
+        NatProof.Nat.is_le_add_l(Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n),
+          NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w), 1n, le_go)
+      NatProof.Nat.is_le_trans(
+        Maybe.default(&1, Nat, Tree.depth.bump(Tree.depth.go(kids, fb, w)), 0n),
+        Nat.add(1n, Maybe.default(&1, Nat, Tree.depth.go(kids, fb, w), 0n)),
+        Nat.add(1n, NodeCost.NodeCost.maybe_depth(Tree.lookup(fb, kids), w)),
+        OC.bump_default_le(Tree.depth.go(kids, fb, w)), e_add)
+
+# The node cost is at most the candidate count plus the children's cost.
+def OC.cost_node_le(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +S: +List<+List<Nat>>) ->
+  {Nat.is_le(Tree.cost(Tree.Node{g, kids}, S),
+             Nat.add(Groups.len_words(S), NodeCost.NodeCost.kid_sum(g, kids, S)))
+   == True{} : Bool}:
+  match S:
+    case Nil{}:
+      NatProof.Nat.is_le_refl(0n)
+    case Con{h, t}:
+      +ih : {Nat.is_le(Tree.cost(Tree.Node{g, kids}, t),
+                 Nat.add(Groups.len_words(t),
+                   NodeCost.NodeCost.kid_sum(g, kids, t))) == True{} : Bool} =
+        OC.cost_node_le(g, kids, t)
+      +hd : {Nat.is_le(Maybe.default(&1, Nat, Tree.depth(Tree.Node{g, kids}, h), 0n),
+                 Nat.add(1n, NodeCost.NodeCost.kid_cost(g, kids, h)))
+               == True{} : Bool} =
+        OC.depth_le_kid(g, kids, h, Feedback.word_eq(g, h), {==})
+      +sum : {Nat.is_le(
+                Nat.add(Maybe.default(&1, Nat, Tree.depth(Tree.Node{g, kids}, h), 0n),
+                  Tree.cost(Tree.Node{g, kids}, t)),
+                Nat.add(Nat.add(1n, NodeCost.NodeCost.kid_cost(g, kids, h)),
+                  Nat.add(Groups.len_words(t),
+                    NodeCost.NodeCost.kid_sum(g, kids, t)))) == True{} : Bool} =
+        CBN.CB.is_le_add(
+          Maybe.default(&1, Nat, Tree.depth(Tree.Node{g, kids}, h), 0n),
+          Nat.add(1n, NodeCost.NodeCost.kid_cost(g, kids, h)),
+          Tree.cost(Tree.Node{g, kids}, t),
+          Nat.add(Groups.len_words(t), NodeCost.NodeCost.kid_sum(g, kids, t)),
+          hd, ih)
+      Fold.OQ.le_cong_r(
+        Nat.add(Maybe.default(&1, Nat, Tree.depth(Tree.Node{g, kids}, h), 0n),
+          Tree.cost(Tree.Node{g, kids}, t)),
+        Nat.add(Nat.add(1n, NodeCost.NodeCost.kid_cost(g, kids, h)),
+          Nat.add(Groups.len_words(t), NodeCost.NodeCost.kid_sum(g, kids, t))),
+        Nat.add(Groups.len_words(Con{h, t}),
+          NodeCost.NodeCost.kid_sum(g, kids, Con{h, t})),
+        CBN.CB.add4(1n, NodeCost.NodeCost.kid_cost(g, kids, h),
+          Groups.len_words(t), NodeCost.NodeCost.kid_sum(g, kids, t)), sum)
+
+# The class costs fit the stored class costs pointwise.
+def OC.class_costs_le(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +groups: +List<Groups.Group>, +inf: Nat,
     cc: OC.CClass(p, inf, G, groups),
     cl: CBS.CU.AllLt(inf, Sat.SB.child_costs(p, G, groups, inf))) ->
-  CBK.CBK.CostEqs(p, G, S, groups, inf):
+  CBN.CB.PointLe(CBK.CBK.class_costs(p, G, S, groups, inf),
+    Sat.SB.child_costs(p, G, groups, inf)):
   match groups:
     case Nil{}:
       Unit{}
@@ -306,69 +405,52 @@ def OC.cost_eqs(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         case Groups.Group{f, ws}:
           (ch, ct) = cc
           (lh, lt) = cl
-          +eq : {Tree.cost(Eval.Eval.tree_of(SolveRef.step(p, SolveRef.mk_schedule(G, ws),
-                     G, ws, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
-                     Eval.Eval.dummy_zero())), ws)
-                 == Sat.SB.child_cost(p, G, ws, inf) : Nat} = ch(lh)
-          (Equal.sym(Nat, Tree.cost(CBK.CBK.tree_of_class(p, G, ws, inf), ws),
-             Sat.SB.child_cost(p, G, ws, inf), eq),
-           OC.cost_eqs(p, G, S, rest, inf, ct, lt))
+          (ch(lh), OC.class_costs_le(p, G, S, rest, inf, ct, lt))
 
-# The cost of the node built from the class fold, with the stored class costs.
-def OC.node_tree_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+# The children's cost of a finished node is at most the stored class costs.
+def OC.kid_sum_le(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +g: +List<Nat>, +inf: Nat,
-    oks: SV.SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{})),
-    gin: Tree.WordIn(g, G),
-    costEq: CBK.CBK.CostEqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
-    +lt: {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S),
-            Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-              Nil{}, 0n, inf))), inf) == True{} : Bool}) ->
-  {Tree.cost(Tree.Node{g, SolveRef.rev_kids(
-       CH.CH.kids_of(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-         Nil{}, 0n, inf)), Nil{})}, S)
-   == Nat.add(Groups.len_words(S),
-        CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
-   : Nat}:
-  +kids : +List<Tree.Child> =
-    CH.CH.kids_of(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-      Nil{}, 0n, inf))
-  +e1 : {CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
-            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))
-          == SolveRef.rev_kids(CH.CH.children(p, G, S,
-               Groups.groups_build(g, S, Nil{}), inf), Nil{}) : +List<Tree.Child>} =
-    CH.CH.items_kids(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)
-  +e2 : {SolveRef.rev_kids(kids, Nil{})
-          == SolveRef.rev_kids(SolveRef.rev_kids(CH.CH.children(p, G, S,
-               Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{})
-          : +List<Tree.Child>} =
-    Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
-      l => SolveRef.rev_kids(l, Nil{}), CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
-        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-      SolveRef.rev_kids(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf),
-        Nil{}), e1)
-  +e3 : {SolveRef.rev_kids(SolveRef.rev_kids(CH.CH.children(p, G, S,
-            Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{})
-          == CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)
-          : +List<Tree.Child>} =
-    CH.CH.rev_rev(CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf))
-  +kids_eq : {SolveRef.rev_kids(kids, Nil{})
+    cc: OC.CClass(p, inf, G, Groups.groups_build(g, S, Nil{})),
+    cl: CBS.CU.AllLt(inf, Sat.SB.child_costs(p, G,
+          Groups.groups_build(g, S, Nil{}), inf)),
+    +kids_eq: {SolveRef.rev_kids(CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+                 Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), Nil{})
                == CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)
-               : +List<Tree.Child>} =
-    Equal.trans(+List<Tree.Child>, SolveRef.rev_kids(kids, Nil{}),
-      SolveRef.rev_kids(SolveRef.rev_kids(CH.CH.children(p, G, S,
-        Groups.groups_build(g, S, Nil{}), inf), Nil{}), Nil{}),
-      CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf), e2, e3)
-  SV.SV.use_valid(
-    {Tree.cost(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S)
-     == Nat.add(Groups.len_words(S),
-          CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
-     : Nat},
-    Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S,
-    SV.SV.end_valid(p, G, S, g, inf, kids,
-      Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-        Nil{}, 0n, inf)), lt, oks, {==}, e1, gin),
-    ti => ad =>
-      CBK.CBK.machine_cost(p, G, S, g, inf, kids, ad, kids_eq, costEq))
+               : +List<Tree.Child>}) ->
+  {Nat.is_le(NodeCost.NodeCost.kid_sum(g, SolveRef.rev_kids(CH.CH.kids_of(
+     Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+     Nil{}), S),
+     CBN.CB.sum(Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)))
+   == True{} : Bool}:
+  +gb : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+  +rev : +List<Tree.Child> = SolveRef.rev_kids(CH.CH.kids_of(
+    Eval.Eval.items(p, G, S, g, gb, Nil{}, 0n, inf)), Nil{})
+  +ch : +List<Tree.Child> = CH.CH.children(p, G, S, gb, inf)
+  +e1 : {NodeCost.NodeCost.kid_sum(g, rev, S) == GC.GC.Total(rev, gb) : Nat} =
+    Equal.sym(Nat, GC.GC.Total(rev, gb), NodeCost.NodeCost.kid_sum(g, rev, S),
+      GC.GC.groups_build_total(g, rev, S))
+  +e2 : {GC.GC.Total(rev, gb) == GC.GC.Total(ch, gb) : Nat} =
+    Equal.cong(+List<Tree.Child>, Nat, l => GC.GC.Total(l, gb), rev, ch, kids_eq)
+  +e3 : {GC.GC.Total(ch, gb) == CBN.CB.sum(CBK.CBK.class_costs(p, G, S, gb, inf))
+         : Nat} =
+    CBK.CBK.total_children(p, G, S, gb, inf, CBK.CBK.distinctB_build(g, S))
+  +kidsum_eq : {NodeCost.NodeCost.kid_sum(g, rev, S)
+                == CBN.CB.sum(CBK.CBK.class_costs(p, G, S, gb, inf)) : Nat} =
+    Equal.trans(Nat, NodeCost.NodeCost.kid_sum(g, rev, S), GC.GC.Total(rev, gb),
+      CBN.CB.sum(CBK.CBK.class_costs(p, G, S, gb, inf)), e1,
+      Equal.trans(Nat, GC.GC.Total(rev, gb), GC.GC.Total(ch, gb),
+        CBN.CB.sum(CBK.CBK.class_costs(p, G, S, gb, inf)), e2, e3))
+  pts : CBN.CB.PointLe(CBK.CBK.class_costs(p, G, S, gb, inf),
+    Sat.SB.child_costs(p, G, gb, inf)) =
+    OC.class_costs_le(p, G, S, gb, inf, cc, cl)
+  +sle : {Nat.is_le(CBN.CB.sum(CBK.CBK.class_costs(p, G, S, gb, inf)),
+                    CBN.CB.sum(Sat.SB.child_costs(p, G, gb, inf))) == True{}
+          : Bool} =
+    CBN.CB.sum_le(CBK.CBK.class_costs(p, G, S, gb, inf),
+      Sat.SB.child_costs(p, G, gb, inf), pts)
+  Fold.OQ.le_cong_l(NodeCost.NodeCost.kid_sum(g, rev, S),
+    CBN.CB.sum(CBK.CBK.class_costs(p, G, S, gb, inf)),
+    CBN.CB.sum(Sat.SB.child_costs(p, G, gb, inf)), kidsum_eq, sle)
 
 # The node of a class fold, spelled with the folded child list.
 def OC.ks_tree_unfold(+g: +List<Nat>, ks: Eval.KS) ->
@@ -381,9 +463,7 @@ def OC.ks_tree_unfold(+g: +List<Nat>, ks: Eval.KS) ->
 # The candidate `Best` of one guess carries the cost of its tree, when finite.
 def OC.cand_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +g: +List<Nat>,
-    cc: OC.CClass(p, inf, G, Groups.groups_build(g, S, Nil{})),
-    oks: SV.SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{})),
-    gin: Tree.WordIn(g, G)) ->
+    cc: OC.CClass(p, inf, G, Groups.groups_build(g, S, Nil{}))) ->
   OC.CostOK(inf,
     SolveRef.Best{
       Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
@@ -391,35 +471,23 @@ def OC.cand_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
       Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
         Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))}, S):
   e =>
-    +cs : +List<Nat> = Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)
+    +gb : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+    +items : Eval.KS = Eval.Eval.items(p, G, S, g, gb, Nil{}, 0n, inf)
+    +cs : +List<Nat> = Sat.SB.child_costs(p, G, gb, inf)
+    +rev : +List<Tree.Child> = SolveRef.rev_kids(CH.CH.kids_of(items), Nil{})
     +eSat : {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S),
-               Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-                 Nil{}, 0n, inf))), inf) == True{} : Bool} =
-      CBN.CB.lt_eq_l(inf,
-        Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-        SolveRef.sat_add(inf, Groups.len_words(S),
-          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-            Nil{}, 0n, inf))),
-        Node.OQ.ks_cost_unfold(inf, S, Eval.Eval.items(p, G, S, g,
-          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), e)
-    +es : {Nat.is_lt(Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), inf) == True{} : Bool} =
-      Sat.SB.sat_add_lt_r(inf, Groups.len_words(S),
-        Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-          Nil{}, 0n, inf)), eSat)
+               Sat.SB.ks_sum(items)), inf) == True{} : Bool} =
+      CBN.CB.lt_eq_l(inf, Fold.OQ.ks_cost(inf, S, items),
+        SolveRef.sat_add(inf, Groups.len_words(S), Sat.SB.ks_sum(items)),
+        Node.OQ.ks_cost_unfold(inf, S, items), e)
+    +es : {Nat.is_lt(Sat.SB.ks_sum(items), inf) == True{} : Bool} =
+      Sat.SB.sat_add_lt_r(inf, Groups.len_words(S), Sat.SB.ks_sum(items), eSat)
     +esL : {Nat.is_lt(OV.OV.sumL(inf, cs, 0n), inf) == True{} : Bool} =
-      CBN.CB.lt_eq_l(inf,
-        Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-          Nil{}, 0n, inf)),
-        OV.OV.sumL(inf, cs, 0n),
-        OV.OV.sum_fold(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf),
-        es)
+      CBN.CB.lt_eq_l(inf, Sat.SB.ks_sum(items), OV.OV.sumL(inf, cs, 0n),
+        OV.OV.sum_fold(p, G, S, g, gb, Nil{}, 0n, inf), es)
     OC.use_pair(
-      {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
-         Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
-       == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+      {Nat.is_le(Tree.cost(Fold.OQ.ks_tree(g, items), S),
+       Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool},
       {Nat.is_lt(Nat.add(0n, CBN.CB.sum(cs)), inf) == True{} : Bool},
       CBS.CU.AllLt(inf, cs)
       & {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat}
@@ -427,113 +495,100 @@ def OC.cand_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
       OC.plain_both(inf, cs, 0n, esL),
       _tot => r =>
         OC.use_pair(
-          {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
-             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
-           == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-                Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+          {Nat.is_le(Tree.cost(Fold.OQ.ks_tree(g, items), S),
+       Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool},
           CBS.CU.AllLt(inf, cs),
           {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat}
           & {Nat.is_lt(0n, inf) == True{} : Bool},
           r,
           all => r2 =>
             OC.use_pair(
-              {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
-                 Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
-               == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-                    Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+              {Nat.is_le(Tree.cost(Fold.OQ.ks_tree(g, items), S),
+       Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool},
               {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat},
               {Nat.is_lt(0n, inf) == True{} : Bool},
               r2,
               plain => _zlt =>
-                +sum_eq : {Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))
-                           == CBN.CB.sum(cs) : Nat} =
-                  Equal.trans(Nat,
-                    Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                    OV.OV.sumL(inf, cs, 0n), CBN.CB.sum(cs),
-                    OV.OV.sum_fold(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-                      Nil{}, 0n, inf),
+                +sum_eq : {Sat.SB.ks_sum(items) == CBN.CB.sum(cs) : Nat} =
+                  Equal.trans(Nat, Sat.SB.ks_sum(items), OV.OV.sumL(inf, cs, 0n),
+                    CBN.CB.sum(cs),
+                    OV.OV.sum_fold(p, G, S, g, gb, Nil{}, 0n, inf),
                     Equal.trans(Nat, OV.OV.sumL(inf, cs, 0n),
                       Nat.add(0n, CBN.CB.sum(cs)), CBN.CB.sum(cs), plain, {==}))
-                ceq : CBK.CBK.CostEqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf) =
-                  OC.cost_eqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf, cc, all)
-                +teq : {Tree.cost(Tree.Node{g, SolveRef.rev_kids(
-                           CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
-                             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                           Nil{})}, S)
-                          == Nat.add(Groups.len_words(S), CBN.CB.sum(cs)) : Nat} =
-                  OC.node_tree_eq(p, G, S, g, inf, oks, gin, ceq, eSat)
-                +fin : {SolveRef.sat_add(inf, Groups.len_words(S),
-                          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
-                        == Tree.cost(Tree.Node{g, SolveRef.rev_kids(
-                             CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
-                               Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                             Nil{})}, S) : Nat} =
-                  CBS.CU.finish_cost(inf, S, g,
-                    SolveRef.rev_kids(CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), Nil{}),
-                    cs,
-                    Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                    eSat, sum_eq, teq)
-                +e1 : {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
-                          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
-                       == Tree.cost(Tree.Node{g, SolveRef.rev_kids(
-                            CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
-                              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                            Nil{})}, S) : Nat} =
-                  Equal.cong(Tree.Tree, Nat, t => Tree.cost(t, S),
-                    Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                    Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
-                      Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-                        Nil{}, 0n, inf)), Nil{})},
-                    OC.ks_tree_unfold(g, Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
-                +e2 : {SolveRef.sat_add(inf, Groups.len_words(S),
-                          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
-                       == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-                            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat} =
-                  Equal.sym(Nat,
-                    Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                    SolveRef.sat_add(inf, Groups.len_words(S),
-                      Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))),
-                    Node.OQ.ks_cost_unfold(inf, S, Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
-                Equal.trans(Nat,
-                  Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
-                    Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S),
-                  Tree.cost(Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
-                    Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-                      Nil{}, 0n, inf)), Nil{})}, S),
-                  Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-                    Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                  e1,
+                +e1 : {CH.CH.kids_of(items)
+                        == SolveRef.rev_kids(CH.CH.children(p, G, S, gb, inf), Nil{})
+                        : +List<Tree.Child>} =
+                  CH.CH.items_kids(p, G, S, g, gb, Nil{}, 0n, inf)
+                +e2 : {rev == SolveRef.rev_kids(SolveRef.rev_kids(
+                          CH.CH.children(p, G, S, gb, inf), Nil{}), Nil{})
+                        : +List<Tree.Child>} =
+                  Equal.cong(+List<Tree.Child>, +List<Tree.Child>,
+                    l => SolveRef.rev_kids(l, Nil{}), CH.CH.kids_of(items),
+                    SolveRef.rev_kids(CH.CH.children(p, G, S, gb, inf), Nil{}), e1)
+                +e3 : {SolveRef.rev_kids(SolveRef.rev_kids(
+                          CH.CH.children(p, G, S, gb, inf), Nil{}), Nil{})
+                        == CH.CH.children(p, G, S, gb, inf) : +List<Tree.Child>} =
+                  CH.CH.rev_rev(CH.CH.children(p, G, S, gb, inf))
+                +kids_eq : {rev == CH.CH.children(p, G, S, gb, inf)
+                            : +List<Tree.Child>} =
+                  Equal.trans(+List<Tree.Child>, rev,
+                    SolveRef.rev_kids(SolveRef.rev_kids(
+                      CH.CH.children(p, G, S, gb, inf), Nil{}), Nil{}),
+                    CH.CH.children(p, G, S, gb, inf), e2, e3)
+                +kle : {Nat.is_le(NodeCost.NodeCost.kid_sum(g, rev, S),
+                           CBN.CB.sum(cs)) == True{} : Bool} =
+                  OC.kid_sum_le(p, G, S, g, inf, cc, all, kids_eq)
+                +cle : {Nat.is_le(Tree.cost(Tree.Node{g, rev}, S),
+                           Nat.add(Groups.len_words(S),
+                             NodeCost.NodeCost.kid_sum(g, rev, S))) == True{}
+                        : Bool} =
+                  OC.cost_node_le(g, rev, S)
+                +cle2 : {Nat.is_le(Tree.cost(Tree.Node{g, rev}, S),
+                            Nat.add(Groups.len_words(S), CBN.CB.sum(cs)))
+                         == True{} : Bool} =
+                  NatProof.Nat.is_le_trans(Tree.cost(Tree.Node{g, rev}, S),
+                    Nat.add(Groups.len_words(S),
+                      NodeCost.NodeCost.kid_sum(g, rev, S)),
+                    Nat.add(Groups.len_words(S), CBN.CB.sum(cs)), cle,
+                    NatProof.Nat.is_le_add_l(NodeCost.NodeCost.kid_sum(g, rev, S),
+                      CBN.CB.sum(cs), Groups.len_words(S), kle))
+                +n_lt : {Nat.is_lt(Groups.len_words(S), inf) == True{} : Bool} =
+                  Sat.SB.sat_add_lt_l(inf, Groups.len_words(S),
+                    Sat.SB.ks_sum(items), eSat)
+                +sum_lt : {Nat.is_lt(Sat.SB.ks_sum(items), inf) == True{} : Bool} = es
+                +sat_eq : {SolveRef.sat_add(inf, Groups.len_words(S),
+                             Sat.SB.ks_sum(items))
+                           == Nat.add(Groups.len_words(S), CBN.CB.sum(cs)) : Nat} =
                   Equal.trans(Nat,
-                    Tree.cost(Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
-                      Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
-                        Nil{}, 0n, inf)), Nil{})}, S),
-                    SolveRef.sat_add(inf, Groups.len_words(S),
-                      Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))),
-                    Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
-                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                    Equal.sym(Nat,
-                      SolveRef.sat_add(inf, Groups.len_words(S),
-                        Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
-                          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))),
-                      Tree.cost(Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
-                        Eval.Eval.items(p, G, S, g,
-                          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
-                        Nil{})}, S), fin),
-                    e2)))))
+                    SolveRef.sat_add(inf, Groups.len_words(S), Sat.SB.ks_sum(items)),
+                    Nat.add(Groups.len_words(S), Sat.SB.ks_sum(items)),
+                    Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+                    OV.OV.sat_fin(inf, Groups.len_words(S), Sat.SB.ks_sum(items),
+                      OV.OV.ge_false_of_lt(Groups.len_words(S), inf, n_lt),
+                      OV.OV.ge_false_of_lt(Sat.SB.ks_sum(items), inf, sum_lt)),
+                    Equal.cong(Nat, Nat, x => Nat.add(Groups.len_words(S), x),
+                      Sat.SB.ks_sum(items), CBN.CB.sum(cs), sum_eq))
+                +kc_eq : {Fold.OQ.ks_cost(inf, S, items)
+                          == Nat.add(Groups.len_words(S), CBN.CB.sum(cs)) : Nat} =
+                  Equal.trans(Nat, Fold.OQ.ks_cost(inf, S, items),
+                    SolveRef.sat_add(inf, Groups.len_words(S), Sat.SB.ks_sum(items)),
+                    Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+                    Node.OQ.ks_cost_unfold(inf, S, items), sat_eq)
+                +cle3 : {Nat.is_le(Tree.cost(Tree.Node{g, rev}, S),
+                            Fold.OQ.ks_cost(inf, S, items)) == True{} : Bool} =
+                  Fold.OQ.le_cong_r(Tree.cost(Tree.Node{g, rev}, S),
+                    Nat.add(Groups.len_words(S), CBN.CB.sum(cs)),
+                    Fold.OQ.ks_cost(inf, S, items),
+                    Equal.sym(Nat, Fold.OQ.ks_cost(inf, S, items),
+                      Nat.add(Groups.len_words(S), CBN.CB.sum(cs)), kc_eq), cle2)
+                Fold.OQ.le_cong_l(Tree.cost(Fold.OQ.ks_tree(g, items), S),
+                  Tree.cost(Tree.Node{g, rev}, S),
+                  Fold.OQ.ks_cost(inf, S, items),
+                  Equal.cong(Tree.Tree, Nat, t => Tree.cost(t, S),
+                    Fold.OQ.ks_tree(g, items), Tree.Node{g, rev},
+                    OC.ks_tree_unfold(g, items)),
+                  cle3))))
 
-# The cost/tree correspondence of the search at one candidate list.
 def OC.CJob(fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>) -> Type:
   OC.CostOK(inf, SolveRef.step(fuel, SolveRef.mk_schedule(G, S), G, S, inf,
@@ -694,13 +749,13 @@ def OC.cjob_zero_nil(+inf: Nat, +G: +List<+List<Nat>>,
                 Eval.Eval.dummy_inf(inf))),
               inf, ec, {==}), e)
         Empty.absurd(
-          {Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+          {Nat.is_le(Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
              SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{}, Nil{},
-             0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{})
-           == Eval.Eval.cost_of(SolveRef.step(0n,
-                SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{},
-                Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()))
-           : Nat},
+             0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{}),
+             Eval.Eval.cost_of(SolveRef.step(0n,
+               SolveRef.mk_schedule(Nil{}, Nil{}), Nil{}, Nil{}, inf, Nil{},
+               Nil{}, 0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())))
+           == True{} : Bool},
           NatProof.Nat.not_lt_self(inf, bad))
     case Con{g, t}:
       e =>
@@ -740,7 +795,19 @@ def OC.cjob_zero_nil(+inf: Nat, +G: +List<+List<Nat>>,
                    SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
                    Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
                    Eval.Eval.dummy_zero())), Nil{}) == 0n : Nat} = {==}
-        Equal.trans(Nat,
+        +l1 : {Nat.is_le(Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+                    SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf,
+                    Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
+                    Eval.Eval.dummy_zero())), Nil{}), 0n) == True{} : Bool} =
+          NatProof.Nat.is_le_eq_l(0n, 0n,
+            Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+              SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
+              0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{}),
+            Equal.sym(Nat, Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
+              SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
+              0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{}), 0n, e0),
+            NatProof.Nat.is_le_refl(0n))
+        NatProof.Nat.is_le_eq_r(
           Tree.cost(Eval.Eval.tree_of(SolveRef.step(0n,
             SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
             0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), Nil{}),
@@ -748,9 +815,10 @@ def OC.cjob_zero_nil(+inf: Nat, +G: +List<+List<Nat>>,
           Eval.Eval.cost_of(SolveRef.step(0n, SolveRef.mk_schedule(g <> t, Nil{}),
             g <> t, Nil{}, inf, Nil{}, Nil{}, 0n, Eval.Eval.dummy_inf(inf),
             Eval.Eval.dummy_zero())),
-          e0, Equal.sym(Nat, Eval.Eval.cost_of(SolveRef.step(0n,
+          Equal.sym(Nat, Eval.Eval.cost_of(SolveRef.step(0n,
             SolveRef.mk_schedule(g <> t, Nil{}), g <> t, Nil{}, inf, Nil{}, Nil{},
-            0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), 0n, ec3))
+            0n, Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero())), 0n, ec3),
+          l1)
 
 # A job moved to an equal candidate list.
 def OC.cjob_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
@@ -768,3 +836,285 @@ def OC.cjob_zero(+inf: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     MV.MV.nil_of_len_zero(S, NatProof.Nat.eq_zero_of_le_zero(Groups.len_words(S), le))
   OC.cjob_transport(0n, inf, G, Nil{}, S,
     Equal.sym(+List<+List<Nat>>, S, Nil{}, eS), OC.cjob_zero_nil(inf, G, hz))
+
+# The dummy accumulator has an infinite cost, so the finiteness premise is
+# contradictory.
+def OC.dummy_ok(+inf: Nat, +S: +List<+List<Nat>>) ->
+  OC.CostOK(inf, Eval.Eval.dummy_inf(inf), S):
+  e =>
+    Empty.absurd(
+      {Nat.is_le(Tree.cost(Eval.Eval.tree_of(Eval.Eval.dummy_inf(inf)), S),
+         Eval.Eval.cost_of(Eval.Eval.dummy_inf(inf))) == True{} : Bool},
+      NatProof.Nat.not_lt_self(inf, e))
+
+# One guess keeps the cost correspondence.
+def OC.guess_cost(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +inf: Nat, +best: SolveRef.Best, b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    ccif: OC.CClassIf(p, inf, G, b, Groups.groups_build(g, S, Nil{})),
+    wg: Tree.WordIn(g, G),
+    cb: OC.CostOK(inf, best, S)) ->
+  OC.CostOK(inf,
+    Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, b, best),
+    S):
+  match b:
+    case True{}:
+      cand : OC.CostOK(inf,
+        SolveRef.Best{
+          Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+          Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))}, S) =
+        OC.cand_cost_ok(p, inf, G, S, g, ccif)
+      h : OC.CostOK(inf, SolveRef.better(
+          Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+          Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best), S) =
+        OC.better_cost(inf,
+          Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+          Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best, S, cand, cb)
+      +e1 : {Eval.Eval.block(p, G, S, g, inf, Groups.groups_build(g, S, Nil{}), best)
+              == SolveRef.better(
+                   Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                     Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                   Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+                     Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best)
+             : SolveRef.Best} =
+        Equal.trans(SolveRef.Best,
+          Eval.Eval.block(p, G, S, g, inf, Groups.groups_build(g, S, Nil{}), best),
+          Eval.Eval.finish_ks(inf, g, S,
+            Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n,
+              inf), best),
+          SolveRef.better(
+            Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+            Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best),
+          Fold.OQ.block_unfold(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, best),
+          Fold.OQ.block_eq(inf, g, S,
+            Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n,
+              inf), best))
+      +e2 : {Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf,
+               b, best)
+              == Eval.Eval.block(p, G, S, g, inf, Groups.groups_build(g, S, Nil{}),
+                   best) : SolveRef.Best} = {==}
+      +e3 : {Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf,
+               b, best)
+              == SolveRef.better(
+                   Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                     Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                   Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+                     Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best)
+             : SolveRef.Best} =
+        Equal.trans(SolveRef.Best,
+          Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, b,
+            best),
+          Eval.Eval.block(p, G, S, g, inf, Groups.groups_build(g, S, Nil{}), best),
+          SolveRef.better(
+            Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+            Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best), e2, e1)
+      OC.transport(inf,
+        SolveRef.better(
+          Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+          Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best),
+        Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, b,
+          best), S, Equal.sym(SolveRef.Best,
+          Eval.Eval.guess_bool(p, G, S, g, Groups.groups_build(g, S, Nil{}), inf, b,
+            best),
+          SolveRef.better(
+            Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+            Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), best), e3), h)
+    case False{}:
+      cb
+
+# The guess fold keeps the cost correspondence.
+def OC.guesses_cost(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, +gs: +List<+List<Nat>>, +best: SolveRef.Best,
+    cbygs: OC.CByGs(p, inf, G, S, gs),
+    every: BO.BO.EveryIn(gs, G),
+    cb: OC.CostOK(inf, best, S)) ->
+  OC.CostOK(inf, Eval.Eval.guesses(1n+p, G, S, inf, gs, best), S):
+  match gs:
+    case Nil{}:
+      cb
+    case Con{g, t}:
+      (ccf, cbt) = cbygs
+      (wg, ev) = every
+      nc : OC.CostOK(inf, Eval.Eval.guess(p, G, S, g, inf, best), S) =
+        OC.guess_cost(p, G, S, g, inf, best,
+          Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==},
+          ccf, wg, cb)
+      OC.guesses_cost(p, G, S, inf, t, Eval.Eval.guess(p, G, S, g, inf, best),
+        cbt, ev, nc)
+
+# One step of the fuel: the job obligation at the next level.
+def OC.cjob_succ(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +inf: Nat, cbygs: OC.CByGs(p, inf, G, S, G)) -> OC.CJob(1n+p, inf, G, S):
+  OC.transport(inf,
+    Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)),
+    SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+      Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()), S,
+    Equal.sym(SolveRef.Best,
+      SolveRef.step(1n+p, SolveRef.mk_schedule(G, S), G, S, inf, Nil{}, Nil{}, 0n,
+        Eval.Eval.dummy_inf(inf), Eval.Eval.dummy_zero()),
+      Eval.Eval.guesses(1n+p, G, S, inf, G, Eval.Eval.dummy_inf(inf)),
+      Eval.Eval.guesses_step(p, G, S, inf, G, Eval.Eval.dummy_inf(inf))),
+    OC.guesses_cost(p, G, S, inf, G, Eval.Eval.dummy_inf(inf), cbygs,
+      BO.BO.every_in_self(G), OC.dummy_ok(inf, S)))
+
+# Split the flat conjunction at an append.
+def OC.cflat_append(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +xs: +List<+List<+List<Nat>>>, +ys: +List<+List<+List<Nat>>>,
+    f: OC.CFlat(fuel, inf, G,
+        List.append(&2, +List<+List<Nat>>, xs, ys))) ->
+  OC.CFlat(fuel, inf, G, xs) & OC.CFlat(fuel, inf, G, ys):
+  match xs:
+    case Nil{}:
+      Tuple{Unit{}, f}
+    case Con{S, t}:
+      (j, fr) = f
+      MV.MV.use_pair(
+        OC.CFlat(fuel, inf, G, S <> t) & OC.CFlat(fuel, inf, G, ys),
+        OC.CFlat(fuel, inf, G, t), OC.CFlat(fuel, inf, G, ys),
+        OC.cflat_append(fuel, inf, G, t, ys, fr),
+        ft => fys => Tuple{Tuple{j, ft}, fys})
+
+# The class conjunction read from a flat conjunction over its classes.
+def OC.cclass_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    f: OC.CFlat(fuel, inf, G, MV.MV.next_groups(groups))) ->
+  OC.CClass(fuel, inf, G, groups):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          (fh, ft) = f
+          (fh, OC.cclass_of_flat(fuel, inf, G, rest, ft))
+
+# A filtered class conjunction is a class conjunction when the test is true.
+def OC.cclassif_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    f: OC.CFlat(fuel, inf, G,
+         MV.MV.classes_b(b, Groups.groups_build(g, S, Nil{})))) ->
+  OC.CClassIf(fuel, inf, G, b, Groups.groups_build(g, S, Nil{})):
+  match b:
+    case True{}:
+      OC.cclass_of_flat(fuel, inf, G, Groups.groups_build(g, S, Nil{}), f)
+    case False{}:
+      Unit{}
+
+# The per-guess class conjunction of a job, from the flat conjunction.
+def OC.cbygs_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>,
+    f: OC.CFlat(fuel, inf, G, MV.MV.next_guess(gs, S))) ->
+  OC.CByGs(fuel, inf, G, S, gs):
+  match gs:
+    case Nil{}:
+      Unit{}
+    case Con{g, t}:
+      MV.MV.use_pair(
+        OC.CByGs(fuel, inf, G, S, g <> t),
+        OC.CFlat(fuel, inf, G, MV.MV.classes(g, S)),
+        OC.CFlat(fuel, inf, G, MV.MV.next_guess(t, S)),
+        OC.cflat_append(fuel, inf, G, MV.MV.classes(g, S), MV.MV.next_guess(t, S),
+          f),
+        fg => ft =>
+          (OC.cclassif_of_flat(fuel, inf, G, S, g,
+             Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, fg),
+           OC.cbygs_of_flat(fuel, inf, G, S, t, ft)))
+
+# Zero fuel: every job is empty, and the validity conjunction too.
+def OC.c_flat_zero_both(+inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(0n, jobs),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  OC.CFlat(0n, inf, G, jobs) & MV.MV.Flat(0n, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Tuple{Unit{}, Unit{}}
+    case Con{S, t}:
+      (ble0, bt) = bounds
+      +ble : {Nat.is_le(Groups.len_words(S), 0n) == True{} : Bool} = ble0
+      MV.MV.use_pair(
+        OC.CFlat(0n, inf, G, jobs) & MV.MV.Flat(0n, inf, G, jobs),
+        OC.CFlat(0n, inf, G, t), MV.MV.Flat(0n, inf, G, t),
+        OC.c_flat_zero_both(inf, G, t, bt, hz),
+        cf => mf =>
+          Tuple{Tuple{OC.cjob_zero(inf, G, S, ble, hz), cf},
+                Tuple{MV.MV.job_zero(inf, G, S, ble), mf}})
+
+# One step of the fuel, both conjunctions together.
+def OC.c_flat_step_both(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    both: OC.CFlat(p, inf, G, MV.MV.next_jobs(G, jobs))
+          & MV.MV.Flat(p, inf, G, MV.MV.next_jobs(G, jobs))) ->
+  OC.CFlat(1n+p, inf, G, jobs) & MV.MV.Flat(1n+p, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Tuple{Unit{}, Unit{}}
+    case Con{S, t}:
+      MV.MV.use_pair(
+        OC.CFlat(1n+p, inf, G, jobs) & MV.MV.Flat(1n+p, inf, G, jobs),
+        OC.CFlat(p, inf, G, MV.MV.next_jobs(G, jobs)),
+        MV.MV.Flat(p, inf, G, MV.MV.next_jobs(G, jobs)),
+        both,
+        cf => mf =>
+          MV.MV.use_pair(
+            OC.CFlat(1n+p, inf, G, jobs) & MV.MV.Flat(1n+p, inf, G, jobs),
+            OC.CFlat(p, inf, G, MV.MV.next_guess(G, S)),
+            OC.CFlat(p, inf, G, MV.MV.next_jobs(G, t)),
+            OC.cflat_append(p, inf, G, MV.MV.next_guess(G, S),
+              MV.MV.next_jobs(G, t), cf),
+            fS => ft =>
+              MV.MV.use_pair(
+                OC.CFlat(1n+p, inf, G, jobs) & MV.MV.Flat(1n+p, inf, G, jobs),
+                MV.MV.Flat(p, inf, G, MV.MV.next_guess(G, S)),
+                MV.MV.Flat(p, inf, G, MV.MV.next_jobs(G, t)),
+                MV.MV.flat_append(p, inf, G, MV.MV.next_guess(G, S),
+                  MV.MV.next_jobs(G, t), mf),
+                mS => mt =>
+                  MV.MV.use_pair(
+                    OC.CFlat(1n+p, inf, G, jobs) & MV.MV.Flat(1n+p, inf, G, jobs),
+                    OC.CFlat(1n+p, inf, G, t), MV.MV.Flat(1n+p, inf, G, t),
+                    OC.c_flat_step_both(inf, p, G, t, Tuple{ft, mt}),
+                    cft => mft =>
+                      Tuple{
+                        Tuple{OC.cjob_succ(p, G, S, inf,
+                                OC.cbygs_of_flat(p, inf, G, S, G, fS)), cft},
+                        Tuple{MV.MV.step_to_fold(inf, p, G, S,
+                                MV.MV.by_gs(p, inf, G, S, G, mS)), mft}}))))
+
+# The fuel induction on the flat conjunction of jobs, with the validity
+# conjunction alongside it.
+def OC.c_flat_both(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(fuel, jobs),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  OC.CFlat(fuel, inf, G, jobs) & MV.MV.Flat(fuel, inf, G, jobs):
+  match fuel:
+    case 0n:
+      OC.c_flat_zero_both(inf, G, jobs, bounds, hz)
+    case 1n+p:
+      OC.c_flat_step_both(inf, p, G, jobs,
+        OC.c_flat_both(p, inf, G, MV.MV.next_jobs(G, jobs),
+          MV.MV.next_bounds(p, G, jobs, bounds), hz))
+
+# The cost conjunction alone.
+def OC.c_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(fuel, jobs),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool}) ->
+  OC.CFlat(fuel, inf, G, jobs):
+  MV.MV.use_pair(OC.CFlat(fuel, inf, G, jobs),
+    OC.CFlat(fuel, inf, G, jobs), MV.MV.Flat(fuel, inf, G, jobs),
+    OC.c_flat_both(fuel, inf, G, jobs, bounds, hz),
+    cf => mf => cf)
