@@ -63,12 +63,16 @@ child    = [ feedback, tree ]
 feedback = [ colour, ... ]
 ```
 
-A colour is `0` (Gray), `1` (Yellow) or `2` (Green). The parser is a rejecting stub; law 6 is open.
+A colour is `0` (Gray), `1` (Yellow) or `2` (Green). A letter is a `Nat` written in unary as a
+JSON number: `n` ones followed by a zero, so `0` is `0`, `1` is `10`, `2` is `110`. The trailing
+zero terminates each number, which is what makes the parser easy to invert: every printed token
+is a prefix that ends at a known character. `Json.parse` accepts exactly this grammar and rejects
+anything else, including trailing text.
 
 ### `LAWS.bend` and `PROOF.bend`
 
-`LAWS.bend` states the six claims. `PROOF.bend` proves laws 1 to 3 and leaves 4 to 6 open. Each
-proof is a definition named after the law, `def Laws.<law>`. See [laws.md](laws.md).
+`LAWS.bend` states the six claims. `PROOF.bend` proves laws 1 to 3 and 6 and leaves 4 and 5
+open. Each proof is a definition named after the law, `def Laws.<law>`. See [laws.md](laws.md).
 
 ### `src/main.bend`
 
@@ -107,7 +111,6 @@ LAWS.bend ── checked by PROOF.bend ──► validity and optimality claims
 ## Current limits
 
 - `solve` is a placeholder, so laws 4 and 5 are open.
-- The JSON parser is not implemented, so law 6 is open.
 - `depth` is total and structurally recursive, but the validity and optimality proofs are still to
   be written.
 - There is no benchmark harness yet.

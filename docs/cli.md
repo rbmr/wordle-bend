@@ -65,12 +65,16 @@ child    = [ feedback, tree ]
 feedback = [ colour, ... ]
 ```
 
-A letter is a decimal code point. A colour is `0` (gray), `1` (yellow) or `2` (green). For
-example, a tree whose first guess is `abc` and whose first child is a green-green-green
-feedback followed by the guess `abd` prints as:
+A letter is a `Nat` encoded in unary as a JSON number: `n` ones followed by a zero, so `0` is
+`0`, `1` is `10`, `2` is `110` and `3` is `1110`. The trailing zero ends the number, so the
+parser knows where one letter stops without looking at what follows, and every letter is still a
+plain JSON number. A word's letters are its code points; the unary form is only the printed
+encoding. A colour is `0` (gray), `1` (yellow) or `2` (green). For example, a tree whose first
+guess has the two letters with code points 1 and 2 and whose only child is a green feedback
+followed by the guess with code point 3 prints as:
 
 ```text
-[[97,98,99],[[2,2,2],[[97,98,100],]]]
+[[10,110],[[[2],[[1110],[]]]]]
 ```
 
 The JSON is one line so that it can be piped to another program without reassembly.
