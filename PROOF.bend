@@ -21,6 +21,7 @@ import ./proofs/depthgroups.bend as DepthGroups
 import ./proofs/validbag.bend as ValidBag
 import ./proofs/solvevalid.bend as SVProof
 import ./proofs/mainvalid.bend as MVProof
+import ./proofs/optimalvalue.bend as OVProof
 
 def Bool.disc(b: Bool) -> Type:
   match b:
