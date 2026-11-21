@@ -63,3 +63,14 @@ def Proof.and_intro(a: Bool, b: Bool,
     case False{}:
       Empty.absurd({Bool.and(False{}, b) == True{} : Bool},
                    Proof.false_ne_true(ea))
+
+# Split one conjunction proof into both facts, consuming the proof once.
+def Proof.and_split(a: Bool, b: Bool,
+    e: {Bool.and(a, b) == True{} : Bool}) ->
+  {a == True{} : Bool} & {b == True{} : Bool}:
+  match a:
+    case True{}:
+      ({==}, e)
+    case False{}:
+      Empty.absurd({a == True{} : Bool} & {b == True{} : Bool},
+                   Proof.false_ne_true(e))

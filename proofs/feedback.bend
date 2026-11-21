@@ -175,3 +175,120 @@ def FbPrf.word_eq_refl(+a: +List<Nat>) ->
       %Equal.sym(Bool, Feedback.word_eq(t, t), True{}, FbPrf.word_eq_refl(t)) : {
         _ == True{} : Bool}
       {==}
+
+# Colour equality reflects to an equality of constructors.
+def FbPrf.color_eq_true(a: Feedback.Color, b: Feedback.Color,
+    e: {Feedback.Color.eq(a, b) == True{} : Bool}) -> {a == b : Feedback.Color}:
+  match a b:
+    case Feedback.Gray{} Feedback.Gray{}:
+      {==}
+    case Feedback.Gray{} Feedback.Yellow{}:
+      Empty.absurd({Feedback.Gray{} == Feedback.Yellow{} : Feedback.Color},
+                   Logic.Proof.false_ne_true(e))
+    case Feedback.Gray{} Feedback.Green{}:
+      Empty.absurd({Feedback.Gray{} == Feedback.Green{} : Feedback.Color},
+                   Logic.Proof.false_ne_true(e))
+    case Feedback.Yellow{} Feedback.Gray{}:
+      Empty.absurd({Feedback.Yellow{} == Feedback.Gray{} : Feedback.Color},
+                   Logic.Proof.false_ne_true(e))
+    case Feedback.Yellow{} Feedback.Yellow{}:
+      {==}
+    case Feedback.Yellow{} Feedback.Green{}:
+      Empty.absurd({Feedback.Yellow{} == Feedback.Green{} : Feedback.Color},
+                   Logic.Proof.false_ne_true(e))
+    case Feedback.Green{} Feedback.Gray{}:
+      Empty.absurd({Feedback.Green{} == Feedback.Gray{} : Feedback.Color},
+                   Logic.Proof.false_ne_true(e))
+    case Feedback.Green{} Feedback.Yellow{}:
+      Empty.absurd({Feedback.Green{} == Feedback.Yellow{} : Feedback.Color},
+                   Logic.Proof.false_ne_true(e))
+    case Feedback.Green{} Feedback.Green{}:
+      {==}
+
+# Colour and feedback equality are reflexive.
+def FbPrf.color_eq_refl(c: Feedback.Color) -> {Feedback.Color.eq(c, c) == True{} : Bool}:
+  match c:
+    case Feedback.Gray{}:
+      {==}
+    case Feedback.Yellow{}:
+      {==}
+    case Feedback.Green{}:
+      {==}
+
+def FbPrf.pair_color_eq_refl(c: Feedback.Color) ->
+  {Feedback.pair_color_eq((c, c)) == True{} : Bool}:
+  FbPrf.color_eq_refl(c)
+
+def FbPrf.feedback_eq_refl(+a: +List<Feedback.Color>) ->
+  {Feedback.feedback_eq(a, a) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{+h, +t}:
+      %Equal.sym(Bool, Feedback.Color.eq(h, h), True{}, FbPrf.color_eq_refl(h)) : {
+        Bool.and(Cmp.is_eq(Nat.cmp(List.length(&2, Feedback.Color, t), List.length(&2, Feedback.Color, t))),
+                 List.all.if(u => List.all(&1, Feedback.Color & Feedback.Color, Feedback.pair_color_eq,
+                                            List.zip(&2, Feedback.Color, &2, Feedback.Color, t, t)),
+                               _))
+        == True{} : Bool}
+      %Equal.sym(Bool, Feedback.feedback_eq(t, t), True{}, FbPrf.feedback_eq_refl(t)) : {
+        _ == True{} : Bool}
+      {==}
+
+# Pointwise equality of two same-length feedback lists.
+def FbPrf.all_pairs_true(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>,
+    +len: {List.length(&2, Feedback.Color, a) == List.length(&2, Feedback.Color, b) : Nat},
+    +e: {FbPrf.all_pairs(a, b) == True{} : Bool}) ->
+  {a == b : +List<Feedback.Color>}:
+  match a b:
+    case Nil{} Nil{}:
+      {==}
+    case Nil{} Con{+b0, +bt}:
+      Empty.absurd({Nil{} == b0 <> bt : +List<Feedback.Color>},
+                   NatProof.NatPrf.zero_ne_succ(List.length(&2, Feedback.Color, bt), len))
+    case Con{+a0, +at} Nil{}:
+      Empty.absurd({a0 <> at == Nil{} : +List<Feedback.Color>},
+                   NatProof.NatPrf.zero_ne_succ(List.length(&2, Feedback.Color, at),
+                     Equal.sym(Nat, List.length(&2, Feedback.Color, a0 <> at), 0n, len)))
+    case Con{+a0, +at} Con{+b0, +bt}:
+      +eh : {Feedback.Color.eq(a0, b0) == True{} : Bool} =
+        FbPrf.all_if_true_l(u => FbPrf.all_pairs(at, bt), Feedback.Color.eq(a0, b0), e)
+      +et : {FbPrf.all_pairs(at, bt) == True{} : Bool} =
+        FbPrf.all_if_true_r(u => FbPrf.all_pairs(at, bt), Feedback.Color.eq(a0, b0), e)
+      +len_t : {List.length(&2, Feedback.Color, at) == List.length(&2, Feedback.Color, bt) : Nat} =
+        Equal.cong(Nat, Nat, NatProof.NatPrf.pred,
+                   List.length(&2, Feedback.Color, a0 <> at),
+                   List.length(&2, Feedback.Color, b0 <> bt), len)
+      +eh_eq : {a0 == b0 : Feedback.Color} = FbPrf.color_eq_true(a0, b0, eh)
+      +et_eq : {at == bt : +List<Feedback.Color>} = FbPrf.all_pairs_true(at, bt, len_t, et)
+      +e1 : {a0 <> at == b0 <> at : +List<Feedback.Color>} =
+        Equal.cong(Feedback.Color, +List<Feedback.Color>, x => x <> at, a0, b0, eh_eq)
+      +e2 : {b0 <> at == b0 <> bt : +List<Feedback.Color>} =
+        Equal.cong(+List<Feedback.Color>, +List<Feedback.Color>, x => b0 <> x, at, bt, et_eq)
+      Equal.trans(+List<Feedback.Color>, a0 <> at, b0 <> at, b0 <> bt, e1, e2)
+
+# `feedback_eq` being true means the two patterns are equal.
+def FbPrf.feedback_eq_true_go(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>,
+    b0: Bool, b1: Bool,
+    +eb0: {b0 == Nat.is_eq(List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b)) : Bool},
+    +eb1: {b1 == FbPrf.all_pairs(a, b) : Bool},
+    e: {Bool.and(b0, b1) == True{} : Bool}) -> {a == b : +List<Feedback.Color>}:
+  match b0:
+    case True{}:
+      +len : {List.length(&2, Feedback.Color, a) == List.length(&2, Feedback.Color, b) : Nat} =
+        NatProof.NatPrf.is_eq_true(
+          List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b),
+          Equal.sym(Bool, b0, Nat.is_eq(List.length(&2, Feedback.Color, a),
+                                        List.length(&2, Feedback.Color, b)), eb0))
+      +all : {FbPrf.all_pairs(a, b) == True{} : Bool} =
+        Equal.trans(Bool, FbPrf.all_pairs(a, b), b1, True{},
+                    Equal.sym(Bool, b1, FbPrf.all_pairs(a, b), eb1), e)
+      FbPrf.all_pairs_true(a, b, len, all)
+    case False{}:
+      Empty.absurd({a == b : +List<Feedback.Color>}, Logic.Proof.false_ne_true(e))
+
+def FbPrf.feedback_eq_true(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>,
+    e: {Feedback.feedback_eq(a, b) == True{} : Bool}) -> {a == b : +List<Feedback.Color>}:
+  FbPrf.feedback_eq_true_go(a, b,
+    Nat.is_eq(List.length(&2, Feedback.Color, a), List.length(&2, Feedback.Color, b)),
+    FbPrf.all_pairs(a, b), {==}, {==}, e)

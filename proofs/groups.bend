@@ -230,3 +230,153 @@ def Grp.groups_build_contains(+g: +List<Nat>, +S: +List<+List<Nat>>,
     +ne: {Feedback.word_eq(g, w) == False{} : Bool}) ->
   Grp.InGroups(w, Groups.groups_build(g, S, Nil{})):
   Grp.groups_build_mem(g, S, w, m, ne, Nil{})
+
+# The per-word facts a group carries: the word is not the guess, its feedback
+# is the group's feedback, and its depth at the node exists.
+def Grp.WordDepths(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +fb: +List<Feedback.Color>, +w: +List<Nat>) -> Type:
+  {Feedback.word_eq(g, w) == False{} : Bool}
+  & {Feedback.feedback_eq(Feedback.feedback(g, w), fb) == True{} : Bool}
+  & {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool}
+
+def Grp.WordsDepths(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +fb: +List<Feedback.Color>, +ws: +List<+List<Nat>>) -> Type:
+  match ws:
+    case Nil{}:
+      Unit
+    case Con{h, t}:
+      Grp.WordDepths(g, kids, fb, h) & Grp.WordsDepths(g, kids, fb, t)
+
+def Grp.GroupDepths(+g: +List<Nat>, +kids: +List<Tree.Child>, gp: Groups.Group) -> Type:
+  match gp:
+    case Groups.Group{fb, ws}:
+      Grp.WordsDepths(g, kids, fb, ws)
+
+def Grp.AllGroupDepths(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +gs: +List<Groups.Group>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case Con{gp, rest}:
+      Grp.GroupDepths(g, kids, gp) & Grp.AllGroupDepths(g, kids, rest)
+
+# The per-word facts extend over an append.
+def Grp.words_depths_append(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +fb: +List<Feedback.Color>, +xs: +List<+List<Nat>>, +ys: +List<+List<Nat>>,
+    px: Grp.WordsDepths(g, kids, fb, xs), py: Grp.WordsDepths(g, kids, fb, ys)) ->
+  Grp.WordsDepths(g, kids, fb, List.append(&2, +List<Nat>, xs, ys)):
+  match xs:
+    case Nil{}:
+      py
+    case Con{h, t}:
+      (ph, pt) = px
+      (ph, Grp.words_depths_append(g, kids, fb, t, ys, pt, py))
+
+# Transport the per-word facts to an equal feedback pattern.
+def Grp.word_depths_fb(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +fb: +List<Feedback.Color>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    e: {fb == f : +List<Feedback.Color>},
+    p: Grp.WordDepths(g, kids, fb, w)) ->
+  Grp.WordDepths(g, kids, f, w):
+  (pne, pfb, pd) = p
+  ec : {Feedback.feedback_eq(Feedback.feedback(g, w), fb)
+         == Feedback.feedback_eq(Feedback.feedback(g, w), f) : Bool} =
+    Equal.cong(+List<Feedback.Color>, Bool,
+               x => Feedback.feedback_eq(Feedback.feedback(g, w), x), fb, f, e)
+  pfb2 : {Feedback.feedback_eq(Feedback.feedback(g, w), f) == True{} : Bool} =
+    Equal.trans(Bool, Feedback.feedback_eq(Feedback.feedback(g, w), f),
+                Feedback.feedback_eq(Feedback.feedback(g, w), fb), True{},
+                Equal.sym(Bool, Feedback.feedback_eq(Feedback.feedback(g, w), fb),
+                          Feedback.feedback_eq(Feedback.feedback(g, w), f), ec),
+                pfb)
+  (pne, pfb2, pd)
+
+# Branch of `group_add_depths`, split on the feedback test.
+def Grp.group_add_depths_go(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +w: +List<Nat>, +fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>, b: Bool,
+    +eb: {b == Feedback.feedback_eq(fb, f) : Bool},
+    local: Grp.WordDepths(g, kids, fb, w),
+    acc_ok: Grp.GroupDepths(g, kids, Groups.Group{f, ws})
+            & Grp.AllGroupDepths(g, kids, rest),
+    k: Grp.WordDepths(g, kids, fb, w) -> Grp.AllGroupDepths(g, kids, rest)
+       -> Grp.AllGroupDepths(g, kids, Groups.group_add(w, fb, rest))) ->
+  Grp.AllGroupDepths(g, kids,
+    Feedback.Bool.case(+List<Groups.Group>, b,
+      Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])} <> rest,
+      Groups.Group{f, ws} <> Groups.group_add(w, fb, rest))):
+  match b:
+    case True{}:
+      (gp_ok, rest_ok) = acc_ok
+      pfb : {Feedback.feedback_eq(fb, f) == True{} : Bool} =
+        Equal.sym(Bool, b, Feedback.feedback_eq(fb, f), eb)
+      e_f : {fb == f : +List<Feedback.Color>} = FbProof.FbPrf.feedback_eq_true(fb, f, pfb)
+      local_f : Grp.WordDepths(g, kids, f, w) =
+        Grp.word_depths_fb(g, kids, fb, f, w, e_f, local)
+      ws_ok : Grp.WordsDepths(g, kids, f, List.append(&2, +List<Nat>, ws, [w])) =
+        Grp.words_depths_append(g, kids, f, ws, [w], gp_ok, (local_f, Unit{}))
+      (ws_ok, rest_ok)
+    case False{}:
+      (gp_ok, rest_ok) = acc_ok
+      (gp_ok, k(local, rest_ok))
+
+# Adding a word keeps every group's per-word facts.
+def Grp.group_add_depths(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +w: +List<Nat>, +fb: +List<Feedback.Color>, +gs: +List<Groups.Group>,
+    local: Grp.WordDepths(g, kids, fb, w),
+    acc_ok: Grp.AllGroupDepths(g, kids, gs)) ->
+  Grp.AllGroupDepths(g, kids, Groups.group_add(w, fb, gs)):
+  match gs:
+    case Nil{}:
+      ((local, Unit{}), Unit{})
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          Grp.group_add_depths_go(g, kids, w, fb, f, ws, rest,
+            Feedback.feedback_eq(fb, f), {==}, local, acc_ok,
+            l => ok => Grp.group_add_depths(g, kids, w, fb, rest, l, ok))
+
+# Branch of `groups_build_depths`, split on the word test. The recursive call
+# is passed as a continuation because Bend checks defs in file order.
+def Grp.groups_build_of(+g: +List<Nat>, +w: +List<Nat>, +t: +List<+List<Nat>>,
+    +acc: +List<Groups.Group>, b: Bool) -> +List<Groups.Group>:
+  Feedback.Bool.case(+List<Groups.Group>, b,
+    Groups.groups_build(g, t, acc),
+    Groups.groups_build(g, t, Groups.group_add(w, Feedback.feedback(g, w), acc)))
+
+def Grp.groups_build_depths_go(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +w: +List<Nat>, +t: +List<+List<Nat>>, +acc: +List<Groups.Group>, b: Bool,
+    +eb: {b == Feedback.word_eq(g, w) : Bool},
+    +dw: {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids}, w)) == True{} : Bool},
+    dt: Tree.AllHaveDepth(Tree.Node{g, kids}, t),
+    acc_ok: Grp.AllGroupDepths(g, kids, acc),
+    k: @a: +List<Groups.Group> -> Grp.AllGroupDepths(g, kids, a)
+       -> Tree.AllHaveDepth(Tree.Node{g, kids}, t)
+       -> Grp.AllGroupDepths(g, kids, Groups.groups_build(g, t, a))) ->
+  Grp.AllGroupDepths(g, kids, Grp.groups_build_of(g, w, t, acc, b)):
+  match b:
+    case True{}:
+      k(acc, acc_ok, dt)
+    case False{}:
+      ne : {Feedback.word_eq(g, w) == False{} : Bool} =
+        Equal.sym(Bool, b, Feedback.word_eq(g, w), eb)
+      local : Grp.WordDepths(g, kids, Feedback.feedback(g, w), w) =
+        (ne, (FbProof.FbPrf.feedback_eq_refl(Feedback.feedback(g, w)), dw))
+      k(Groups.group_add(w, Feedback.feedback(g, w), acc),
+        Grp.group_add_depths(g, kids, w, Feedback.feedback(g, w), acc, local, acc_ok),
+        dt)
+
+# Every group built from S carries the per-word facts.
+def Grp.groups_build_depths(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +S: +List<+List<Nat>>, +acc: +List<Groups.Group>,
+    depths: Tree.AllHaveDepth(Tree.Node{g, kids}, S),
+    acc_ok: Grp.AllGroupDepths(g, kids, acc)) ->
+  Grp.AllGroupDepths(g, kids, Groups.groups_build(g, S, acc)):
+  match S:
+    case Nil{}:
+      acc_ok
+    case Con{w, t}:
+      (dw, dt) = depths
+      Grp.groups_build_depths_go(g, kids, w, t, acc, Feedback.word_eq(g, w),
+        {==}, dw, dt, acc_ok,
+        a => ok => d => Grp.groups_build_depths(g, kids, t, a, d, ok))
