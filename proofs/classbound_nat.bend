@@ -463,3 +463,16 @@ def CB.bound(n: Nat, +ms: +List<Nat>, +cs: +List<Nat>,
                     Nat.mul(1n+q, 1n+q), e0, {==})
       NatProof.Nat.is_le_eq_r(Nat.add(1n+q, CB.sum(cs)),
         Nat.add(1n+q, Nat.mul(1n+q, q)), Nat.mul(1n+q, 1n+q), e, h2)
+
+# Substitution in the arguments of `is_lt`.
+def CB.lt_eq_r(a: Nat, b: Nat, c: Nat, e: {b == c : Nat},
+    p: {Nat.is_lt(a, b) == True{} : Bool}) ->
+  {Nat.is_lt(a, c) == True{} : Bool}:
+  %e : {Nat.is_lt(a, _) == True{} : Bool}
+  p
+
+def CB.lt_eq_l(a: Nat, b: Nat, c: Nat, e: {b == c : Nat},
+    p: {Nat.is_lt(b, a) == True{} : Bool}) ->
+  {Nat.is_lt(c, a) == True{} : Bool}:
+  %e : {Nat.is_lt(_, a) == True{} : Bool}
+  p
