@@ -721,3 +721,141 @@ def FC.fin_job_wrap(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, flatS: FC.FinByGs(p, inf, G, S, G)) ->
   FC.FinJob(1n+p, inf, G, S):
   hz => T => v => FC.fin_job_at(p, inf, G, S, T, v, flatS, hz)
+
+# Split the completeness conjunction at an append.
+def FC.finflat_append(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +xs: +List<+List<+List<Nat>>>, +ys: +List<+List<+List<Nat>>>,
+    f: FC.FinFlat(fuel, inf, G,
+        List.append(&2, +List<+List<Nat>>, xs, ys))) ->
+  FC.FinFlat(fuel, inf, G, xs) & FC.FinFlat(fuel, inf, G, ys):
+  match xs:
+    case Nil{}:
+      Tuple{Unit{}, f}
+    case Con{S, t}:
+      (j, fr) = f
+      FC.use_pair(
+        FC.FinFlat(fuel, inf, G, S <> t) & FC.FinFlat(fuel, inf, G, ys),
+        FC.FinFlat(fuel, inf, G, t), FC.FinFlat(fuel, inf, G, ys),
+        FC.finflat_append(fuel, inf, G, t, ys, fr),
+        ft => fys => Tuple{Tuple{j, ft}, fys})
+
+# The class conjunction read from a flat conjunction over its classes.
+def FC.finclass_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    f: FC.FinFlat(fuel, inf, G, MV.MV.next_groups(groups))) ->
+  FC.FinClass(fuel, inf, G, groups):
+  match groups:
+    case Nil{}:
+      Unit{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          (fh, ft) = f
+          (fh, FC.finclass_of_flat(fuel, inf, G, rest, ft))
+
+# A filtered class conjunction is a class conjunction when the test is true.
+def FC.finclassif_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, b: Bool,
+    +eb: {b == Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})) : Bool},
+    f: FC.FinFlat(fuel, inf, G,
+         MV.MV.classes_b(b, Groups.groups_build(g, S, Nil{})))) ->
+  FC.FinClassIf(fuel, inf, G, b, Groups.groups_build(g, S, Nil{})):
+  match b:
+    case True{}:
+      FC.finclass_of_flat(fuel, inf, G, Groups.groups_build(g, S, Nil{}), f)
+    case False{}:
+      Unit{}
+
+# The per-guess class conjunction of a job, from the flat conjunction.
+def FC.finbygs_of_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +gs: +List<+List<Nat>>,
+    f: FC.FinFlat(fuel, inf, G, MV.MV.next_guess(gs, S))) ->
+  FC.FinByGs(fuel, inf, G, S, gs):
+  match gs:
+    case Nil{}:
+      Unit{}
+    case Con{g, t}:
+      FC.use_pair(
+        FC.FinByGs(fuel, inf, G, S, g <> t),
+        FC.FinFlat(fuel, inf, G, MV.MV.classes(g, S)),
+        FC.FinFlat(fuel, inf, G, MV.MV.next_guess(t, S)),
+        FC.finflat_append(fuel, inf, G, MV.MV.classes(g, S),
+          MV.MV.next_guess(t, S), f),
+        fg => ft =>
+          (FC.finclassif_of_flat(fuel, inf, G, S, g,
+             Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{})), {==}, fg),
+           FC.finbygs_of_flat(fuel, inf, G, S, t, ft)))
+
+# Zero fuel: every job is the empty candidate list.
+def FC.fin_flat_zero(+inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(0n, jobs)) ->
+  FC.FinFlat(0n, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      (ble, bt) = bounds
+      +eS : {S == Nil{} : +List<+List<Nat>>} =
+        MV.MV.nil_of_len_zero(S,
+          NatProof.Nat.eq_zero_of_le_zero(Groups.len_words(S), ble))
+      Tuple{FC.finjob_transport(0n, inf, G, Nil{}, S,
+               Equal.sym(+List<+List<Nat>>, S, Nil{}, eS), FC.fin_zero_nil(inf, G)),
+            FC.fin_flat_zero(inf, G, t, bt)}
+
+# One step of the fuel: every job at the next level gets its bound.
+def FC.fin_flat_step(+inf: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>,
+    ff: FC.FinFlat(p, inf, G, MV.MV.next_jobs(G, jobs))) ->
+  FC.FinFlat(1n+p, inf, G, jobs):
+  match jobs:
+    case Nil{}:
+      Unit{}
+    case Con{S, t}:
+      FC.use_pair(
+        FC.FinFlat(1n+p, inf, G, S <> t),
+        FC.FinFlat(p, inf, G, MV.MV.next_guess(G, S)),
+        FC.FinFlat(p, inf, G, MV.MV.next_jobs(G, t)),
+        FC.finflat_append(p, inf, G, MV.MV.next_guess(G, S),
+          MV.MV.next_jobs(G, t), ff),
+        fS => ft =>
+          Tuple{FC.fin_job_wrap(p, inf, G, S,
+                  FC.finbygs_of_flat(p, inf, G, S, G, fS)),
+                FC.fin_flat_step(inf, p, G, t, ft)})
+
+# The fuel induction on the flat conjunction of jobs.
+def FC.fin_flat(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +jobs: +List<+List<+List<Nat>>>, bounds: MV.MV.Bounds(fuel, jobs)) ->
+  FC.FinFlat(fuel, inf, G, jobs):
+  match fuel:
+    case 0n:
+      FC.fin_flat_zero(inf, G, jobs, bounds)
+    case 1n+p:
+      FC.fin_flat_step(inf, p, G, jobs,
+        FC.fin_flat(p, inf, G, MV.MV.next_jobs(G, jobs),
+          MV.MV.next_bounds(p, G, jobs, bounds)))
+
+# Completeness: a valid tree makes the solver's stored cost finite.
+def FC.complete(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +T2: Tree.Tree, v: Tree.Valid(T2, G, C)) ->
+  {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, C)),
+     SolveRef.inf_of(Groups.len_words(C))) == True{} : Bool}:
+  +n : Nat = Groups.len_words(C)
+  +inf : Nat = SolveRef.inf_of(n)
+  +hz : {Nat.is_lt(Nat.mul(n, n), inf) == True{} : Bool} =
+    CBN.CB.lt_add_one(Nat.mul(n, n))
+  +le : {Nat.is_le(Groups.len_words(C), n) == True{} : Bool} =
+    NatProof.Nat.is_le_refl(n)
+  MV.MV.use_pair(
+    {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), inf) == True{} : Bool},
+    FC.FinJob(n, inf, G, C), FC.FinFlat(n, inf, G, Nil{}),
+    FC.fin_flat(n, inf, G, C <> Nil{}, Tuple{le, Unit{}}),
+    j => u =>
+      FC.use_pair(
+        {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), inf) == True{}
+         : Bool},
+        {Nat.is_lt(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), inf) == True{}
+         : Bool},
+        {Nat.is_le(Eval.Eval.cost_of(MV.MV.solve_best(G, C)), Nat.mul(n, n))
+         == True{} : Bool},
+        j(hz)(T2)(v),
+        f1 => f2 => f1))
