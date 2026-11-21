@@ -10,6 +10,7 @@ import ./proofs/nat.bend as NatProof
 import ./proofs/min.bend as Min
 import ./proofs/feedback.bend as FbProof
 import ./proofs/depth.bend as DepthProof
+import ./proofs/groups.bend as Grp
 
 def Bool.disc(b: Bool) -> Type:
   match b:
