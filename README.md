@@ -23,10 +23,12 @@ a correctness guarantee that the earlier work could not give.
 ## Status
 
 **Exact and verified; performance work remains.** All eight laws in `LAWS.bend` are proved in
-`PROOF.bend` and the modules under `proofs/`, and `PENDING_LAWS` is empty. The solver in
-`src/solve.bend` is the exact, exhaustive reference solver: it is verified correct for every input,
+`PROOF.bend` and the modules under `proofs/`, and `PENDING_LAWS` is empty. The reference solver in
+`src/solve.bend` is the exact, exhaustive specification: it is verified correct for every input,
 including optimality, but it is not fast. Its search is exponential and takes a few seconds at 10
-candidates, so the full bundled lists are not practical yet. The command-line interface is
+candidates, so the full bundled lists are not practical yet. The command line uses
+`src/solve_par.bend`, which evaluates the root guess list in parallel and is proved to return
+exactly the reference tree (`Par.solve_eq` in `PROOF.bend`). The command-line interface is
 documented in [docs/cli.md](docs/cli.md), the bundled word lists are in `words/`, and the benchmark
 harness is in `bench/`. [docs/performance.md](docs/performance.md) records the current performance
 status and the plan for speeding the solver up.
@@ -57,8 +59,8 @@ bundled guesses include all six:
 ```
 
 The second run uses the two-word list as both the guesses and the candidates, and prints
-`[[97,98,99],[[[2,2,0],[[97,98,100],[]]]]]`, the tree for `abc` and `abd`. The reference solver is
-exponential, so keep both lists small until the faster search lands.
+`[[97,98,99],[[[2,2,0],[[97,98,100],[]]]]]`, the tree for `abc` and `abd`. The search is
+exponential, so keep both lists small until pruning lands.
 
 ## Where the proofs are
 
@@ -75,7 +77,7 @@ the helper lemmas in `proofs/`. `scripts/check-proofs.sh` is the gate that CI ru
 | `PROOF.bend` | The proofs of the laws, one `def Laws.<name>` each. |
 | `proofs/` | Helper lemmas used by the proofs, grouped by purpose. |
 | `PENDING_LAWS` | Laws allowed to be open. Currently empty. |
-| `src/` | The Bend code: feedback, groups, tree, reference solver, JSON, CLI. |
+| `src/` | The Bend code: feedback, groups, tree, the reference and parallel solvers, JSON, CLI. |
 | `words/` | The bundled candidate and guess lists. |
 | `bench/` | The benchmark harness. |
 | `scripts/` | `check-proofs.sh`, the proof gate. |
