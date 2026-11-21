@@ -222,13 +222,35 @@ def FS.group_items_build_eq(+n: Nat, +groups: +List<Groups.Group>,
     case Con{gp, rest}:
       match gp:
         case Groups.Group{+f, +ws}:
-          Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
-            ib => SolveFast.group_items_step(f, ws, SolveFast.class_lb(ws), ib),
-            SolveFast.group_items_build(n, rest, tail),
-            SolveFast.ItemsBound{SolveFast.lower_bound(n, rest),
-              List.append(&2, SolveFast.Item,
-                SolveFast.group_items(n, rest), tail)},
-            FS.group_items_build_eq(n, rest, tail))
+          match ws:
+            case Nil{}:
+              Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+                ib => SolveFast.group_items_step(f, Nil{}, 0n, ib),
+                SolveFast.group_items_build(n, rest, tail),
+                SolveFast.ItemsBound{SolveFast.lower_bound(n, rest),
+                  List.append(&2, SolveFast.Item,
+                    SolveFast.group_items(n, rest), tail)},
+                FS.group_items_build_eq(n, rest, tail))
+            case Con{+w, +wt}:
+              match wt:
+                case Nil{}:
+                  Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+                    ib => SolveFast.group_items_one_step(f, w, ib),
+                    SolveFast.group_items_build(n, rest, tail),
+                    SolveFast.ItemsBound{SolveFast.lower_bound(n, rest),
+                      List.append(&2, SolveFast.Item,
+                        SolveFast.group_items(n, rest), tail)},
+                    FS.group_items_build_eq(n, rest, tail))
+                case Con{+w2, +wt2}:
+                  +ws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
+                  Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+                    ib => SolveFast.group_items_step(f, ws2,
+                            SolveFast.class_lb(ws2), ib),
+                    SolveFast.group_items_build(n, rest, tail),
+                    SolveFast.ItemsBound{SolveFast.lower_bound(n, rest),
+                      List.append(&2, SolveFast.Item,
+                        SolveFast.group_items(n, rest), tail)},
+                    FS.group_items_build_eq(n, rest, tail))
 
 # `(b + c) - c = b`.
 def FS.add_sub_cancel(+b: Nat, +c: Nat) ->

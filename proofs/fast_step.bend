@@ -377,6 +377,120 @@ def FS.class_add_live(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
   Equal.trans(SolveRef.Best, lhs1, lhs2, lhs4, e12,
     Equal.trans(SolveRef.Best, lhs2, lhs3, lhs4, e23, e34))
 
+# A skipped `OneItem` leaves `kids` and `sum` unchanged and stays in
+# `skip = True{}`.
+def FS.one_dead(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +inf: Nat, +g: +List<Nat>,
+    +dfb: +List<Feedback.Color>, +dw: +List<Nat>,
+    +dinner: +List<SolveFast.Item>, +kids: +List<Tree.Child>, +sum: Nat,
+    +best: SolveRef.Best) ->
+  {SolveFast.step(1n+p, gs, SolveFast.OneItem{dfb, dw} <> dinner,
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{})
+   == SolveFast.step(1n+p, gs, dinner, G, S, inf, g, kids, sum, best,
+        SolveFast.dummy_zero(), True{})
+   : SolveRef.Best}:
+  match gs:
+    case Nil{}:
+      {==}
+    case Con{gh, gt}:
+      {==}
+
+# A live `OneItem` adds the leaf `Tree.Node{w, Nil{}}` of cost 1 directly.
+def FS.one_live(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +inf: Nat, +g: +List<Nat>,
+    +fb: +List<Feedback.Color>, +w: +List<Nat>,
+    +inner: +List<SolveFast.Item>, +kids: +List<Tree.Child>, +sum: Nat,
+    +best: SolveRef.Best) ->
+  {SolveFast.step(1n+p, gs, SolveFast.OneItem{fb, w} <> inner,
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), False{})
+   == SolveFast.step(1n+p, gs, inner, G, S, inf, g,
+        Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
+        SolveRef.sat_add(inf, sum, 1n), best,
+        SolveFast.dummy_zero(), False{})
+   : SolveRef.Best}:
+  match gs:
+    case Nil{}:
+      {==}
+    case Con{gh, gt}:
+      {==}
+
+def FS.block_dead_check(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +n: Nat, +inf: Nat, +g: +List<Nat>,
+    +dfb: +List<Feedback.Color>, +dws: +List<+List<Nat>>,
+    +drest: +List<Groups.Group>, +kids: +List<Tree.Child>, +sum: Nat,
+    +best: SolveRef.Best, +rest: +List<SolveFast.Item>,
+    rec: {SolveFast.step(1n+p, gs,
+            List.append(&2, SolveFast.Item, SolveFast.group_items(n, drest),
+              SolveFast.End{} <> rest),
+            G, S, inf, g,
+            Tree.Child{dfb, Eval.Eval.tree_of(SolveFast.dummy_zero())} <> kids,
+            SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(SolveFast.dummy_zero())),
+            best, SolveFast.dummy_zero(), True{})
+          == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+               SolveFast.dummy_zero(), False{})
+          : SolveRef.Best}) ->
+  {SolveFast.step(1n+p, gs,
+      SolveFast.Check{SolveFast.lower_bound(n,
+        Groups.Group{dfb, dws} <> drest)}
+        <> (SolveFast.ClassItem{dfb, dws}
+            <> (SolveFast.Add{dfb}
+                <> List.append(&2, SolveFast.Item,
+                     SolveFast.group_items(n, drest),
+                     SolveFast.End{} <> rest))),
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{})
+   == SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+        SolveFast.dummy_zero(), False{})
+   : SolveRef.Best}:
+  +rem_lb : Nat =
+    SolveFast.lower_bound(n, Groups.Group{dfb, dws} <> drest)
+  +dinner : +List<SolveFast.Item> =
+    List.append(&2, SolveFast.Item, SolveFast.group_items(n, drest),
+      SolveFast.End{} <> rest)
+  +dkids : +List<Tree.Child> =
+    Tree.Child{dfb, Eval.Eval.tree_of(SolveFast.dummy_zero())} <> kids
+  +dsum : Nat =
+    SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(SolveFast.dummy_zero()))
+  +drhs : SolveRef.Best =
+    SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
+      SolveFast.dummy_zero(), False{})
+  +e0 : {SolveFast.step(1n+p, gs,
+           SolveFast.Check{rem_lb}
+             <> (SolveFast.ClassItem{dfb, dws}
+                 <> (SolveFast.Add{dfb} <> dinner)),
+           G, S, inf, g, kids, sum, best,
+           SolveFast.dummy_zero(), True{})
+         == SolveFast.step(1n+p, gs,
+              SolveFast.ClassItem{dfb, dws}
+                <> (SolveFast.Add{dfb} <> dinner),
+              G, S, inf, g, kids, sum, best,
+              SolveFast.dummy_zero(), True{})
+         : SolveRef.Best} =
+    FS.check_dead(p, gs, G, S, inf, g, rem_lb,
+      SolveFast.ClassItem{dfb, dws} <> (SolveFast.Add{dfb} <> dinner),
+      kids, sum, best, SolveFast.dummy_zero())
+  Equal.trans(SolveRef.Best,
+    SolveFast.step(1n+p, gs,
+      SolveFast.Check{rem_lb}
+        <> (SolveFast.ClassItem{dfb, dws}
+            <> (SolveFast.Add{dfb} <> dinner)),
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
+    SolveFast.step(1n+p, gs,
+      SolveFast.ClassItem{dfb, dws} <> (SolveFast.Add{dfb} <> dinner),
+      G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
+    drhs,
+    e0,
+    Equal.trans(SolveRef.Best,
+      SolveFast.step(1n+p, gs,
+        SolveFast.ClassItem{dfb, dws}
+          <> (SolveFast.Add{dfb} <> dinner),
+        G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
+      SolveFast.step(1n+p, gs, dinner, G, S, inf, g, dkids, dsum, best,
+        SolveFast.dummy_zero(), True{}),
+      drhs,
+      FS.class_add_dead(p, gs, G, S, inf, g, dfb, dws, dinner, kids,
+        sum, best),
+      rec))
+
 # A skipped block searches no class and leaves the best result alone.
 def FS.block_dead(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +n: Nat, +inf: Nat, +g: +List<Nat>,
@@ -396,56 +510,46 @@ def FS.block_dead(+p: Nat, +gs: +List<+List<Nat>>, +G: +List<+List<Nat>>,
     case Con{dgp, drest}:
       match dgp:
         case Groups.Group{+dfb, +dws}:
-          +rem_lb : Nat =
-            SolveFast.lower_bound(n, Groups.Group{dfb, dws} <> drest)
-          +dinner : +List<SolveFast.Item> =
-            List.append(&2, SolveFast.Item, SolveFast.group_items(n, drest),
-              SolveFast.End{} <> rest)
-          +dkids : +List<Tree.Child> =
-            Tree.Child{dfb, Eval.Eval.tree_of(SolveFast.dummy_zero())} <> kids
-          +dsum : Nat =
-            SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(SolveFast.dummy_zero()))
-          +drhs : SolveRef.Best =
-            SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n, best,
-              SolveFast.dummy_zero(), False{})
-          +e0 : {SolveFast.step(1n+p, gs,
-                   SolveFast.Check{rem_lb}
-                     <> (SolveFast.ClassItem{dfb, dws}
-                         <> (SolveFast.Add{dfb} <> dinner)),
-                   G, S, inf, g, kids, sum, best,
-                   SolveFast.dummy_zero(), True{})
-                 == SolveFast.step(1n+p, gs,
-                      SolveFast.ClassItem{dfb, dws}
-                        <> (SolveFast.Add{dfb} <> dinner),
+          match dws:
+            case Nil{}:
+              +dkids : +List<Tree.Child> =
+                Tree.Child{dfb, Eval.Eval.tree_of(SolveFast.dummy_zero())} <> kids
+              +dsum : Nat =
+                SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(SolveFast.dummy_zero()))
+              FS.block_dead_check(p, gs, G, S, n, inf, g, dfb, Nil{}, drest,
+                kids, sum, best, rest,
+                FS.block_dead(p, gs, G, S, n, inf, g, drest, dkids, dsum, best,
+                  rest))
+            case Con{+dw, +dwt}:
+              match dwt:
+                case Nil{}:
+                  +dinner : +List<SolveFast.Item> =
+                    List.append(&2, SolveFast.Item,
+                      SolveFast.group_items(n, drest),
+                      SolveFast.End{} <> rest)
+                  Equal.trans(SolveRef.Best,
+                    SolveFast.step(1n+p, gs,
+                      SolveFast.OneItem{dfb, dw} <> dinner,
                       G, S, inf, g, kids, sum, best,
-                      SolveFast.dummy_zero(), True{})
-                 : SolveRef.Best} =
-            FS.check_dead(p, gs, G, S, inf, g, rem_lb,
-              SolveFast.ClassItem{dfb, dws} <> (SolveFast.Add{dfb} <> dinner),
-              kids, sum, best, SolveFast.dummy_zero())
-          Equal.trans(SolveRef.Best,
-            SolveFast.step(1n+p, gs,
-              SolveFast.Check{rem_lb}
-                <> (SolveFast.ClassItem{dfb, dws}
-                    <> (SolveFast.Add{dfb} <> dinner)),
-              G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
-            SolveFast.step(1n+p, gs,
-              SolveFast.ClassItem{dfb, dws} <> (SolveFast.Add{dfb} <> dinner),
-              G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
-            drhs,
-            e0,
-            Equal.trans(SolveRef.Best,
-              SolveFast.step(1n+p, gs,
-                SolveFast.ClassItem{dfb, dws}
-                  <> (SolveFast.Add{dfb} <> dinner),
-                G, S, inf, g, kids, sum, best, SolveFast.dummy_zero(), True{}),
-              SolveFast.step(1n+p, gs, dinner, G, S, inf, g, dkids, dsum, best,
-                SolveFast.dummy_zero(), True{}),
-              drhs,
-              FS.class_add_dead(p, gs, G, S, inf, g, dfb, dws, dinner, kids,
-                sum, best),
-              FS.block_dead(p, gs, G, S, n, inf, g, drest, dkids, dsum, best,
-                rest)))
+                      SolveFast.dummy_zero(), True{}),
+                    SolveFast.step(1n+p, gs, dinner, G, S, inf, g, kids, sum,
+                      best, SolveFast.dummy_zero(), True{}),
+                    SolveFast.step(1n+p, gs, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                      best, SolveFast.dummy_zero(), False{}),
+                    FS.one_dead(p, gs, G, S, inf, g, dfb, dw, dinner, kids,
+                      sum, best),
+                    FS.block_dead(p, gs, G, S, n, inf, g, drest, kids, sum,
+                      best, rest))
+                case Con{+dw2, +dwt2}:
+                  +dws2 : +List<+List<Nat>> = dw <> (dw2 <> dwt2)
+                  +dkids : +List<Tree.Child> =
+                    Tree.Child{dfb, Eval.Eval.tree_of(SolveFast.dummy_zero())} <> kids
+                  +dsum : Nat =
+                    SolveRef.sat_add(inf, sum, Eval.Eval.cost_of(SolveFast.dummy_zero()))
+                  FS.block_dead_check(p, gs, G, S, n, inf, g, dfb, dws2, drest,
+                    kids, sum, best, rest,
+                    FS.block_dead(p, gs, G, S, n, inf, g, drest, dkids, dsum,
+                      best, rest))
 
 # A skipped class tail (`ClassItem`, `Add`, and the remaining groups) leaves
 # `best` unchanged.
