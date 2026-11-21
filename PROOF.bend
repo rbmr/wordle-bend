@@ -24,6 +24,7 @@ import ./proofs/mainvalid.bend as MVProof
 import ./proofs/optimalvalue.bend as OVProof
 import ./proofs/classbound.bend as CBProof
 import ./proofs/classbound_kids.bend as CBKids
+import ./proofs/classbound_sum.bend as CBSum
 
 def Bool.disc(b: Bool) -> Type:
   match b:
