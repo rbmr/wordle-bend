@@ -169,3 +169,49 @@ def FeedbackProof.all_green_equal_go(g: +List<Nat>, a: +List<Nat>, +pool: +List<
 
 def Laws.feedback_all_green_only_if_equal(g, a, p, e):
   FeedbackProof.all_green_equal_go(g, a, Feedback.non_green(g, a), Feedback.next_same(g, a), {==}, p, e)
+
+def Color.eq_refl(c: Feedback.Color) -> {Feedback.Color.eq(c, c) == True{} : Bool}:
+  match c:
+    case Feedback.Gray{}:
+      {==}
+    case Feedback.Yellow{}:
+      {==}
+    case Feedback.Green{}:
+      {==}
+
+def FeedbackProof.pair_color_eq_refl(c: Feedback.Color) -> {Feedback.pair_color_eq((c, c)) == True{} : Bool}:
+  Color.eq_refl(c)
+
+def FeedbackProof.feedback_eq_refl(+a: +List<Feedback.Color>) ->
+  {Feedback.feedback_eq(a, a) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{+h, +t}:
+      %Equal.sym(Bool, Feedback.Color.eq(h, h), True{}, Color.eq_refl(h)) : {
+        Bool.and(Cmp.is_eq(Nat.cmp(List.length(&2, Feedback.Color, t), List.length(&2, Feedback.Color, t))),
+                 List.all.if(u => List.all(&1, Feedback.Color & Feedback.Color, Feedback.pair_color_eq,
+                                            List.zip(&2, Feedback.Color, &2, Feedback.Color, t, t)),
+                              _))
+        == True{} : Bool}
+      %Equal.sym(Bool, Feedback.feedback_eq(t, t), True{}, FeedbackProof.feedback_eq_refl(t)) : {
+        _ == True{} : Bool}
+      {==}
+
+def FeedbackProof.pair_nat_eq_refl(n: Nat) -> {Feedback.pair_nat_eq((n, n)) == True{} : Bool}:
+  Nat.is_eq_refl(n)
+
+def FeedbackProof.word_eq_refl(+a: +List<Nat>) -> {Feedback.word_eq(a, a) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{+h, +t}:
+      %Equal.sym(Bool, Nat.is_eq(h, h), True{}, Nat.is_eq_refl(h)) : {
+        Bool.and(Nat.is_eq(List.length(&2, Nat, t), List.length(&2, Nat, t)),
+                 List.all.if(u => List.all(&1, Nat & Nat, Feedback.pair_nat_eq,
+                                            List.zip(&2, Nat, &2, Nat, t, t)),
+                              _))
+        == True{} : Bool}
+      %Equal.sym(Bool, Feedback.word_eq(t, t), True{}, FeedbackProof.word_eq_refl(t)) : {
+        _ == True{} : Bool}
+      {==}
