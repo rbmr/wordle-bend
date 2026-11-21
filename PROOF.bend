@@ -40,6 +40,8 @@ import ./proofs/lb_capacity.bend as LBProof3
 import ./src/solve_fast.bend as SolveFast
 import ./proofs/fast_step.bend as FSProof
 import ./proofs/fast_better.bend as FSPrune
+import ./proofs/fast_lb.bend as FSLB
+import ./proofs/fast_eq.bend as FSEq
 import ./src/solve_par.bend as SolvePar
 import ./proofs/par_fold.bend as ParFold
 
@@ -1572,3 +1574,8 @@ def Laws.solve_optimal(G, C, T2, v):
 def Par.solve_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
   {SolvePar.solve(G, C) == SolveRef.solve(G, C) : Maybe<Tree.Tree>}:
   ParFold.ParFold.solve_eq(G, C)
+
+# The bound-pruned solver returns exactly the reference tree for every input.
+def Fast.solve_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
+  {SolveFast.solve_fast(G, C) == SolveRef.solve(G, C) : Maybe<Tree.Tree>}:
+  FSEq.FE.solve_fast_eq(G, C)
