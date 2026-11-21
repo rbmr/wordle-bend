@@ -505,7 +505,7 @@ def FG.groups_smaller_fast_eq(+S: +List<+List<Nat>>,
             Groups.groups_smaller(S, rest),
             FG.groups_smaller_fast_eq(S, rest))
 
-# One guess step of `schedule_one` agrees with `schedule_go` on `[w]`.
+# One guess step of `schedule_one_guess` agrees with `schedule_guess` on `[w]`.
 def FG.schedule_one_step_eq(+g: +List<Nat>, +w: +List<Nat>,
     +tail1: +List<SolveFast.Item>, +tail2: +List<SolveFast.Item>,
     same: Bool, et: {tail1 == tail2 : +List<SolveFast.Item>}) ->
@@ -523,24 +523,14 @@ def FG.schedule_one_step_eq(+g: +List<Nat>, +w: +List<Nat>,
     case False{}:
       et
 
-# `schedule_one(G, w)` agrees with `schedule_go(G, [w], 1n)`.
-def FG.schedule_one_eq(+G: +List<+List<Nat>>, +w: +List<Nat>) ->
-  {SolveFast.schedule_one(G, w)
-   == SolveFast.schedule_go(G, w <> Nil{}, 1n) : +List<SolveFast.Item>}:
-  match G:
-    case Nil{}:
-      {==}
-    case Con{+g, +rest}:
-      FG.schedule_one_step_eq(g, w,
-        SolveFast.schedule_one(rest, w),
-        SolveFast.schedule_go(rest, w <> Nil{}, 1n),
-        SolveFast.word_eq_fast(g, w),
-        FG.schedule_one_eq(rest, w))
-
-# `schedule(G, S)` agrees with `schedule_go(G, S, len_words(S))`.
-def FG.schedule_eq(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) ->
-  {SolveFast.schedule(G, S)
-   == SolveFast.schedule_go(G, S, Groups.len_words(S))
+# `guess_body(g, S, len_words(S))` agrees with `schedule_guess` on `groups_build_fast`.
+def FG.guess_body_eq(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
+  {SolveFast.guess_body(g, S, Groups.len_words(S))
+   == SolveFast.schedule_guess(g,
+        SolveFast.groups_build_fast(g, S, Nil{}),
+        Groups.len_words(S), Nil{},
+        SolveFast.groups_smaller_fast(Groups.len_words(S),
+          SolveFast.groups_build_fast(g, S, Nil{})))
    : +List<SolveFast.Item>}:
   match S:
     case Nil{}:
@@ -548,6 +538,7 @@ def FG.schedule_eq(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) ->
     case Con{+w, +t}:
       match t:
         case Nil{}:
-          FG.schedule_one_eq(G, w)
+          FG.schedule_one_step_eq(g, w, Nil{}, Nil{},
+            SolveFast.word_eq_fast(g, w), {==})
         case Con{w2, t2}:
           {==}

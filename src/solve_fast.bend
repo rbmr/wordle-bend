@@ -108,6 +108,25 @@ def hit_bool(b: Bool) -> Nat:
 def hit_word(+g: +List<Nat>, +w: +List<Nat>) -> Nat:
   hit_bool(word_eq_fast(g, w))
 
+# The number of candidates in `S` not equal to `g`, and the fast pre-grouping
+# lower bound `|S| + keep_fast(g, S) = 2 * |S| - word_mult(g, S)`.
+def keep_step(+rest: Nat, same: Bool) -> Nat:
+  match same:
+    case True{}:
+      rest
+    case False{}:
+      Nat.add(1n, rest)
+
+def keep_fast(+g: +List<Nat>, +S: +List<+List<Nat>>) -> Nat:
+  match S:
+    case Nil{}:
+      0n
+    case Con{+w, +t}:
+      keep_step(keep_fast(g, t), word_eq_fast(g, w))
+
+def pre_lb(+n: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>) -> Nat:
+  Nat.add(n, keep_fast(g, S))
+
 # The number of candidates in `S` equal to `g`, duplicates counted.
 def word_mult(+g: +List<Nat>, +S: +List<+List<Nat>>) -> Nat:
   match S:
@@ -350,15 +369,6 @@ def schedule_guess(+g: +List<Nat>, +groups: +List<Groups.Group>, +n: Nat,
     case False{}:
       rest
 
-def schedule_go(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>, +n: Nat) -> +List<Item>:
-  match G:
-    case Nil{}:
-      Nil{}
-    case Con{+g, +rest}:
-      +groups = groups_build_fast(g, S, Nil{})
-      schedule_guess(g, groups, n, schedule_go(rest, S, n),
-                     groups_smaller_fast(n, groups))
-
 # Fast schedule for a singleton candidate list `[w]`: a guess `g` is usable
 # exactly when `g == w` (producing no children and bound 1); any `g != w` puts
 # `w` into one class of size 1 and is unusable, so its feedback does not need
@@ -371,99 +381,183 @@ def schedule_one_guess(+g: +List<Nat>, +rest: +List<Item>,
     case False{}:
       rest
 
-def schedule_one(+G: +List<+List<Nat>>, +w: +List<Nat>) -> +List<Item>:
-  match G:
-    case Nil{}:
-      Nil{}
-    case Con{+g, +rest}:
-      schedule_one_guess(g, schedule_one(rest, w), word_eq_fast(g, w))
-
-# The schedule for a guess list: one block per usable guess, in G order.
-def schedule(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>) -> +List<Item>:
+# Per-guess lazy schedule items. When `cs` is exhausted, `step` pops the next
+# guess `g` from `gs` and builds its schedule items only if the cheap pre-bound
+# `pre_lb(|S|, g, S) = |S| + keep_fast(g, S)` can still beat `best`. On a
+# singleton candidate list `[w]`, `schedule_one_guess` avoids computing feedback
+# for non-matching guesses.
+def guess_body(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat) -> +List<Item>:
   match S:
     case Nil{}:
-      schedule_go(G, Nil{}, 0n)
+      +groups = groups_build_fast(g, Nil{}, Nil{})
+      schedule_guess(g, groups, 0n, Nil{}, groups_smaller_fast(0n, groups))
     case Con{+w, +t}:
       match t:
         case Nil{}:
-          schedule_one(G, w)
+          schedule_one_guess(g, Nil{}, word_eq_fast(g, w))
         case Con{+w2, +t2}:
-          schedule_go(G, w <> (w2 <> t2),
-            Groups.len_words(w <> (w2 <> t2)))
+          +groups = groups_build_fast(g, w <> (w2 <> t2), Nil{})
+          schedule_guess(g, groups, n, Nil{}, groups_smaller_fast(n, groups))
 
-# One step of the pruned search. The arguments and the fuel are the reference's;
-# `skip` says whether the current block is skipped. A skipped block searches no
-# class and leaves `best` unchanged.
-def step(+fuel: Nat, +cs: +List<Item>, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+def guess_items_go(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+                   pre_skip: Bool) -> +List<Item>:
+  match pre_skip:
+    case True{}:
+      Nil{}
+    case False{}:
+      guess_body(g, S, n)
+
+def guess_items(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+                +best: SolveRef.Best) -> +List<Item>:
+  guess_items_go(g, S, n, skippable(best, pre_lb(n, g, S)))
+
+# One step of the pruned search. `gs` holds the remaining unscheduled guesses at
+# this node and `cs` holds the items of the current guess. Lexicographic
+# structural recursion on `(fuel, gs, cs)` lets `step` build each guess's
+# feedback groups lazily when `cs` becomes `Nil{}`.
+def step(+fuel: Nat, +gs: +List<+List<Nat>>, +cs: +List<Item>,
+         +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
          +inf: Nat, +g: +List<Nat>, +kids: +List<Tree.Child>, +sum: Nat,
          +best: SolveRef.Best, +pending: SolveRef.Best, skip: Bool) -> SolveRef.Best:
   match fuel:
     case 0n:
-      match cs:
+      match gs:
         case Nil{}:
-          best
-        case Con{item, rest}:
-          match item:
-            case Begin{g2, lb}:
-              step(0n, rest, G, S, inf, g2, Nil{}, 0n, best, pending, False{})
-            case Check{rem_lb}:
-              step(0n, rest, G, S, inf, g, kids, sum, best, pending, skip)
-            case ClassItem{fb, words}:
-              dummy_inf(inf)
-            case Add{fb}:
-              match pending:
-                case SolveRef.Best{tree, cost}:
-                  step(0n, rest, G, S, inf, g,
-                       Tree.Child{fb, tree} <> kids,
-                       SolveRef.sat_add(inf, sum, cost), best, dummy_zero(), skip)
-            case End{}:
-              step(0n, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                   SolveRef.finish_guess(inf, g, kids, sum, Groups.len_words(S), best),
-                   dummy_zero(), False{})
-    case 1n+p:
-      match cs:
-        case Nil{}:
-          best
-        case Con{item, rest}:
-          match item:
-            case Begin{g2, lb}:
-              step(fuel, rest, G, S, inf, g2, Nil{}, 0n, best, dummy_zero(),
-                   skippable(best, lb))
-            case Check{rem_lb}:
-              match skip:
-                case True{}:
-                  step(fuel, rest, G, S, inf, g, kids, sum, best,
-                       dummy_zero(), True{})
-                case False{}:
-                  step(fuel, rest, G, S, inf, g, kids, sum, best,
-                       dummy_zero(), skippable(best, Nat.add(sum, rem_lb)))
-            case ClassItem{fb, words}:
-              match skip:
-                case True{}:
-                  step(fuel, rest, G, S, inf, g, kids, sum, best,
-                       dummy_zero(), skip)
-                case False{}:
-                  step(fuel, rest, G, S, inf, g, kids, sum, best,
-                       step(p, schedule(G, words), G, words, inf,
-                            Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
-                       skip)
-            case Add{fb}:
-              match pending:
-                case SolveRef.Best{tree, cost}:
-                  step(fuel, rest, G, S, inf, g,
-                       Tree.Child{fb, tree} <> kids,
-                       SolveRef.sat_add(inf, sum, cost), best,
-                       dummy_zero(), skip)
-            case End{}:
-              match skip:
-                case True{}:
-                  step(fuel, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                       best, dummy_zero(), False{})
-                case False{}:
-                  step(fuel, rest, G, S, inf, Nil{}, Nil{}, 0n,
-                       SolveRef.finish_guess(inf, g, kids, sum,
-                         Groups.len_words(S), best),
+          match cs:
+            case Nil{}:
+              best
+            case Con{item, rest}:
+              match item:
+                case Begin{g2, lb}:
+                  step(0n, Nil{}, rest, G, S, inf, g2, Nil{}, 0n, best, pending, False{})
+                case Check{rem_lb}:
+                  step(0n, Nil{}, rest, G, S, inf, g, kids, sum, best, pending, skip)
+                case ClassItem{fb, words}:
+                  dummy_inf(inf)
+                case Add{fb}:
+                  match pending:
+                    case SolveRef.Best{tree, cost}:
+                      step(0n, Nil{}, rest, G, S, inf, g,
+                           Tree.Child{fb, tree} <> kids,
+                           SolveRef.sat_add(inf, sum, cost), best, dummy_zero(), skip)
+                case End{}:
+                  step(0n, Nil{}, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                       SolveRef.finish_guess(inf, g, kids, sum, Groups.len_words(S), best),
                        dummy_zero(), False{})
+        case Con{+g2, +grest}:
+          match cs:
+            case Nil{}:
+              step(0n, grest, guess_body(g2, S, Groups.len_words(S)),
+                   G, S, inf, Nil{}, Nil{}, 0n, best, dummy_zero(), False{})
+            case Con{item, rest}:
+              match item:
+                case Begin{g3, lb}:
+                  step(0n, g2 <> grest, rest, G, S, inf, g3, Nil{}, 0n, best, pending, False{})
+                case Check{rem_lb}:
+                  step(0n, g2 <> grest, rest, G, S, inf, g, kids, sum, best, pending, skip)
+                case ClassItem{fb, words}:
+                  dummy_inf(inf)
+                case Add{fb}:
+                  match pending:
+                    case SolveRef.Best{tree, cost}:
+                      step(0n, g2 <> grest, rest, G, S, inf, g,
+                           Tree.Child{fb, tree} <> kids,
+                           SolveRef.sat_add(inf, sum, cost), best, dummy_zero(), skip)
+                case End{}:
+                  step(0n, g2 <> grest, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                       SolveRef.finish_guess(inf, g, kids, sum, Groups.len_words(S), best),
+                       dummy_zero(), False{})
+    case 1n+p:
+      match gs:
+        case Nil{}:
+          match cs:
+            case Nil{}:
+              best
+            case Con{item, rest}:
+              match item:
+                case Begin{g2, lb}:
+                  step(fuel, Nil{}, rest, G, S, inf, g2, Nil{}, 0n, best, dummy_zero(),
+                       skippable(best, lb))
+                case Check{+rem_lb}:
+                  match skip:
+                    case True{}:
+                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), True{})
+                    case False{}:
+                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), skippable(best, Nat.add(sum, rem_lb)))
+                case ClassItem{fb, words}:
+                  match skip:
+                    case True{}:
+                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), skip)
+                    case False{}:
+                      step(fuel, Nil{}, rest, G, S, inf, g, kids, sum, best,
+                           step(p, G, Nil{}, G, words, inf,
+                                Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
+                           skip)
+                case Add{fb}:
+                  match pending:
+                    case SolveRef.Best{tree, cost}:
+                      step(fuel, Nil{}, rest, G, S, inf, g,
+                           Tree.Child{fb, tree} <> kids,
+                           SolveRef.sat_add(inf, sum, cost), best,
+                           dummy_zero(), skip)
+                case End{}:
+                  match skip:
+                    case True{}:
+                      step(fuel, Nil{}, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                           best, dummy_zero(), False{})
+                    case False{}:
+                      step(fuel, Nil{}, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                           SolveRef.finish_guess(inf, g, kids, sum,
+                             Groups.len_words(S), best),
+                           dummy_zero(), False{})
+        case Con{+g2, +grest}:
+          match cs:
+            case Nil{}:
+              step(fuel, grest, guess_items(g2, S, Groups.len_words(S), best),
+                   G, S, inf, Nil{}, Nil{}, 0n, best, dummy_zero(), False{})
+            case Con{item, rest}:
+              match item:
+                case Begin{g3, lb}:
+                  step(fuel, g2 <> grest, rest, G, S, inf, g3, Nil{}, 0n, best, dummy_zero(),
+                       skippable(best, lb))
+                case Check{+rem_lb}:
+                  match skip:
+                    case True{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), True{})
+                    case False{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), skippable(best, Nat.add(sum, rem_lb)))
+                case ClassItem{fb, words}:
+                  match skip:
+                    case True{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
+                           dummy_zero(), skip)
+                    case False{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g, kids, sum, best,
+                           step(p, G, Nil{}, G, words, inf,
+                                Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}),
+                           skip)
+                case Add{fb}:
+                  match pending:
+                    case SolveRef.Best{tree, cost}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, g,
+                           Tree.Child{fb, tree} <> kids,
+                           SolveRef.sat_add(inf, sum, cost), best,
+                           dummy_zero(), skip)
+                case End{}:
+                  match skip:
+                    case True{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                           best, dummy_zero(), False{})
+                    case False{}:
+                      step(fuel, g2 <> grest, rest, G, S, inf, Nil{}, Nil{}, 0n,
+                           SolveRef.finish_guess(inf, g, kids, sum,
+                             Groups.len_words(S), best),
+                           dummy_zero(), False{})
 
 # The pruned search on a guess list and candidate list.
 def solve_fast(+guesses: +List<+List<Nat>>,
@@ -471,7 +565,7 @@ def solve_fast(+guesses: +List<+List<Nat>>,
   +n = Groups.len_words(candidates)
   +inf = SolveRef.inf_of(n)
   SolveRef.best_to_maybe(inf,
-    step(n, schedule(guesses, candidates), guesses, candidates, inf,
+    step(n, guesses, Nil{}, guesses, candidates, inf,
          Nil{}, Nil{}, 0n, dummy_inf(inf), dummy_zero(), False{}))
 
 def solve(+guesses: +List<+List<Nat>>,
