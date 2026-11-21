@@ -35,6 +35,7 @@ import ./proofs/optcomplete.bend as OQCompleteProof
 import ./proofs/eval.bend as EvalProof
 import ./proofs/optstrong.bend as OQStrongProof
 import ./proofs/lb_size.bend as LBProof
+import ./proofs/lb_twice.bend as LBProof2
 
 def Bool.disc(b: Bool) -> Type:
   match b:
