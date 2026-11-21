@@ -1,0 +1,10 @@
+# Laws that are allowed to be open. The proof gate (scripts/check-proofs.sh)
+# requires a proof for every law in LAWS.bend, except the laws named here.
+#
+# A name must be a law in LAWS.bend and must not have a proof def in PROOF.bend.
+# Adding one needs an explicit explanation in the pull request description.
+# Remove a name as soon as its law is proved: this list only shrinks, and the
+# target is an empty file.
+solve_valid
+solve_optimal
+tree_roundtrip
