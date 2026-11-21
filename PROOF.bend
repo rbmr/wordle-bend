@@ -32,6 +32,7 @@ import ./proofs/optnode.bend as OQNodeProof
 import ./proofs/optind.bend as OQIndProof
 import ./proofs/optcost.bend as OQCostProof
 import ./proofs/optcomplete.bend as OQCompleteProof
+import ./proofs/eval.bend as EvalProof
 
 def Bool.disc(b: Bool) -> Type:
   match b:
@@ -1514,3 +1515,21 @@ def Laws.tree_json_wellformed(t):
 # The law: a tree returned by the solver is valid.
 def Laws.solve_valid(G, C, T, e):
   MVProof.MV.solve_valid(G, C, T, e)
+
+# The law: the tree returned by the solver is optimal.
+def Laws.solve_optimal(G, C, T2, v):
+  +inf : Nat = SolveRef.inf_of(Groups.len_words(C))
+  +fin : {Nat.is_lt(EvalProof.Eval.cost_of(MVProof.MV.solve_best(G, C)), inf)
+          == True{} : Bool} =
+    OQCompleteProof.FC.complete(G, C, T2, v)
+  +es : {SolveRef.solve(G, C) == Some{EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C))}
+         : Maybe<Tree.Tree>} =
+    OQCostProof.OC.best_to_maybe_fin(inf, MVProof.MV.solve_best(G, C), fin)
+  +hcost : {Nat.is_le(Tree.cost(EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), C),
+                EvalProof.Eval.cost_of(MVProof.MV.solve_best(G, C))) == True{} : Bool} =
+    OQCostProof.OC.machine_cost(G, C)(fin)
+  +le : {Nat.is_le(Tree.cost(EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), C),
+             Tree.cost(T2, C)) == True{} : Bool} =
+    OQIndProof.OQ.optimal_of(G, C, T2,
+      EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), v, hcost)
+  (EvalProof.Eval.tree_of(MVProof.MV.solve_best(G, C)), (es, le))
