@@ -8,4 +8,3 @@
 solve_valid
 solve_optimal
 tree_json_wellformed
-print_matches_render
