@@ -367,9 +367,45 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         NatProof.Nat.is_le_trans(
           Eval.Eval.cost_of(next_best), Eval.Eval.cost_of(best), inf,
           Fold.OQ.guess_cost_le_acc(p, G, S, g, inf, best), hbest)
+      +e0a : {SolveFast.step(1n+p,
+                SolveFast.schedule_guess(g, fgrp, Groups.len_words(S), rest,
+                  SolveFast.groups_smaller_fast(Groups.len_words(S), fgrp)),
+                G, S, inf, Nil{}, Nil{}, 0n, best,
+                SolveFast.dummy_zero(), False{})
+              == SolveFast.step(1n+p,
+                   SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest,
+                     SolveFast.groups_smaller_fast(Groups.len_words(S), groups)),
+                   G, S, inf, Nil{}, Nil{}, 0n, best,
+                   SolveFast.dummy_zero(), False{})
+              : SolveRef.Best} =
+        Equal.cong(+List<Groups.Group>, SolveRef.Best,
+          grp => SolveFast.step(1n+p,
+                   SolveFast.schedule_guess(g, grp, Groups.len_words(S), rest,
+                     SolveFast.groups_smaller_fast(Groups.len_words(S), grp)),
+                   G, S, inf, Nil{}, Nil{}, 0n, best,
+                   SolveFast.dummy_zero(), False{}),
+          fgrp, groups, egrp)
+      +e0b : {SolveFast.step(1n+p,
+                SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest,
+                  SolveFast.groups_smaller_fast(Groups.len_words(S), groups)),
+                G, S, inf, Nil{}, Nil{}, 0n, best,
+                SolveFast.dummy_zero(), False{})
+              == SolveFast.step(1n+p,
+                   SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest,
+                     usable),
+                   G, S, inf, Nil{}, Nil{}, 0n, best,
+                   SolveFast.dummy_zero(), False{})
+              : SolveRef.Best} =
+        Equal.cong(Bool, SolveRef.Best,
+          u => SolveFast.step(1n+p,
+                 SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest, u),
+                 G, S, inf, Nil{}, Nil{}, 0n, best,
+                 SolveFast.dummy_zero(), False{}),
+          SolveFast.groups_smaller_fast(Groups.len_words(S), groups), usable,
+          FG.FG.groups_smaller_fast_eq(S, groups))
       +e0 : {SolveFast.step(1n+p,
                SolveFast.schedule_guess(g, fgrp, Groups.len_words(S), rest,
-                 Groups.groups_smaller(S, fgrp)),
+                 SolveFast.groups_smaller_fast(Groups.len_words(S), fgrp)),
                G, S, inf, Nil{}, Nil{}, 0n, best,
                SolveFast.dummy_zero(), False{})
              == SolveFast.step(1n+p,
@@ -378,13 +414,23 @@ def FE.guesses_step(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
                   G, S, inf, Nil{}, Nil{}, 0n, best,
                   SolveFast.dummy_zero(), False{})
              : SolveRef.Best} =
-        Equal.cong(+List<Groups.Group>, SolveRef.Best,
-          grp => SolveFast.step(1n+p,
-                   SolveFast.schedule_guess(g, grp, Groups.len_words(S), rest,
-                     Groups.groups_smaller(S, grp)),
-                   G, S, inf, Nil{}, Nil{}, 0n, best,
-                   SolveFast.dummy_zero(), False{}),
-          fgrp, groups, egrp)
+        Equal.trans(SolveRef.Best,
+          SolveFast.step(1n+p,
+            SolveFast.schedule_guess(g, fgrp, Groups.len_words(S), rest,
+              SolveFast.groups_smaller_fast(Groups.len_words(S), fgrp)),
+            G, S, inf, Nil{}, Nil{}, 0n, best,
+            SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p,
+            SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest,
+              SolveFast.groups_smaller_fast(Groups.len_words(S), groups)),
+            G, S, inf, Nil{}, Nil{}, 0n, best,
+            SolveFast.dummy_zero(), False{}),
+          SolveFast.step(1n+p,
+            SolveFast.schedule_guess(g, groups, Groups.len_words(S), rest,
+              usable),
+            G, S, inf, Nil{}, Nil{}, 0n, best,
+            SolveFast.dummy_zero(), False{}),
+          e0a, e0b)
       +e1 : {SolveFast.step(1n+p,
                SolveFast.schedule_guess(g, groups, Groups.len_words(S),
                  rest, usable),
