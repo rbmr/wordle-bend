@@ -18,15 +18,15 @@ Word lists are data with their own origin and their own terms, and those terms a
 MIT, and sometimes not permissive at all. The MIT licence on the code does not extend to data
 bundled in `words/`.
 
-The lists in `words/` were carried over unchanged from an earlier project of the same maintainer.
-No upstream source is asserted here, and no licence is claimed for them beyond what that earlier
-project established. If the lists are replaced or a new list is added, record its source, licence,
-attribution and any modification in this document in the same change.
+The lists in `words/` were carried over unchanged from the earlier, unverified Rust implementation
+of this solver. No upstream source is asserted here, and no licence is claimed for them beyond what
+that earlier implementation established. If the lists are replaced or a new list is added, record
+its source, licence, attribution and any modification in this document in the same change.
 
 | File | Contents | Provenance |
 | --- | --- | --- |
-| `words/candidates.txt` | 2,341 five-letter candidate words, one per line. | Carried over unchanged from an earlier project of the same maintainer. |
-| `words/guesses.txt` | 14,854 five-letter guess words, one per line. | Carried over unchanged from an earlier project of the same maintainer. |
+| `words/candidates.txt` | 2,341 five-letter candidate words, one per line. | Carried over unchanged from the earlier, unverified implementation of this solver. |
+| `words/guesses.txt` | 14,854 five-letter guess words, one per line. | Carried over unchanged from the earlier, unverified implementation of this solver. |
 
 A list whose licence cannot be established, or whose terms do not permit redistribution in a public
 repository, is not bundled.

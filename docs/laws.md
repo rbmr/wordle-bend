@@ -2,8 +2,9 @@
 
 The laws are the correctness statement for the solver. `LAWS.bend` states them;
 `PROOF.bend` proves each one with a definition of the same name, so `law foo` is
-proven by `def Laws.foo`. A law with no proof is an open claim, and
-`bend PROOF.bend` reports it.
+proven by `def Laws.foo`. All eight laws are proved and `PENDING_LAWS` is empty.
+The helper lemmas live under `proofs/`; [proofs.md](proofs.md) maps them. A law
+with no proof would be an open claim, and `bend PROOF.bend` reports it.
 
 ## Types
 
@@ -16,8 +17,10 @@ proven by `def Laws.foo`. A law with no proof is an open claim, and
 
 `src/feedback.bend` defines `Color`, the feedback function and `AllGreen`.
 `src/tree.bend` defines `Tree`, `depth`, `Valid` and `cost`.
-`src/solve.bend` holds the placeholder solver. `src/json.bend` prints a tree as
-JSON and parses that text back.
+`src/solve.bend` delegates to the exact reference solver in `src/solve_ref.bend`.
+`src/json.bend` prints a tree as JSON and parses that text back, and
+`src/spec_json.bend` is the independent renderer and recogniser used by laws 7
+and 8.
 
 ## Feedback
 

@@ -26,11 +26,14 @@ rather than a claim about a run.
 | `feedback_all_green_only_if_equal` | proved |
 | `feedback_length` | proved |
 | `solve_valid` | proved |
-| `solve_optimal` | pending: the optimality proof is open |
+| `solve_optimal` | proved |
 | `tree_roundtrip` | proved |
+| `tree_json_wellformed` | proved |
+| `print_matches_render` | proved |
 
-Every proved law has a `def Laws.<name>` in `PROOF.bend`. The open ones are listed in
-`PENDING_LAWS`.
+Every law has a `def Laws.<name>` in `PROOF.bend`, and `PENDING_LAWS` is empty: there are no open
+laws. [laws.md](laws.md) gives each proof strategy and [proofs.md](proofs.md) maps the helper
+modules under `proofs/`.
 
 ## The proof gate
 
@@ -41,8 +44,8 @@ the same script locally, so a green run means the same thing in both places:
 scripts/check-proofs.sh
 ```
 
-The script fails unless `LAWS.bend` and `PROOF.bend` exist, then checks the lists before running
-`bend`:
+The script fails unless `LAWS.bend`, `PROOF.bend` and `PENDING_LAWS` exist, then checks the lists
+before running `bend`:
 
 - It reads the law names from the `law <name>:` lines in `LAWS.bend` and the proved names from the
   `def Laws.<name>(` lines in `PROOF.bend`.
@@ -54,15 +57,17 @@ The script fails unless `LAWS.bend` and `PROOF.bend` exist, then checks the list
 `#` comments are ignored.
 
 When `PENDING_LAWS` is empty, the gate requires `bend PROOF.bend` to exit 0 with `ALL PROOFS CHECK`,
-then runs `bend PROOF.bend --verdict` and requires the same. The verdict kernel checks the laws
-against Lean, and it needs every proof to be present.
+then runs `bend PROOF.bend --verdict` and requires the same. That is the current state: all eight
+laws are proved. The verdict kernel checks the laws against Lean, and it needs every proof to be
+present.
 
 While `PENDING_LAWS` is non-empty, the gate requires `bend PROOF.bend` to exit 1 with
 `SOME PROOFS FAIL` and exactly one error, `Error: N TODOs found.`, where `N` is the number of
 pending laws. Any other error output fails the gate: pending means "not attempted", not "broken".
 A type error in a proof therefore fails the gate even though some laws are allowed to be open. The
 script prints the pending laws, notes that `--verdict` was skipped, and ends with a one-line summary
-of the proved and pending counts.
+of the proved and pending counts. The gate currently prints
+`check-proofs: 8 of 8 law(s) proved, 0 pending`.
 
 ## PENDING_LAWS
 
@@ -72,8 +77,8 @@ gate. It is not a place for broken proofs.
 - Adding a law to `PENDING_LAWS` needs an explicit explanation in the pull request description:
   which law, why it cannot be proved yet, and what will make it provable.
 - The list should only shrink over time. Remove a name in the same pull request that adds its proof.
-- The target is an empty list. When it is empty, the gate also runs the Lean verdict kernel and
-  every law must be proved with no error output.
+- The target is an empty list, and the list is empty now: every law is proved. When it is empty, the
+  gate runs the Lean verdict kernel as well and every law must be proved with no error output.
 
 To type-check the law statements alone, without proving them, run `bend LAWS.bend --check-only`;
 open laws appear there as TODOs.
@@ -88,7 +93,8 @@ deliberately thin: reading arguments and files, mapping letters, and printing.
 
 A benchmark measures how long the solver takes on fixed inputs. It answers "how fast", not "is it
 right". A faster solver that returns a wrong tree is a regression, not a performance win. A correct
-solver that is slow is still correct. The benchmark harness is not in this tree yet.
+solver that is slow is still correct. The benchmark harness is in `bench/`; the protocol is in
+[benchmarking.md](benchmarking.md) and the current baseline is in [performance.md](performance.md).
 
 ## Current checks in CI
 

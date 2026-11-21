@@ -2,58 +2,86 @@
 
 An exact, formally verified solver for Wordle-style games.
 
-Given a guesses list and a candidates list, the solver is intended to produce
-the decision tree (the policy) of an optimal guessing strategy, minimising the
-total number of guesses over all candidates. The game is treated generically:
-any words, any length, any alphabet. Both lists are inputs, so the solver is
+Given a guesses list and a candidates list, the solver produces the decision tree (the policy) of an
+optimal guessing strategy, minimising the total number of guesses over all candidates. The game is
+treated generically: any words, any length, any alphabet. Both lists are inputs, so the solver is
 not tied to the five-letter English game.
 
 Two properties distinguish this solver from a heuristic one:
 
-- **Exact.** The tree it returns is optimal, not merely good. Optimality is
-  over the stated objective: the sum of the number of guesses needed for every
-  candidate.
-- **Formally verified.** The solver carries machine-checked proofs, called
-  laws, that the returned tree is valid and optimal for every input. The
-  guarantee is part of the artifact, not a claim checked by a handful of
-  examples.
+- **Exact.** The tree it returns is optimal, not merely good. Optimality is over the stated
+  objective: the sum of the number of guesses needed for every candidate.
+- **Formally verified.** The solver carries machine-checked proofs, called laws, that the returned
+  tree is valid and optimal for every input. The guarantee is part of the artifact, not a claim
+  checked by a handful of examples.
 
-The solver is written in [Bend](https://github.com/HigherOrderCO/Bend) for HVM,
-a runtime built for massive parallelism across GPUs and CPUs. The earlier solver
-for this problem was written in Rust and was unverified. This project succeeds
-it with the same goal of practical wall-clock speed, plus a correctness
-guarantee that the earlier work could not give.
+The solver is written in [Bend](https://github.com/HigherOrderCO/Bend) for HVM, a runtime built for
+massive parallelism across GPUs and CPUs. The earlier solver for this problem was written in Rust
+and was unverified. This project succeeds it with the same goal of practical wall-clock speed, plus
+a correctness guarantee that the earlier work could not give.
 
 ## Status
 
-**Core code and laws, in progress.** The feedback function, the tree structure,
-the validity and cost definitions, the JSON printer, the command-line entry
-point, and the bundled word lists are present. Laws 1 to 3 and 6 are proved.
-Laws 4 and 5 are stated and still open, because the solver itself is a
-placeholder that returns `None`; Phase 4 replaces it with the search.
+**Exact and verified; performance work remains.** All eight laws in `LAWS.bend` are proved in
+`PROOF.bend` and the modules under `proofs/`, and `PENDING_LAWS` is empty. The solver in
+`src/solve.bend` is the exact, exhaustive reference solver: it is verified correct for every input,
+including optimality, but it is not fast. Its search is exponential and takes a few seconds at 10
+candidates, so the full bundled lists are not practical yet. The command-line interface is
+documented in [docs/cli.md](docs/cli.md), the bundled word lists are in `words/`, and the benchmark
+harness is in `bench/`. [docs/performance.md](docs/performance.md) records the current performance
+status and the plan for speeding the solver up.
 
-`Json.print` writes a tree as one JSON array, and `Json.parse` reads exactly
-that grammar back, so the roundtrip law is proved.
+## Quick start
+
+Install Bend 2.0.40 and clang 19 or newer, then from the repository root:
+
+```sh
+# requires Bend 2.0.40 and clang 19+
+bend src/main.bend -o wordle-bend
+head -n 10 words/candidates.txt > my-words.txt
+./wordle-bend --guesses my-words.txt --candidates my-words.txt
+printf 'abc\nabd\n' > my-words.txt
+./wordle-bend --guesses my-words.txt --candidates my-words.txt
+```
+
+The first run uses a small sample of the bundled lists. The second uses a two-word list of your own,
+as both the guesses and the candidates, and prints
+`[[97,98,99],[[[2,2,0],[[97,98,100],[]]]]]`, the tree for `abc` and `abd`. The reference solver is
+exponential, so keep both lists small until the faster search lands.
+
+## Where the proofs are
+
+`LAWS.bend` states the eight laws. `PROOF.bend` defines `def Laws.<name>` for each one and imports
+the helper lemmas in `proofs/`. `scripts/check-proofs.sh` is the gate that CI runs, and
+[docs/proofs.md](docs/proofs.md) maps every proof file and explains how to run the checks locally.
+[docs/laws.md](docs/laws.md) gives each law and its proof strategy in plain English.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
-| `LAWS.bend` | The six laws, each an open claim until `PROOF.bend` proves it. |
-| `PROOF.bend` | The proofs, plus the helper lemmas they use. |
-| `src/` | The Bend code: feedback, tree, solver placeholder, JSON, CLI. |
+| `LAWS.bend` | The eight laws the solver must satisfy. |
+| `PROOF.bend` | The proofs of the laws, one `def Laws.<name>` each. |
+| `proofs/` | Helper lemmas used by the proofs, grouped by purpose. |
+| `PENDING_LAWS` | Laws allowed to be open. Currently empty. |
+| `src/` | The Bend code: feedback, groups, tree, reference solver, JSON, CLI. |
 | `words/` | The bundled candidate and guess lists. |
+| `bench/` | The benchmark harness. |
+| `scripts/` | `check-proofs.sh`, the proof gate. |
 | `docs/` | Detailed documentation, one file per concern. Start here after this README. |
 
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) — the components and how data flows between them.
 - [docs/cli.md](docs/cli.md) — the command line: flags, input and output formats, exit codes, examples.
-- [docs/laws.md](docs/laws.md) — each law in plain English, with its Bend definition and status.
-- [docs/contributing.md](docs/contributing.md) — branch names, commit format, pull request workflow,
-  and repository hygiene rules.
+- [docs/laws.md](docs/laws.md) — each law in plain English, with its Bend definition and proof strategy.
+- [docs/proofs.md](docs/proofs.md) — what each file under `proofs/` proves, the gate, and the local checks.
+- [docs/performance.md](docs/performance.md) — current speed, the smoke baseline, and the optimisation plan.
 - [docs/testing.md](docs/testing.md) — why correctness is established by laws and proofs rather than
   example tests, and how benchmarks differ from tests.
+- [docs/benchmarking.md](docs/benchmarking.md) — the benchmark protocol, the CSV format, and how to run a benchmark.
+- [docs/contributing.md](docs/contributing.md) — branch names, commit format, pull request workflow,
+  and repository hygiene rules.
 - [docs/licenses.md](docs/licenses.md) — the MIT licence for the code, and the provenance of the
   bundled word lists.
 

@@ -2,13 +2,14 @@
 
 The benchmark harness measures how long the solver takes on fixed inputs and records the numbers in
 a CSV so that runs are comparable across commits, machines and hardware classes. It answers "how
-fast", never "is it right": correctness is established by the laws in `laws/`, as
-[testing.md](testing.md) explains. A faster run that prints a different tree is a regression, not a
-win.
+fast", never "is it right": correctness is established by the laws in `LAWS.bend`, `PROOF.bend` and
+`proofs/`, as [testing.md](testing.md) explains. A faster run that prints a different tree is a
+regression, not a win.
 
-The harness is present but the solver and the bundled word lists are not yet in the tree. Until
-they are, a run needs either a real `src/main.bend` plus `words/candidates.txt` and
-`words/guesses.txt`, or a prebuilt solver supplied through `BENCH_BINARY`.
+The harness is in `bench/`, the solver is in `src/`, and the bundled lists are in `words/`. The
+reference solver is exact but exponential, so benchmark sizes must stay small until the faster
+search lands. [performance.md](performance.md) records the current status and the optimisation
+plan.
 
 ## What is measured
 
@@ -93,9 +94,9 @@ Options:
 The harness refuses to start when `git status --porcelain` is non-empty unless `--allow-dirty` is
 given. It records the short commit hash from `git rev-parse --short HEAD`.
 
-`BENCH_BINARY` skips the build and runs the given executable. It exists so the harness itself can
-be tested without a solver, and so a prebuilt solver can be timed; the binary must accept the same
-`--guesses` and `--candidates` arguments.
+`BENCH_BINARY` skips the build and runs the given executable. It exists so a prebuilt solver can be
+timed without rebuilding, and so the harness can be checked against a known executable; the binary
+must accept the same `--guesses` and `--candidates` arguments.
 
 `BENCH_COMMIT` supplies the commit hash when the tree has no `.git`, as in a remote run. The label is
 always supplied by the caller, never auto-detected: no hostname or machine name is recorded.
