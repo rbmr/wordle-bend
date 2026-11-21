@@ -368,3 +368,166 @@ def OC.node_tree_eq(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         Nil{}, 0n, inf)), lt, oks, {==}, e1, gin),
     ti => ad =>
       CBK.CBK.machine_cost(p, G, S, g, inf, kids, ad, kids_eq, costEq))
+
+# The node of a class fold, spelled with the folded child list.
+def OC.ks_tree_unfold(+g: +List<Nat>, ks: Eval.KS) ->
+  {Fold.OQ.ks_tree(g, ks)
+   == Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(ks), Nil{})} : Tree.Tree}:
+  match ks:
+    case Eval.KS{kids, sum}:
+      {==}
+
+# The candidate `Best` of one guess carries the cost of its tree, when finite.
+def OC.cand_cost_ok(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>,
+    cc: OC.CClass(p, inf, G, Groups.groups_build(g, S, Nil{})),
+    oks: SV.SV.Oks(p, G, inf, Groups.groups_build(g, S, Nil{})),
+    gin: Tree.WordIn(g, G)) ->
+  OC.CostOK(inf,
+    SolveRef.Best{
+      Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+        Nil{}, 0n, inf)),
+      Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))}, S):
+  e =>
+    +cs : +List<Nat> = Sat.SB.child_costs(p, G, Groups.groups_build(g, S, Nil{}), inf)
+    +eSat : {Nat.is_lt(SolveRef.sat_add(inf, Groups.len_words(S),
+               Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+                 Nil{}, 0n, inf))), inf) == True{} : Bool} =
+      CBN.CB.lt_eq_l(inf,
+        Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+        SolveRef.sat_add(inf, Groups.len_words(S),
+          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+            Nil{}, 0n, inf))),
+        Node.OQ.ks_cost_unfold(inf, S, Eval.Eval.items(p, G, S, g,
+          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), e)
+    +es : {Nat.is_lt(Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), inf) == True{} : Bool} =
+      Sat.SB.sat_add_lt_r(inf, Groups.len_words(S),
+        Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+          Nil{}, 0n, inf)), eSat)
+    +esL : {Nat.is_lt(OV.OV.sumL(inf, cs, 0n), inf) == True{} : Bool} =
+      CBN.CB.lt_eq_l(inf,
+        Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+          Nil{}, 0n, inf)),
+        OV.OV.sumL(inf, cs, 0n),
+        OV.OV.sum_fold(p, G, S, g, Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf),
+        es)
+    OC.use_pair(
+      {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+         Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
+       == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+      {Nat.is_lt(Nat.add(0n, CBN.CB.sum(cs)), inf) == True{} : Bool},
+      CBS.CU.AllLt(inf, cs)
+      & {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat}
+      & {Nat.is_lt(0n, inf) == True{} : Bool},
+      OC.plain_both(inf, cs, 0n, esL),
+      _tot => r =>
+        OC.use_pair(
+          {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
+           == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+          CBS.CU.AllLt(inf, cs),
+          {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat}
+          & {Nat.is_lt(0n, inf) == True{} : Bool},
+          r,
+          all => r2 =>
+            OC.use_pair(
+              {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+                 Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
+               == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                    Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat},
+              {OV.OV.sumL(inf, cs, 0n) == Nat.add(0n, CBN.CB.sum(cs)) : Nat},
+              {Nat.is_lt(0n, inf) == True{} : Bool},
+              r2,
+              plain => _zlt =>
+                +sum_eq : {Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))
+                           == CBN.CB.sum(cs) : Nat} =
+                  Equal.trans(Nat,
+                    Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                    OV.OV.sumL(inf, cs, 0n), CBN.CB.sum(cs),
+                    OV.OV.sum_fold(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+                      Nil{}, 0n, inf),
+                    Equal.trans(Nat, OV.OV.sumL(inf, cs, 0n),
+                      Nat.add(0n, CBN.CB.sum(cs)), CBN.CB.sum(cs), plain, {==}))
+                ceq : CBK.CBK.CostEqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf) =
+                  OC.cost_eqs(p, G, S, Groups.groups_build(g, S, Nil{}), inf, cc, all)
+                +teq : {Tree.cost(Tree.Node{g, SolveRef.rev_kids(
+                           CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+                             Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                           Nil{})}, S)
+                          == Nat.add(Groups.len_words(S), CBN.CB.sum(cs)) : Nat} =
+                  OC.node_tree_eq(p, G, S, g, inf, oks, gin, ceq, eSat)
+                +fin : {SolveRef.sat_add(inf, Groups.len_words(S),
+                          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
+                        == Tree.cost(Tree.Node{g, SolveRef.rev_kids(
+                             CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+                               Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                             Nil{})}, S) : Nat} =
+                  CBS.CU.finish_cost(inf, S, g,
+                    SolveRef.rev_kids(CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), Nil{}),
+                    cs,
+                    Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                    eSat, sum_eq, teq)
+                +e1 : {Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+                          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S)
+                       == Tree.cost(Tree.Node{g, SolveRef.rev_kids(
+                            CH.CH.kids_of(Eval.Eval.items(p, G, S, g,
+                              Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                            Nil{})}, S) : Nat} =
+                  Equal.cong(Tree.Tree, Nat, t => Tree.cost(t, S),
+                    Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                    Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
+                      Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+                        Nil{}, 0n, inf)), Nil{})},
+                    OC.ks_tree_unfold(g, Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
+                +e2 : {SolveRef.sat_add(inf, Groups.len_words(S),
+                          Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
+                       == Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                            Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)) : Nat} =
+                  Equal.sym(Nat,
+                    Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                    SolveRef.sat_add(inf, Groups.len_words(S),
+                      Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))),
+                    Node.OQ.ks_cost_unfold(inf, S, Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)))
+                Equal.trans(Nat,
+                  Tree.cost(Fold.OQ.ks_tree(g, Eval.Eval.items(p, G, S, g,
+                    Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)), S),
+                  Tree.cost(Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
+                    Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+                      Nil{}, 0n, inf)), Nil{})}, S),
+                  Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                    Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                  e1,
+                  Equal.trans(Nat,
+                    Tree.cost(Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
+                      Eval.Eval.items(p, G, S, g, Groups.groups_build(g, S, Nil{}),
+                        Nil{}, 0n, inf)), Nil{})}, S),
+                    SolveRef.sat_add(inf, Groups.len_words(S),
+                      Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                        Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))),
+                    Fold.OQ.ks_cost(inf, S, Eval.Eval.items(p, G, S, g,
+                      Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                    Equal.sym(Nat,
+                      SolveRef.sat_add(inf, Groups.len_words(S),
+                        Sat.SB.ks_sum(Eval.Eval.items(p, G, S, g,
+                          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf))),
+                      Tree.cost(Tree.Node{g, SolveRef.rev_kids(CH.CH.kids_of(
+                        Eval.Eval.items(p, G, S, g,
+                          Groups.groups_build(g, S, Nil{}), Nil{}, 0n, inf)),
+                        Nil{})}, S), fin),
+                    e2)))))
