@@ -107,8 +107,21 @@ law solve_valid:
   Tree.Valid(T, G, C)
 ```
 
-Open. The placeholder solver always returns `None`, so the premise is never
-inhabited in a run, but the law is not proved.
+Proved in `proofs/mainvalid.bend`. `solve` runs the fused search `step` at fuel
+`length(C)`. The proof is an induction on that fuel, not on the input: too
+little fuel only ever turns a class into infinity, and a cost of infinity is
+the vacuous case of the invariant ("the cost is at least infinity, or it is
+finite and the tree is valid"). At fuel `1+p` one guess is evaluated by the
+specification fold `Eval.guess` at fuel `p`, whose classes are strictly shorter
+than the candidate list, so the length bound `length(S) <= fuel` hands each
+class its own obligation at the smaller fuel. A single recursive call returns
+the conjunction of all of them together with the bounds of the next level, so
+each class reads its result without using an induction hypothesis twice.
+`proofs/solvevalid.bend` supplies the node step: a finite guess cost is finite
+per child, each child is valid by the invariant, and every candidate gets its
+depth from the feedback class it belongs to. Finally `solve` returns `Some T`
+only when the stored cost is below infinity, where the invariant gives
+validity.
 
 ## 5. solve_optimal
 

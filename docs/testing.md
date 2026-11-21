@@ -25,12 +25,12 @@ rather than a claim about a run.
 | `feedback_all_green_when_equal` | proved |
 | `feedback_all_green_only_if_equal` | proved |
 | `feedback_length` | proved |
-| `solve_valid` | pending: the solver is a placeholder |
-| `solve_optimal` | pending: the solver is a placeholder |
+| `solve_valid` | proved |
+| `solve_optimal` | pending: the optimality proof is open |
 | `tree_roundtrip` | proved |
 
-The three proved laws have a `def Laws.<name>` in `PROOF.bend`. The other three are listed in
-`PENDING_LAWS`, which allows them to stay open until their implementation exists.
+Every proved law has a `def Laws.<name>` in `PROOF.bend`. The open ones are listed in
+`PENDING_LAWS`.
 
 ## The proof gate
 

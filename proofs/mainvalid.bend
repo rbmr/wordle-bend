@@ -476,3 +476,78 @@ def MV.main_ok(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
   MV.use_pair(MV.Job(fuel, inf, G, S), MV.Job(fuel, inf, G, S), Unit,
     MV.flat(fuel, inf, G, S <> Nil{}, Tuple{le, Unit{}}),
     j => u => j)
+
+# The tree inside a `Maybe`, with a dummy for `None`.
+def MV.from_some(m: Maybe<Tree.Tree>, d: Tree.Tree) -> Tree.Tree:
+  match m:
+    case None{}:
+      d
+    case Some{t}:
+      t
+
+# `None` is not `Some`.
+def MV.maybe_disc(-A: Type, m: Maybe<A>) -> Type:
+  match m:
+    case None{}:
+      Unit
+    case Some{a}:
+      Empty
+
+def MV.none_ne_some(-A: Type, T: A, e: {None{} == Some{T} : Maybe<A>}) -> Empty:
+  %e : MV.maybe_disc(A, _)
+  Unit{}
+
+# A `Maybe` result of the search is a valid tree.
+def MV.maybe_ok_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +tree: Tree.Tree, +cost: Nat, T: Tree.Tree, b: Bool,
+    +eb: {b == Nat.is_ge(cost, SolveRef.inf_of(Groups.len_words(C))) : Bool},
+    ok: BO.BO.BestOK(SolveRef.inf_of(Groups.len_words(C)),
+      SolveRef.Best{tree, cost}, G, C),
+    e: {Feedback.Bool.case(Maybe<Tree.Tree>, b, None{}, Some{tree}) == Some{T}
+        : Maybe<Tree.Tree>}) -> Tree.Valid(T, G, C):
+  match b:
+    case True{}:
+      Empty.absurd(Tree.Valid(T, G, C), MV.none_ne_some(Tree.Tree, T, e))
+    case False{}:
+      match ok:
+        case Inl{ge}:
+          Empty.absurd(Tree.Valid(T, G, C),
+            SV.SV.lt_ge_absurd(cost, SolveRef.inf_of(Groups.len_words(C)),
+              Sat.SB.lt_of_ge_false(cost, SolveRef.inf_of(Groups.len_words(C)),
+                Equal.sym(Bool, False{},
+                  Nat.is_ge(cost, SolveRef.inf_of(Groups.len_words(C))), eb)),
+              ge))
+        case Inr{p}:
+          (lt, v) = p
+          +et : {tree == T : Tree.Tree} =
+            Equal.cong(Maybe<Tree.Tree>, Tree.Tree,
+              m => MV.from_some(m, Tree.Node{Nil{}, Nil{}}), Some{tree}, Some{T}, e)
+          %et : Tree.Valid(_, G, C)
+          v
+
+def MV.maybe_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    best: SolveRef.Best, T: Tree.Tree,
+    ok: BO.BO.BestOK(SolveRef.inf_of(Groups.len_words(C)), best, G, C),
+    e: {SolveRef.best_to_maybe(SolveRef.inf_of(Groups.len_words(C)), best) == Some{T}
+        : Maybe<Tree.Tree>}) -> Tree.Valid(T, G, C):
+  match best:
+    case SolveRef.Best{tree, +cost}:
+      MV.maybe_ok_go(G, C, tree, cost, T,
+        Nat.is_ge(cost, SolveRef.inf_of(Groups.len_words(C))), {==}, ok, e)
+
+# The search the solver runs on its input.
+def MV.solve_best(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) -> SolveRef.Best:
+  SolveRef.step(Groups.len_words(C), SolveRef.mk_schedule(G, C), G, C,
+    SolveRef.inf_of(Groups.len_words(C)), Nil{}, Nil{}, 0n,
+    Eval.Eval.dummy_inf(SolveRef.inf_of(Groups.len_words(C))), Eval.Eval.dummy_zero())
+
+# That search keeps the invariant.
+def MV.solve_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
+  BO.BO.BestOK(SolveRef.inf_of(Groups.len_words(C)), MV.solve_best(G, C), G, C):
+  MV.main_ok(Groups.len_words(C), SolveRef.inf_of(Groups.len_words(C)), G, C,
+    NatProof.Nat.is_le_refl(Groups.len_words(C)))
+
+# The law, at the solver's own entry point.
+def MV.solve_valid(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, T: Tree.Tree,
+    e: {SolveRef.solve(G, C) == Some{T} : Maybe<Tree.Tree>}) -> Tree.Valid(T, G, C):
+  MV.maybe_ok(G, C, MV.solve_best(G, C), T, MV.solve_ok(G, C), e)
