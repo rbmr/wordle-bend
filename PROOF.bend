@@ -23,6 +23,7 @@ import ./proofs/solvevalid.bend as SVProof
 import ./proofs/mainvalid.bend as MVProof
 import ./proofs/optimalvalue.bend as OVProof
 import ./proofs/classbound.bend as CBProof
+import ./proofs/classbound_kids.bend as CBKids
 
 def Bool.disc(b: Bool) -> Type:
   match b:
