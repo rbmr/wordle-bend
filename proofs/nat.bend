@@ -162,7 +162,22 @@ def Nat.is_le_of_lt_succ(a: Nat, b: Nat,
     case 1n+ap 1n+bp:
       Nat.is_le_of_lt_succ(ap, bp, e)
 
-# 4. `a <= 0` forces `a = 0`.
+# 4. If `a <= b` fails then `b <= a` holds.
+def NatPrf.is_le_swap_of_false(a: Nat, b: Nat,
+    e: {Nat.is_le(a, b) == False{} : Bool}) ->
+  {Nat.is_le(b, a) == True{} : Bool}:
+  match a b:
+    case 0n _:
+      Empty.absurd({Nat.is_le(b, 0n) == True{} : Bool},
+        Logic.Proof.true_ne_false(
+          Equal.trans(Bool, True{}, Nat.is_le(0n, b), False{},
+            Equal.sym(Bool, Nat.is_le(0n, b), True{}, Nat.is_le_zero_l(b)), e)))
+    case 1n+ap 0n:
+      {==}
+    case 1n+ap 1n+bp:
+      NatPrf.is_le_swap_of_false(ap, bp, e)
+
+# 4b. `a <= 0` forces `a = 0`.
 def Nat.eq_zero_of_le_zero(a: Nat,
     e: {Nat.is_le(a, 0n) == True{} : Bool}) -> {a == 0n : Nat}:
   match a:

@@ -1,6 +1,11 @@
 # The proof-carrying result of the verified solver.
 import Base
 import ../src/tree.bend as Tree
+import ./eval.bend as Eval
+import ./groupsdistinct.bend as GroupsDistinct
+import ./children.bend as Children
+import ./sat.bend as Sat
+import ./bestok.bend as BestOK
 
 # Optimality: no valid tree for the same input costs less.
 def Optimal(T: Tree.Tree, G: +List<+List<Nat>>, S: +List<+List<Nat>>) -> Type:
