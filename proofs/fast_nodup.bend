@@ -615,6 +615,44 @@ def FN.keep_of_member(+g: +List<Nat>, +S: +List<+List<Nat>>,
       FN.keep_of_member_step(g, w, t, Feedback.word_eq(g, w), {==}, nd, mw,
         ndt => mwt => FN.keep_of_member(g, t, ndt, mwt))
 
+# `|S| <= 1 + keep_fast(g, S)` on any duplicate-free candidate list `S`.
+def FN.len_le_succ_keep_go(+g: +List<Nat>, +S: +List<+List<Nat>>,
+    +nd: {FN.no_dup_ref(S) == True{} : Bool},
+    b: Bool, +eb: {b == Tree.member_word(g, S) : Bool}) ->
+  {Nat.is_le(Groups.len_words(S), Nat.add(1n, SolveFast.keep_fast(g, S)))
+   == True{} : Bool}:
+  match b:
+    case True{}:
+      +mw : {Tree.member_word(g, S) == True{} : Bool} =
+        Equal.sym(Bool, True{}, Tree.member_word(g, S), eb)
+      +ek : {Nat.add(1n, SolveFast.keep_fast(g, S)) == Groups.len_words(S) : Nat} =
+        FN.keep_of_member(g, S, nd, mw)
+      NatProof.Nat.is_le_eq_r(Groups.len_words(S), Groups.len_words(S),
+        Nat.add(1n, SolveFast.keep_fast(g, S)),
+        Equal.sym(Nat, Nat.add(1n, SolveFast.keep_fast(g, S)),
+          Groups.len_words(S), ek),
+        NatProof.Nat.is_le_refl(Groups.len_words(S)))
+    case False{}:
+      +nm : {Tree.member_word(g, S) == False{} : Bool} =
+        Equal.sym(Bool, False{}, Tree.member_word(g, S), eb)
+      +ek : {SolveFast.keep_fast(g, S) == Groups.len_words(S) : Nat} =
+        FN.keep_of_not_member(g, S, nm)
+      NatProof.Nat.is_le_eq_r(Groups.len_words(S),
+        Nat.add(1n, Groups.len_words(S)),
+        Nat.add(1n, SolveFast.keep_fast(g, S)),
+        Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+          Groups.len_words(S), SolveFast.keep_fast(g, S),
+          Equal.sym(Nat, SolveFast.keep_fast(g, S), Groups.len_words(S), ek)),
+        NatProof.Nat.is_le_of_lt(Groups.len_words(S),
+          Nat.add(1n, Groups.len_words(S)),
+          NatProof.Nat.is_lt_succ_self(Groups.len_words(S))))
+
+def FN.len_le_succ_keep(+g: +List<Nat>, +S: +List<+List<Nat>>,
+    +nd: {FN.no_dup_ref(S) == True{} : Bool}) ->
+  {Nat.is_le(Groups.len_words(S), Nat.add(1n, SolveFast.keep_fast(g, S)))
+   == True{} : Bool}:
+  FN.len_le_succ_keep_go(g, S, nd, Tree.member_word(g, S), {==})
+
 # `pre_lb(|S|, g, S) == 2 * |S|` when `g` is not in `S`.
 def FN.pre_lb_of_not_member(+g: +List<Nat>, +S: +List<+List<Nat>>,
     +nm: {Tree.member_word(g, S) == False{} : Bool}) ->
@@ -1328,41 +1366,166 @@ def FN.fgroups_lb_eq(+nodup: Bool, +n: Nat, +fgroups: +List<SolveFast.FGroup>,
           Nat.add(n, SolveFast.class_words(groups)),
           FLB.FS.lower_bound_eq(n, groups)))
 
-# `rev_words(wt2, [w2, w])` has at least two elements, so `group_items` takes
-# the `ClassItem` + `Add` branch.
-def FN.group_items_ge2_eq(+n: Nat, +f: +List<Feedback.Color>,
+# `rev_words(wt3, [w3, w2, w])` has at least three elements, so `group_items`
+# takes the `ClassItem` + `Add` branch.
+def FN.group_items_ge3_eq(+nodup: Bool, +n: Nat, +f: +List<Feedback.Color>,
     +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>,
-    +k: Nat, +ek: {Groups.len_words(ws) == Nat.add(2n, k) : Nat}) ->
-  {SolveFast.group_items(n, Groups.Group{f, ws} <> rest)
+    +k: Nat, +ek: {Groups.len_words(ws) == Nat.add(3n, k) : Nat}) ->
+  {SolveFast.group_items(nodup, n, Groups.Group{f, ws} <> rest)
    == SolveFast.ClassItem{f, ws, Groups.len_words(ws),
         SolveFast.lower_bound(n, rest)}
       <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
-          <> SolveFast.group_items(n, rest))
+          <> SolveFast.group_items(nodup, n, rest))
    : +List<SolveFast.Item>}:
   match ws:
     case Nil{}:
       Empty.absurd(
-        {SolveFast.group_items(n, Groups.Group{f, Nil{}} <> rest)
+        {SolveFast.group_items(nodup, n, Groups.Group{f, Nil{}} <> rest)
          == SolveFast.ClassItem{f, Nil{}, 0n, SolveFast.lower_bound(n, rest)}
             <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
-                <> SolveFast.group_items(n, rest))
+                <> SolveFast.group_items(nodup, n, rest))
          : +List<SolveFast.Item>},
-        NatProof.NatPrf.zero_ne_succ(Nat.add(1n, k), ek))
+        NatProof.NatPrf.zero_ne_succ(Nat.add(2n, k), ek))
     case Con{+w, +wt}:
       match wt:
         case Nil{}:
-          +e0 : {0n == Nat.add(1n, k) : Nat} =
-            NatProof.NatPrf.pred_succ(0n, Nat.add(1n, k), ek)
+          +e0 : {0n == Nat.add(2n, k) : Nat} =
+            NatProof.NatPrf.pred_succ(0n, Nat.add(2n, k), ek)
           Empty.absurd(
-            {SolveFast.group_items(n, Groups.Group{f, w <> Nil{}} <> rest)
+            {SolveFast.group_items(nodup, n, Groups.Group{f, w <> Nil{}} <> rest)
              == SolveFast.ClassItem{f, w <> Nil{}, 1n,
                   SolveFast.lower_bound(n, rest)}
                 <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
-                    <> SolveFast.group_items(n, rest))
+                    <> SolveFast.group_items(nodup, n, rest))
              : +List<SolveFast.Item>},
-            NatProof.NatPrf.zero_ne_succ(k, e0))
+            NatProof.NatPrf.zero_ne_succ(Nat.add(1n, k), e0))
         case Con{+w2, +wt2}:
-          {==}
+          match wt2:
+            case Nil{}:
+              +e0 : {1n == Nat.add(2n, k) : Nat} =
+                NatProof.NatPrf.pred_succ(1n, Nat.add(2n, k), ek)
+              +e1 : {0n == Nat.add(1n, k) : Nat} =
+                NatProof.NatPrf.pred_succ(0n, Nat.add(1n, k), e0)
+              +ws2 : +List<+List<Nat>> = w <> (w2 <> Nil{})
+              Empty.absurd(
+                {SolveFast.group_items(nodup, n, Groups.Group{f, ws2} <> rest)
+                 == SolveFast.ClassItem{f, ws2, 2n,
+                      SolveFast.lower_bound(n, rest)}
+                    <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
+                        <> SolveFast.group_items(nodup, n, rest))
+                 : +List<SolveFast.Item>},
+                NatProof.NatPrf.zero_ne_succ(k, e1))
+            case Con{+w3, +wt3}:
+              {==}
+
+def FN.fgroup_items_two_eq(nodup: Bool, +n: Nat, +f: +List<Feedback.Color>,
+    +len: Nat, +w: +List<Nat>, +w2: +List<Nat>, +rg: +List<Groups.Group>,
+    +tail: +List<SolveFast.Item>,
+    +ib: SolveFast.ItemsBound,
+    +eib: {ib == SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                   List.append(&2, SolveFast.Item,
+                     SolveFast.group_items(nodup, n, rg), tail)}
+           : SolveFast.ItemsBound},
+    +elen: {len == 2n : Nat},
+    +nh: {FN.nodup_ok(nodup, w2 <> (w <> Nil{})) == True{} : Bool}) ->
+  {SolveFast.fgroup_items_two(nodup, f, len, w, w2, ib)
+   == SolveFast.ItemsBound{
+        SolveFast.lower_bound(n,
+          Groups.Group{f, w2 <> (w <> Nil{})} <> rg),
+        List.append(&2, SolveFast.Item,
+          SolveFast.group_items(nodup, n,
+            Groups.Group{f, w2 <> (w <> Nil{})} <> rg), tail)}
+   : SolveFast.ItemsBound}:
+  match nodup:
+    case True{}:
+      +ws2 : +List<+List<Nat>> = w2 <> (w <> Nil{})
+      +eclb : {3n == SolveFast.class_lb(ws2) : Nat} =
+        FN.class_lb_nodup_eq(ws2, nh)
+      +e1 : {SolveFast.group_items_two_step(f, w2, w, ib)
+             == SolveFast.ItemsBound{
+                  Nat.add(3n, SolveFast.lower_bound(n, rg)),
+                  SolveFast.TwoItem{f, w2, w}
+                  <> List.append(&2, SolveFast.Item,
+                       SolveFast.group_items(True{}, n, rg), tail)}
+             : SolveFast.ItemsBound} =
+        Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+          x => SolveFast.group_items_two_step(f, w2, w, x),
+          ib,
+          SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+            List.append(&2, SolveFast.Item,
+              SolveFast.group_items(True{}, n, rg), tail)},
+          eib)
+      +e2 : {SolveFast.ItemsBound{
+               Nat.add(3n, SolveFast.lower_bound(n, rg)),
+               SolveFast.TwoItem{f, w2, w}
+               <> List.append(&2, SolveFast.Item,
+                    SolveFast.group_items(True{}, n, rg), tail)}
+             == SolveFast.ItemsBound{
+                  Nat.add(SolveFast.class_lb(ws2), SolveFast.lower_bound(n, rg)),
+                  SolveFast.TwoItem{f, w2, w}
+                  <> List.append(&2, SolveFast.Item,
+                       SolveFast.group_items(True{}, n, rg), tail)}
+             : SolveFast.ItemsBound} =
+        Equal.cong(Nat, SolveFast.ItemsBound,
+          c => SolveFast.ItemsBound{
+                 Nat.add(c, SolveFast.lower_bound(n, rg)),
+                 SolveFast.TwoItem{f, w2, w}
+                 <> List.append(&2, SolveFast.Item,
+                      SolveFast.group_items(True{}, n, rg), tail)},
+          3n, SolveFast.class_lb(ws2), eclb)
+      Equal.trans(SolveFast.ItemsBound,
+        SolveFast.group_items_two_step(f, w2, w, ib),
+        SolveFast.ItemsBound{
+          Nat.add(3n, SolveFast.lower_bound(n, rg)),
+          SolveFast.TwoItem{f, w2, w}
+          <> List.append(&2, SolveFast.Item,
+               SolveFast.group_items(True{}, n, rg), tail)},
+        SolveFast.ItemsBound{
+          SolveFast.lower_bound(n, Groups.Group{f, ws2} <> rg),
+          List.append(&2, SolveFast.Item,
+            SolveFast.group_items(True{}, n, Groups.Group{f, ws2} <> rg), tail)},
+        e1, e2)
+    case False{}:
+      +ws2 : +List<+List<Nat>> = w2 <> (w <> Nil{})
+      +e1 : {SolveFast.group_items_step(f, ws2, len, SolveFast.class_lb(ws2), ib)
+             == SolveFast.group_items_step(f, ws2, len, SolveFast.class_lb(ws2),
+                  SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                    List.append(&2, SolveFast.Item,
+                      SolveFast.group_items(False{}, n, rg), tail)})
+             : SolveFast.ItemsBound} =
+        Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+          x => SolveFast.group_items_step(f, ws2, len, SolveFast.class_lb(ws2), x),
+          ib,
+          SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+            List.append(&2, SolveFast.Item,
+              SolveFast.group_items(False{}, n, rg), tail)},
+          eib)
+      +e2 : {SolveFast.group_items_step(f, ws2, len, SolveFast.class_lb(ws2),
+               SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                 List.append(&2, SolveFast.Item,
+                   SolveFast.group_items(False{}, n, rg), tail)})
+             == SolveFast.group_items_step(f, ws2, 2n, SolveFast.class_lb(ws2),
+                  SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                    List.append(&2, SolveFast.Item,
+                      SolveFast.group_items(False{}, n, rg), tail)})
+             : SolveFast.ItemsBound} =
+        Equal.cong(Nat, SolveFast.ItemsBound,
+          l => SolveFast.group_items_step(f, ws2, l, SolveFast.class_lb(ws2),
+                 SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                   List.append(&2, SolveFast.Item,
+                     SolveFast.group_items(False{}, n, rg), tail)}),
+          len, 2n, elen)
+      Equal.trans(SolveFast.ItemsBound,
+        SolveFast.group_items_step(f, ws2, len, SolveFast.class_lb(ws2), ib),
+        SolveFast.group_items_step(f, ws2, len, SolveFast.class_lb(ws2),
+          SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+            List.append(&2, SolveFast.Item,
+              SolveFast.group_items(False{}, n, rg), tail)}),
+        SolveFast.group_items_step(f, ws2, 2n, SolveFast.class_lb(ws2),
+          SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+            List.append(&2, SolveFast.Item,
+              SolveFast.group_items(False{}, n, rg), tail)}),
+        e1, e2)
 
 # `fgroup_items_build` matches `lower_bound` and `group_items` on
 # `fgroups_to_groups`.
@@ -1375,7 +1538,7 @@ def FN.fgroup_items_build_eq(+nodup: Bool, +n: Nat,
    == SolveFast.ItemsBound{
         SolveFast.lower_bound(n, FN.fgroups_to_groups(fgroups)),
         List.append(&2, SolveFast.Item,
-          SolveFast.group_items(n, FN.fgroups_to_groups(fgroups)), tail)}
+          SolveFast.group_items(nodup, n, FN.fgroups_to_groups(fgroups)), tail)}
    : SolveFast.ItemsBound}:
   match fgroups:
     case Nil{}:
@@ -1400,7 +1563,7 @@ def FN.fgroup_items_build_eq(+nodup: Bool, +n: Nat,
                 SolveFast.fgroup_items_build(nodup, n, rest, tail),
                 SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
                   List.append(&2, SolveFast.Item,
-                    SolveFast.group_items(n, rg), tail)},
+                    SolveFast.group_items(nodup, n, rg), tail)},
                 FN.fgroup_items_build_eq(nodup, n, rest, tail, lt, nt))
             case Con{+w, +wt}:
               match wt:
@@ -1420,176 +1583,208 @@ def FN.fgroup_items_build_eq(+nodup: Bool, +n: Nat,
                     SolveFast.fgroup_items_build(nodup, n, rest, tail),
                     SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
                       List.append(&2, SolveFast.Item,
-                        SolveFast.group_items(n, rg), tail)},
+                        SolveFast.group_items(nodup, n, rg), tail)},
                     FN.fgroup_items_build_eq(nodup, n, rest, tail, lt, nt))
                 case Con{+w2, +wt2}:
-                  +rws2 : +List<+List<Nat>> = w <> (w2 <> wt2)
-                  +ws2 : +List<+List<Nat>> =
-                    SolveFast.rev_words(wt2, w2 <> (w <> Nil{}))
-                  +lh : {Nat.is_eq(len, Groups.len_words(rws2))
-                         == True{} : Bool} =
-                    Logic.Proof.and_true_l(
-                      Nat.is_eq(len, Groups.len_words(rws2)),
-                      FN.fgroups_lens_ok(rest), lok)
-                  +lt : {FN.fgroups_lens_ok(rest) == True{} : Bool} =
-                    Logic.Proof.and_true_r(
-                      Nat.is_eq(len, Groups.len_words(rws2)),
-                      FN.fgroups_lens_ok(rest), lok)
-                  +nh : {FN.nodup_ok(nodup, ws2) == True{} : Bool} =
-                    Logic.Proof.and_true_l(FN.nodup_ok(nodup, ws2),
-                      FN.nodup_ok_jobs(nodup,
-                        MV.MV.next_groups(FN.fgroups_to_groups(rest))), ng)
-                  +nt : {FN.nodup_ok_jobs(nodup,
-                           MV.MV.next_groups(FN.fgroups_to_groups(rest)))
-                         == True{} : Bool} =
-                    Logic.Proof.and_true_r(FN.nodup_ok(nodup, ws2),
-                      FN.nodup_ok_jobs(nodup,
-                        MV.MV.next_groups(FN.fgroups_to_groups(rest))), ng)
-                  +elen : {len == Groups.len_words(ws2) : Nat} =
-                    Equal.trans(Nat, len, Groups.len_words(rws2),
-                      Groups.len_words(ws2),
-                      NatProof.NatPrf.is_eq_true(len, Groups.len_words(rws2),
-                        lh),
-                      Equal.sym(Nat, Groups.len_words(ws2),
-                        Groups.len_words(rws2), FN.len_rev_nil(rws2)))
-                  +rg : +List<Groups.Group> = FN.fgroups_to_groups(rest)
-                  +ih : {SolveFast.fgroup_items_build(nodup, n, rest, tail)
-                         == SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                              List.append(&2, SolveFast.Item,
-                                SolveFast.group_items(n, rg), tail)}
-                         : SolveFast.ItemsBound} =
-                    FN.fgroup_items_build_eq(nodup, n, rest, tail, lt, nt)
-                  +eclb : {SolveFast.class_lb_fast(nodup, len, ws2)
-                           == SolveFast.class_lb(ws2) : Nat} =
-                    FN.class_lb_fast_eq(nodup, len, ws2, elen, nh)
-                  +e1 : {SolveFast.group_items_step(f, ws2, len,
-                           SolveFast.class_lb_fast(nodup, len, ws2),
-                           SolveFast.fgroup_items_build(nodup, n, rest, tail))
-                         == SolveFast.group_items_step(f, ws2, len,
-                              SolveFast.class_lb_fast(nodup, len, ws2),
-                              SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                                List.append(&2, SolveFast.Item,
-                                  SolveFast.group_items(n, rg), tail)})
-                         : SolveFast.ItemsBound} =
-                    Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
-                      ib => SolveFast.group_items_step(f, ws2, len,
-                              SolveFast.class_lb_fast(nodup, len, ws2), ib),
-                      SolveFast.fgroup_items_build(nodup, n, rest, tail),
-                      SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                        List.append(&2, SolveFast.Item,
-                          SolveFast.group_items(n, rg), tail)},
-                      ih)
-                  +e2 : {SolveFast.group_items_step(f, ws2, len,
-                           SolveFast.class_lb_fast(nodup, len, ws2),
-                           SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                             List.append(&2, SolveFast.Item,
-                               SolveFast.group_items(n, rg), tail)})
-                         == SolveFast.group_items_step(f, ws2,
-                              Groups.len_words(ws2), SolveFast.class_lb(ws2),
-                              SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                                List.append(&2, SolveFast.Item,
-                                  SolveFast.group_items(n, rg), tail)})
-                         : SolveFast.ItemsBound} =
-                    Equal.trans(SolveFast.ItemsBound,
-                      SolveFast.group_items_step(f, ws2, len,
-                        SolveFast.class_lb_fast(nodup, len, ws2),
-                        SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                          List.append(&2, SolveFast.Item,
-                            SolveFast.group_items(n, rg), tail)}),
-                      SolveFast.group_items_step(f, ws2, Groups.len_words(ws2),
-                        SolveFast.class_lb_fast(nodup, len, ws2),
-                        SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                          List.append(&2, SolveFast.Item,
-                            SolveFast.group_items(n, rg), tail)}),
-                      SolveFast.group_items_step(f, ws2, Groups.len_words(ws2),
-                        SolveFast.class_lb(ws2),
-                        SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                          List.append(&2, SolveFast.Item,
-                            SolveFast.group_items(n, rg), tail)}),
-                      Equal.cong(Nat, SolveFast.ItemsBound,
-                        l => SolveFast.group_items_step(f, ws2, l,
-                               SolveFast.class_lb_fast(nodup, len, ws2),
+                  match wt2:
+                    case Nil{}:
+                      +ws2 : +List<+List<Nat>> = w2 <> (w <> Nil{})
+                      +lh : {Nat.is_eq(len, 2n) == True{} : Bool} =
+                        Logic.Proof.and_true_l(Nat.is_eq(len, 2n),
+                          FN.fgroups_lens_ok(rest), lok)
+                      +lt : {FN.fgroups_lens_ok(rest) == True{} : Bool} =
+                        Logic.Proof.and_true_r(Nat.is_eq(len, 2n),
+                          FN.fgroups_lens_ok(rest), lok)
+                      +nh : {FN.nodup_ok(nodup, ws2) == True{} : Bool} =
+                        Logic.Proof.and_true_l(FN.nodup_ok(nodup, ws2),
+                          FN.nodup_ok_jobs(nodup,
+                            MV.MV.next_groups(FN.fgroups_to_groups(rest))), ng)
+                      +nt : {FN.nodup_ok_jobs(nodup,
+                               MV.MV.next_groups(FN.fgroups_to_groups(rest)))
+                             == True{} : Bool} =
+                        Logic.Proof.and_true_r(FN.nodup_ok(nodup, ws2),
+                          FN.nodup_ok_jobs(nodup,
+                            MV.MV.next_groups(FN.fgroups_to_groups(rest))), ng)
+                      +elen : {len == 2n : Nat} =
+                        NatProof.NatPrf.is_eq_true(len, 2n, lh)
+                      +rg : +List<Groups.Group> = FN.fgroups_to_groups(rest)
+                      +ih : {SolveFast.fgroup_items_build(nodup, n, rest, tail)
+                             == SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                  List.append(&2, SolveFast.Item,
+                                    SolveFast.group_items(nodup, n, rg), tail)}
+                             : SolveFast.ItemsBound} =
+                        FN.fgroup_items_build_eq(nodup, n, rest, tail, lt, nt)
+                      FN.fgroup_items_two_eq(nodup, n, f, len, w, w2, rg, tail,
+                        SolveFast.fgroup_items_build(nodup, n, rest, tail),
+                        ih, elen, nh)
+                    case Con{+w3, +wt3}:
+                      +rws3 : +List<+List<Nat>> = w <> (w2 <> (w3 <> wt3))
+                      +ws3 : +List<+List<Nat>> =
+                        SolveFast.rev_words(wt3, w3 <> (w2 <> (w <> Nil{})))
+                      +lh : {Nat.is_eq(len, Groups.len_words(rws3))
+                             == True{} : Bool} =
+                        Logic.Proof.and_true_l(
+                          Nat.is_eq(len, Groups.len_words(rws3)),
+                          FN.fgroups_lens_ok(rest), lok)
+                      +lt : {FN.fgroups_lens_ok(rest) == True{} : Bool} =
+                        Logic.Proof.and_true_r(
+                          Nat.is_eq(len, Groups.len_words(rws3)),
+                          FN.fgroups_lens_ok(rest), lok)
+                      +nh : {FN.nodup_ok(nodup, ws3) == True{} : Bool} =
+                        Logic.Proof.and_true_l(FN.nodup_ok(nodup, ws3),
+                          FN.nodup_ok_jobs(nodup,
+                            MV.MV.next_groups(FN.fgroups_to_groups(rest))), ng)
+                      +nt : {FN.nodup_ok_jobs(nodup,
+                               MV.MV.next_groups(FN.fgroups_to_groups(rest)))
+                             == True{} : Bool} =
+                        Logic.Proof.and_true_r(FN.nodup_ok(nodup, ws3),
+                          FN.nodup_ok_jobs(nodup,
+                            MV.MV.next_groups(FN.fgroups_to_groups(rest))), ng)
+                      +elen : {len == Groups.len_words(ws3) : Nat} =
+                        Equal.trans(Nat, len, Groups.len_words(rws3),
+                          Groups.len_words(ws3),
+                          NatProof.NatPrf.is_eq_true(len, Groups.len_words(rws3),
+                            lh),
+                          Equal.sym(Nat, Groups.len_words(ws3),
+                            Groups.len_words(rws3), FN.len_rev_nil(rws3)))
+                      +rg : +List<Groups.Group> = FN.fgroups_to_groups(rest)
+                      +ih : {SolveFast.fgroup_items_build(nodup, n, rest, tail)
+                             == SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                  List.append(&2, SolveFast.Item,
+                                    SolveFast.group_items(nodup, n, rg), tail)}
+                             : SolveFast.ItemsBound} =
+                        FN.fgroup_items_build_eq(nodup, n, rest, tail, lt, nt)
+                      +eclb : {SolveFast.class_lb_fast(nodup, len, ws3)
+                               == SolveFast.class_lb(ws3) : Nat} =
+                        FN.class_lb_fast_eq(nodup, len, ws3, elen, nh)
+                      +e1 : {SolveFast.group_items_step(f, ws3, len,
+                               SolveFast.class_lb_fast(nodup, len, ws3),
+                               SolveFast.fgroup_items_build(nodup, n, rest, tail))
+                             == SolveFast.group_items_step(f, ws3, len,
+                                  SolveFast.class_lb_fast(nodup, len, ws3),
+                                  SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                    List.append(&2, SolveFast.Item,
+                                      SolveFast.group_items(nodup, n, rg), tail)})
+                             : SolveFast.ItemsBound} =
+                        Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+                          ib => SolveFast.group_items_step(f, ws3, len,
+                                  SolveFast.class_lb_fast(nodup, len, ws3), ib),
+                          SolveFast.fgroup_items_build(nodup, n, rest, tail),
+                          SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                            List.append(&2, SolveFast.Item,
+                              SolveFast.group_items(nodup, n, rg), tail)},
+                          ih)
+                      +e2 : {SolveFast.group_items_step(f, ws3, len,
+                               SolveFast.class_lb_fast(nodup, len, ws3),
                                SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
                                  List.append(&2, SolveFast.Item,
-                                   SolveFast.group_items(n, rg), tail)}),
-                        len, Groups.len_words(ws2), elen),
-                      Equal.cong(Nat, SolveFast.ItemsBound,
-                        c => SolveFast.group_items_step(f, ws2,
-                               Groups.len_words(ws2), c,
-                               SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                                 List.append(&2, SolveFast.Item,
-                                   SolveFast.group_items(n, rg), tail)}),
-                        SolveFast.class_lb_fast(nodup, len, ws2),
-                        SolveFast.class_lb(ws2), eclb))
-                  +ek : {Groups.len_words(ws2)
-                         == Nat.add(2n, Groups.len_words(wt2)) : Nat} =
-                    FN.len_rev_nil(rws2)
-                  +egi : {SolveFast.group_items(n, Groups.Group{f, ws2} <> rg)
-                          == SolveFast.ClassItem{f, ws2, Groups.len_words(ws2),
-                               SolveFast.lower_bound(n, rg)}
-                             <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
-                                 <> SolveFast.group_items(n, rg))
-                          : +List<SolveFast.Item>} =
-                    FN.group_items_ge2_eq(n, f, ws2, rg, Groups.len_words(wt2),
-                      ek)
-                  +e3 : {SolveFast.ItemsBound{
-                           SolveFast.lower_bound(n, Groups.Group{f, ws2} <> rg),
-                           SolveFast.ClassItem{f, ws2, Groups.len_words(ws2),
-                             SolveFast.lower_bound(n, rg)}
-                           <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
-                               <> List.append(&2, SolveFast.Item,
-                                    SolveFast.group_items(n, rg), tail))}
-                         == SolveFast.ItemsBound{
-                              SolveFast.lower_bound(n,
-                                Groups.Group{f, ws2} <> rg),
+                                   SolveFast.group_items(nodup, n, rg), tail)})
+                             == SolveFast.group_items_step(f, ws3,
+                                  Groups.len_words(ws3), SolveFast.class_lb(ws3),
+                                  SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                    List.append(&2, SolveFast.Item,
+                                      SolveFast.group_items(nodup, n, rg), tail)})
+                             : SolveFast.ItemsBound} =
+                        Equal.trans(SolveFast.ItemsBound,
+                          SolveFast.group_items_step(f, ws3, len,
+                            SolveFast.class_lb_fast(nodup, len, ws3),
+                            SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
                               List.append(&2, SolveFast.Item,
-                                SolveFast.group_items(n,
-                                  Groups.Group{f, ws2} <> rg), tail)}
-                         : SolveFast.ItemsBound} =
-                    Equal.cong(+List<SolveFast.Item>, SolveFast.ItemsBound,
-                      its => SolveFast.ItemsBound{
-                               SolveFast.lower_bound(n,
-                                 Groups.Group{f, ws2} <> rg),
-                               List.append(&2, SolveFast.Item, its, tail)},
-                      SolveFast.ClassItem{f, ws2, Groups.len_words(ws2),
-                        SolveFast.lower_bound(n, rg)}
-                      <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
-                          <> SolveFast.group_items(n, rg)),
-                      SolveFast.group_items(n, Groups.Group{f, ws2} <> rg),
-                      Equal.sym(+List<SolveFast.Item>,
-                        SolveFast.group_items(n, Groups.Group{f, ws2} <> rg),
-                        SolveFast.ClassItem{f, ws2, Groups.len_words(ws2),
-                          SolveFast.lower_bound(n, rg)}
-                        <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
-                            <> SolveFast.group_items(n, rg)),
-                        egi))
-                  Equal.trans(SolveFast.ItemsBound,
-                    SolveFast.group_items_step(f, ws2, len,
-                      SolveFast.class_lb_fast(nodup, len, ws2),
-                      SolveFast.fgroup_items_build(nodup, n, rest, tail)),
-                    SolveFast.group_items_step(f, ws2, Groups.len_words(ws2),
-                      SolveFast.class_lb(ws2),
-                      SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                        List.append(&2, SolveFast.Item,
-                          SolveFast.group_items(n, rg), tail)}),
-                    SolveFast.ItemsBound{
-                      SolveFast.lower_bound(n, Groups.Group{f, ws2} <> rg),
-                      List.append(&2, SolveFast.Item,
-                        SolveFast.group_items(n, Groups.Group{f, ws2} <> rg),
-                        tail)},
-                    Equal.trans(SolveFast.ItemsBound,
-                      SolveFast.group_items_step(f, ws2, len,
-                        SolveFast.class_lb_fast(nodup, len, ws2),
-                        SolveFast.fgroup_items_build(nodup, n, rest, tail)),
-                      SolveFast.group_items_step(f, ws2, len,
-                        SolveFast.class_lb_fast(nodup, len, ws2),
-                        SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                SolveFast.group_items(nodup, n, rg), tail)}),
+                          SolveFast.group_items_step(f, ws3, Groups.len_words(ws3),
+                            SolveFast.class_lb_fast(nodup, len, ws3),
+                            SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                              List.append(&2, SolveFast.Item,
+                                SolveFast.group_items(nodup, n, rg), tail)}),
+                          SolveFast.group_items_step(f, ws3, Groups.len_words(ws3),
+                            SolveFast.class_lb(ws3),
+                            SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                              List.append(&2, SolveFast.Item,
+                                SolveFast.group_items(nodup, n, rg), tail)}),
+                          Equal.cong(Nat, SolveFast.ItemsBound,
+                            l => SolveFast.group_items_step(f, ws3, l,
+                                   SolveFast.class_lb_fast(nodup, len, ws3),
+                                   SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                     List.append(&2, SolveFast.Item,
+                                       SolveFast.group_items(nodup, n, rg), tail)}),
+                            len, Groups.len_words(ws3), elen),
+                          Equal.cong(Nat, SolveFast.ItemsBound,
+                            c => SolveFast.group_items_step(f, ws3,
+                                   Groups.len_words(ws3), c,
+                                   SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                                     List.append(&2, SolveFast.Item,
+                                       SolveFast.group_items(nodup, n, rg), tail)}),
+                            SolveFast.class_lb_fast(nodup, len, ws3),
+                            SolveFast.class_lb(ws3), eclb))
+                      +ek : {Groups.len_words(ws3)
+                             == Nat.add(3n, Groups.len_words(wt3)) : Nat} =
+                        FN.len_rev_nil(rws3)
+                      +egi : {SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg)
+                              == SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                                   SolveFast.lower_bound(n, rg)}
+                                 <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
+                                     <> SolveFast.group_items(nodup, n, rg))
+                              : +List<SolveFast.Item>} =
+                        FN.group_items_ge3_eq(nodup, n, f, ws3, rg,
+                          Groups.len_words(wt3), ek)
+                      +e3 : {SolveFast.ItemsBound{
+                               SolveFast.lower_bound(n, Groups.Group{f, ws3} <> rg),
+                               SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                                 SolveFast.lower_bound(n, rg)}
+                               <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
+                                   <> List.append(&2, SolveFast.Item,
+                                        SolveFast.group_items(nodup, n, rg), tail))}
+                             == SolveFast.ItemsBound{
+                                  SolveFast.lower_bound(n,
+                                    Groups.Group{f, ws3} <> rg),
+                                  List.append(&2, SolveFast.Item,
+                                    SolveFast.group_items(nodup, n,
+                                      Groups.Group{f, ws3} <> rg), tail)}
+                             : SolveFast.ItemsBound} =
+                        Equal.cong(+List<SolveFast.Item>, SolveFast.ItemsBound,
+                          its => SolveFast.ItemsBound{
+                                   SolveFast.lower_bound(n,
+                                     Groups.Group{f, ws3} <> rg),
+                                   List.append(&2, SolveFast.Item, its, tail)},
+                          SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                            SolveFast.lower_bound(n, rg)}
+                          <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
+                              <> SolveFast.group_items(nodup, n, rg)),
+                          SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg),
+                          Equal.sym(+List<SolveFast.Item>,
+                            SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg),
+                            SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                              SolveFast.lower_bound(n, rg)}
+                            <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
+                                <> SolveFast.group_items(nodup, n, rg)),
+                            egi))
+                      Equal.trans(SolveFast.ItemsBound,
+                        SolveFast.group_items_step(f, ws3, len,
+                          SolveFast.class_lb_fast(nodup, len, ws3),
+                          SolveFast.fgroup_items_build(nodup, n, rest, tail)),
+                        SolveFast.group_items_step(f, ws3, Groups.len_words(ws3),
+                          SolveFast.class_lb(ws3),
+                          SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                            List.append(&2, SolveFast.Item,
+                              SolveFast.group_items(nodup, n, rg), tail)}),
+                        SolveFast.ItemsBound{
+                          SolveFast.lower_bound(n, Groups.Group{f, ws3} <> rg),
                           List.append(&2, SolveFast.Item,
-                            SolveFast.group_items(n, rg), tail)}),
-                      SolveFast.group_items_step(f, ws2, Groups.len_words(ws2),
-                        SolveFast.class_lb(ws2),
-                        SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
-                          List.append(&2, SolveFast.Item,
-                            SolveFast.group_items(n, rg), tail)}),
-                      e1, e2),
-                    e3)
+                            SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg),
+                            tail)},
+                        Equal.trans(SolveFast.ItemsBound,
+                          SolveFast.group_items_step(f, ws3, len,
+                            SolveFast.class_lb_fast(nodup, len, ws3),
+                            SolveFast.fgroup_items_build(nodup, n, rest, tail)),
+                          SolveFast.group_items_step(f, ws3, len,
+                            SolveFast.class_lb_fast(nodup, len, ws3),
+                            SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                              List.append(&2, SolveFast.Item,
+                                SolveFast.group_items(nodup, n, rg), tail)}),
+                          SolveFast.group_items_step(f, ws3, Groups.len_words(ws3),
+                            SolveFast.class_lb(ws3),
+                            SolveFast.ItemsBound{SolveFast.lower_bound(n, rg),
+                              List.append(&2, SolveFast.Item,
+                                SolveFast.group_items(nodup, n, rg), tail)}),
+                          e1, e2),
+                        e3)

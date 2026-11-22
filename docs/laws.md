@@ -17,7 +17,8 @@ with no proof would be an open claim, and `bend PROOF.bend` reports it.
 
 `src/feedback.bend` defines `Color`, the feedback function and `AllGreen`.
 `src/tree.bend` defines `Tree`, `depth`, `Valid` and `cost`.
-`src/solve.bend` delegates to the exact reference solver in `src/solve_ref.bend`.
+`src/solve.bend` delegates to the bound-pruned solver in `src/solve_fast.bend`,
+while `src/solve_ref.bend` stays in the tree as the reference specification.
 `src/json.bend` prints a tree as JSON and parses that text back, and
 `src/spec_json.bend` is the independent renderer and recogniser used by laws 7
 and 8.
@@ -110,21 +111,20 @@ law solve_valid:
   Tree.Valid(T, G, C)
 ```
 
-Proved in `proofs/mainvalid.bend`. `solve` runs the fused search `step` at fuel
-`length(C)`. The proof is an induction on that fuel, not on the input: too
-little fuel only ever turns a class into infinity, and a cost of infinity is
-the vacuous case of the invariant ("the cost is at least infinity, or it is
-finite and the tree is valid"). At fuel `1+p` one guess is evaluated by the
-specification fold `Eval.guess` at fuel `p`, whose classes are strictly shorter
-than the candidate list, so the length bound `length(S) <= fuel` hands each
-class its own obligation at the smaller fuel. A single recursive call returns
-the conjunction of all of them together with the bounds of the next level, so
-each class reads its result without using an induction hypothesis twice.
-`proofs/solvevalid.bend` supplies the node step: a finite guess cost is finite
-per child, each child is valid by the invariant, and every candidate gets its
-depth from the feedback class it belongs to. Finally `solve` returns `Some T`
-only when the stored cost is below infinity, where the invariant gives
-validity.
+Proved in `proofs/fast_opt.bend` (using `proofs/fast_valid.bend` and the
+reference solver proofs in `proofs/mainvalid.bend`). For `|C| = 0`, `SolveFast`
+agrees with `SolveRef` (`mainvalid.bend`). For `|C| = 1` and `|C| = 2`, the
+direct root trees (`Node{w, []}`, `two_tree(w1, w2)`) are proved valid once the
+root confirms all candidates belong to `G`. For `|C| >= 3`, fuel induction over
+the staged guess queue maintains the boolean accumulator invariant
+`FV.best_ok_b(limit, G, S, best)`: either the accumulator stayed at or above
+`limit`, or its tree satisfies `FV.valid_b(tree, G, S)` with
+`Tree.cost(tree, S) <= cost`. `OneItem` and `TwoItem` children satisfy this
+directly, `ClassItem` children satisfy it by the fuel induction hypothesis, and
+`FV.end_node_ok` reconstructs validity and the cost bound when `End` finishes a
+guess. When `solve` returns `Some{T}`, the final cost is strictly below `inf`,
+so `FV.best_ok_extract` and `FV.valid_of_b` yield `Tree.Valid(T, G, C)`. The
+reference solver also remains proved valid in `PROOF.bend` (`Ref.solve_valid`).
 
 ## 5. solve_optimal
 
@@ -143,37 +143,19 @@ law solve_optimal:
     & {Nat.is_le(Tree.cost(T, C), Tree.cost(T2, C)) == True{} : Bool})
 ```
 
-Proved in `proofs/opt*.bend`. The argument compares the stored cost of the
-search with the cost of an arbitrary valid tree, and it has to compare the
-*tree* the search returns as well, so it proves three facts.
-
-The first is the lower bound: the stored cost is at most the cost of every
-valid tree. `proofs/optind.bend` is the induction on the fuel. At positive fuel
-one guess is evaluated by the class fold, so a single recursive call hands
-every class of every guess its own obligation at the smaller fuel; the classes
-are strictly shorter than the candidate list (`groups_smaller`), which is what
-supplies the smaller fuel. For a usable node the class children of the guess are
-the children of the tree (`proofs/cover*.bend`), so the node's cost splits into
-one guess per candidate plus the class costs, and the class results sit below
-those children. For an unusable node one class holds all of the candidates
-(`proofs/cover_groups.bend`), so its valid child is a tree for the same list and
-the same fuel applies to it.
-
-The second is finiteness: if a valid tree exists, the stored cost is below
-infinity. `proofs/optcomplete.bend` is the same fuel induction, but the classes
-of the *given* tree supply the child searches. A class of size `m` costs at most
-`m*m` (`proofs/classbound*.bend`), the classes partition the candidate list, and
-so the node cost fits `|S|*|S|`, which is below `inf`. The completeness
-induction and the lower bound both walk the given tree, and each step reads the
-same class subtrees out of it, so `proofs/optstrong.bend` merges the two walks:
-one class traversal delivers the cost comparison together with the size and cost
-bounds for the classes, and one structural recursion carries both facts.
-
-The third is the bookkeeping of the machine: `proofs/optcost.bend` shows that
-when the stored cost is finite the tree the search returns costs at most that
-cost, so the two numbers agree. `solve` then returns that tree, and the law
-chains the tree's cost against the stored cost and the stored cost against the
-given tree.
+Proved in `proofs/fast_opt.bend` on top of the reference optimality proof in
+`proofs/opt*.bend`. First, `proofs/optstrong.bend` proves that for any valid
+tree `T2`, `SolveRef`'s stored cost is strictly below `inf` and at most
+`Tree.cost(T2, C)` (`Ref.solve_optimal` in `PROOF.bend`). Second,
+`proofs/fast_opt.bend` proves by fuel induction over the staged `GList` search
+that `SolveFast` never worsens its cutoff accumulator, satisfies `FV.best_ok_b`
+(so any tree with cost below `inf` has `Tree.cost(T, C) <= stored_cost`), and
+achieves a stored cost at most `SolveRef`'s stored cost — even though
+`SolveFast` tries candidate words `S` before `G`, resolves duplicate-free
+two-word classes in O(1), raises the early-exit floor from `2*|S| - 1` to
+`2*|S|` after `S`, and may pick a different tie-breaking optimal tree. Chaining
+`Tree.cost(T, C) <= fast_cost <= ref_cost <= Tree.cost(T2, C)` establishes
+optimality for every valid input.
 
 ## 6. tree_roundtrip
 

@@ -2,16 +2,16 @@
 
 ## Current status
 
-The reference solver in `src/solve.bend` (through `src/solve_ref.bend`) is exact and exhaustive. It
-is verified correct for every input, including optimality, but it is not fast: for every candidate
-list it tries every usable guess, partitions the candidates by feedback, and solves every class
-recursively. The work grows exponentially with the number of candidates.
-
-The command line uses `src/solve_fast.bend`, which skips any guess whose lower bound cannot beat the
-best cost found so far and is proved to return the exact reference tree (`Fast.solve_eq` in
-`PROOF.bend`). The parallel root solver in `src/solve_par.bend` (`Par.solve_eq`) and the reference
-solver stay in the tree. The search is still exponential in the candidate count, so the full bundled
-lists in `words/` are not practical yet. Speed is the remaining work; correctness is not.
+The exact solver in `src/solve.bend` (delegating to `src/solve_fast.bend`) is proved directly valid
+and optimal for every input (`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend`). It uses
+depth-two lower bounds, tight recursive cutoff propagation, O(1) singleton and duplicate-free
+two-word class resolution, candidate-first staged search (`S` before `G` with a `2*|S|` post-`S`
+floor), and lazy reusable 1024-entry flat-array histograms/buckets with collision-budget early
+abort for 5-letter duplicate-free nodes. The exhaustive reference solver in `src/solve_ref.bend`
+(`Ref.solve_valid`, `Ref.solve_optimal`) and the parallel root solver in `src/solve_par.bend`
+(`Par.solve_eq`) stay in the tree as specifications. The full bundled lists in `words/` still need
+stronger move ordering, child ordering, and deeper bounds; speed is the remaining work, correctness
+is not.
 
 ## Smoke baseline
 

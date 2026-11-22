@@ -9,7 +9,7 @@
 # any alphabet works, and the guesses and candidates must agree on case.
 import Base
 import ./tree.bend as Tree
-import ./solve_fast.bend as Solve
+import ./solve.bend as Solve
 import ./json.bend as Json
 
 # ---------------------------------------------------------------------------

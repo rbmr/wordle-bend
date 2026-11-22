@@ -22,13 +22,11 @@ a correctness guarantee that the earlier work could not give.
 
 ## Status
 
-**Exact and verified; performance work remains.** All eight laws in `LAWS.bend` are proved in
-`PROOF.bend` and the modules under `proofs/`, and `PENDING_LAWS` is empty. The reference solver in
-`src/solve.bend` is the exact, exhaustive specification: it is verified correct for every input,
-including optimality, but it is not fast. Its search is exponential and takes a few seconds at 10
-candidates, so the full bundled lists are not practical yet. The command line uses
-`src/solve_fast.bend`, which prunes any guess whose lower bound cannot beat the best cost found so
-far and is proved to return the exact reference tree (`Fast.solve_eq` in `PROOF.bend`). The
+**Exact and verified; performance work ongoing.** All eight laws in `LAWS.bend` are proved in
+`PROOF.bend` and the modules under `proofs/`, and `PENDING_LAWS` is empty. The command line and
+`src/solve.bend` run `src/solve_fast.bend`, a bound-pruned solver proved directly valid and optimal
+for every input (`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend`), while
+`src/solve_ref.bend` remains in the tree as the exhaustive reference specification. The
 command-line interface is
 documented in [docs/cli.md](docs/cli.md), the bundled word lists are in `words/`, and the benchmark
 harness is in `bench/`. [docs/performance.md](docs/performance.md) records the current performance
