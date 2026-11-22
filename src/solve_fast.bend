@@ -18,17 +18,22 @@
 # `class_lb(ws) = 2 * |ws| - 1` in O(1), and every tree over `S` costs at least
 # `2 * |S| - 1` — allowing immediate early exit once `best_cost(best) <= floor`.
 #
-# On duplicate-free child nodes, candidate words `S` are tried before the full
-# guess list `G` via `GList` (`GTry` / `GThen` / `GEnd`). If the incoming cutoff
-# is already at most `2 * |S|`, only `S` is searched; otherwise `GThen` raises
-# the early-exit floor from `2 * |S| - 1` to `2 * |S|` after `S` finishes and
-# allocates the reusable 1024-entry `Buf5` histogram/bucket arrays lazily when
-# needed. Five-letter duplicate-free nodes score guesses in a single generation-
-# stamped `hist5_go` pass that aborts early as soon as collisions exhaust
-# `best_cost(best) - 2 * |S|`. Each live `ClassItem` passes the tight remaining
-# budget `best_cost(best) - (sum + tail_lb)` into its recursive child search,
-# `OneItem` resolves singleton classes in O(1), and `TwoItem` resolves
-# duplicate-free two-word classes in O(1) (`two_tree`, cost 3).
+# On duplicate-free 5-letter inputs (checked once at the root), a single
+# reusable `Buf5` holding a generation-stamped 1024-entry `seen` array, a
+# 1024-entry `buckets` array, and a precomputed `|G| x |C|` flat `Array<U32>`
+# feedback code table `tbl` is allocated once at the root and threaded linearly
+# through the entire search tree via `StepRes`. Each candidate carries its
+# column index and guess-row offset in `CWord`, eliminating repeated feedback
+# computation in `hist5_go` and `fill5_go`. On child nodes, candidate words `S`
+# are tried before `G` via `GList` (`GTry` / `GThen` / `GEnd`); after `GThen`
+# raises the floor from `2 * |S| - 1` to `2 * |S|`, stage-two histograms skip
+# already-tried candidate guesses (`code == 682`) and tighten the collision
+# budget to `best_cost(best) - 2 * |S| - 1`. Surviving guesses drain feedback
+# classes Largest-Class-First (`BigClass`), resolve singleton (`OneItem`),
+# duplicate-free two-word (`TwoItem`, cost 3), and duplicate-free three-word
+# (`DoneItem`, exact cost 5 or 6 via `solve_three_tbl`) classes in O(1), and
+# pass tight remaining budgets `best_cost(best) - (sum + tail_lb)` to recursive
+# `ClassItem` searches.
 import Base
 import ./feedback.bend as Feedback
 import ./tree.bend as Tree
@@ -42,11 +47,31 @@ import ./solve_ref.bend as SolveRef
 # `best_cost(best) - (sum + tail_lb)`. `Add` consumes the child and switches
 # to `skip = True{}` as soon as `sum2 + tail_lb >= best_cost(best)`. `OneItem`
 # resolves a singleton feedback class `[w]` directly in O(1).
+type CWord is Data:
+  CWord{ci: U32, grow: U32, word: +List<Nat>}
+
+def cwords_words(+cs: +List<CWord>) -> +List<+List<Nat>>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case Con{cw, rest}:
+      match cw:
+        case CWord{ci, grow, w}:
+          w <> cwords_words(rest)
+
+def dummy_cwords(+ws: +List<+List<Nat>>) -> +List<CWord>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case Con{w, rest}:
+      CWord{0, 0, w} <> dummy_cwords(rest)
+
 type Item is Data:
   Begin{guess: +List<Nat>}
-  ClassItem{fb: +List<Feedback.Color>, words: +List<+List<Nat>>, wlen: Nat, tail_lb: Nat}
+  ClassItem{fb: +List<Feedback.Color>, words: +List<CWord>, wlen: Nat, tail_lb: Nat}
   OneItem{fb: +List<Feedback.Color>, word: +List<Nat>}
   TwoItem{fb: +List<Feedback.Color>, w1: +List<Nat>, w2: +List<Nat>}
+  DoneItem{fb: +List<Feedback.Color>, tree: Tree.Tree, cost: Nat}
   Add{fb: +List<Feedback.Color>, tail_lb: Nat}
   End{}
 
@@ -639,7 +664,7 @@ def group_items_two(nodup: Bool, +n: Nat, +f: +List<Feedback.Color>,
     case False{}:
       +ws2 : +List<+List<Nat>> = w <> (w2 <> Nil{})
       +tlb = lower_bound(n, rest)
-      ClassItem{f, ws2, 2n, tlb} <> (Add{f, tlb} <> rest_items)
+      ClassItem{f, dummy_cwords(ws2), 2n, tlb} <> (Add{f, tlb} <> rest_items)
 
 # Specification of the class items of one guess: singleton classes `[w]`
 # become `OneItem{f, w}`, duplicate-free two-word classes `[w, w2]` become
@@ -668,7 +693,7 @@ def group_items(+nodup: Bool, +n: Nat, +groups: +List<Groups.Group>) -> +List<It
                     case Con{+w3, +wt3}:
                       +ws3 : +List<+List<Nat>> = w <> (w2 <> (w3 <> wt3))
                       +tlb = lower_bound(n, rest)
-                      ClassItem{f, ws3, Groups.len_words(ws3), tlb}
+                      ClassItem{f, dummy_cwords(ws3), Groups.len_words(ws3), tlb}
                       <> (Add{f, tlb} <> group_items(nodup, n, rest))
 
 # Single-pass construction of a guess's lower bound and schedule items from
@@ -682,7 +707,7 @@ def group_items_step(+f: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
   match ib:
     case ItemsBound{+rem_lb, +rest_items}:
       ItemsBound{Nat.add(clb, rem_lb),
-        ClassItem{f, ws, wlen, rem_lb} <> (Add{f, rem_lb} <> rest_items)}
+        ClassItem{f, dummy_cwords(ws), wlen, rem_lb} <> (Add{f, rem_lb} <> rest_items)}
 
 def group_items_one_step(+f: +List<Feedback.Color>, +w: +List<Nat>,
                          ib: ItemsBound) -> ItemsBound:
@@ -993,450 +1018,44 @@ def guess_items(+nodup: Bool, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
     case False{}:
       guess_items_go(False{}, g, S, n, best, skippable(best, pre_lb(n, g, S)))
 
-# Per-node reusable 1024-entry flat arrays for 5-letter duplicate-free nodes:
-# `seen` stores a generation stamp for O(1) zero-allocation lower-bound and
-# usability pruning (`hist5_go`), and `buckets` stores reversed candidate lists
-# for O(|S|) bucketing (`fill5_go` + `drain5_go`) on surviving guesses.
-type Buf5 is Type:
-  NoBuf{}
-  Buf5{seen: Array<Nat>, buckets: Array<+List<+List<Nat>>>, gen: Nat}
-
-type GuessRes is Type:
-  GuessRes{items: +List<Item>, buf: Buf5}
-
-def mk_buf_go(use: Bool) -> Buf5:
-  match use:
-    case True{}:
-      Buf5{Array.new(Nat, 10n, 0n), Array.new(+List<+List<Nat>>, 10n, Nil{}), 1n}
-    case False{}:
-      NoBuf{}
-
-def mk_buf_nodup(+n: Nat, +b0: SolveRef.Best) -> Buf5:
-  mk_buf_go(
-    Bool.or(Nat.is_le(8n, n),
-      Bool.and(Nat.is_le(2n, n), Bool.not(skippable(b0, Nat.add(n, n))))))
-
-def mk_buf(+nodup: Bool, +n: Nat, +b0: SolveRef.Best) -> Buf5:
-  match nodup:
-    case True{}:
-      mk_buf_nodup(n, b0)
-    case False{}:
-      NoBuf{}
-
-# Initial node buffer for stage 1 (trying candidates in `S` first): avoid
-# allocating 16 KB of flat arrays on tiny nodes (`n < 8`) that usually hit the
-# floor within `S`; `ensure_buf` allocates once if the node falls through to `G`.
-def mk_buf_init(+nodup: Bool, +n: Nat, +b0: SolveRef.Best) -> Buf5:
-  match nodup:
-    case True{}:
-      mk_buf_go(Nat.is_le(8n, n))
-    case False{}:
-      NoBuf{}
-
-def ensure_buf(+nodup: Bool, +n: Nat, +best: SolveRef.Best,
-               gres: GuessRes) -> GuessRes:
-  match gres:
-    case GuessRes{items, buf}:
-      match buf:
-        case NoBuf{}:
-          GuessRes{Nil{}, mk_buf(nodup, n, best)}
-        case Buf5{seen, buckets, gen}:
-          GuessRes{Nil{}, Buf5{seen, buckets, gen}}
-
-# Pass 1: generation-stamped O(1) histogram counting `m` (non-matching
-# candidates) and `k` (distinct feedback classes) without allocating classes,
-# aborting early as soon as collisions exceed `budget = best_cost - 2*n`.
-type Hist5Res is Type:
-  Hist5Ok{seen: Array<Nat>, m: Nat, k: Nat, budget: Nat}
-  Hist5Pruned{seen: Array<Nat>}
-  Hist5Fallback{seen: Array<Nat>}
-
-def hist5_hit(seen: Array<Nat>, +m: Nat, +k: Nat, seen_before: Bool,
-              budget: Nat) -> Hist5Res:
-  match seen_before:
-    case True{}:
-      match budget:
-        case 0n:
-          Hist5Pruned{seen}
-        case 1n+bp:
-          Hist5Ok{seen, Nat.add(1n, m), k, bp}
-    case False{}:
-      Hist5Ok{seen, Nat.add(1n, m), Nat.add(1n, k), budget}
-
-def hist5_swap(+gen: Nat, +m: Nat, +k: Nat, +budget: Nat,
-               r: Array<Nat> & Nat) -> Hist5Res:
-  (seen2, +old) = r
-  hist5_hit(seen2, m, k, Nat.is_eq(old, gen), budget)
-
-def hist5_step(seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget: Nat,
-               +code: U32, same: Bool) -> Hist5Res:
-  match same:
-    case True{}:
-      Hist5Ok{seen, m, k, budget}
-    case False{}:
-      hist5_swap(gen, m, k, budget, Array.swap(Nat, seen, code, gen))
-
-def hist5_one(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-              +w: +List<Nat>, seen: Array<Nat>, +gen: Nat,
-              +m: Nat, +k: Nat, +budget: Nat) -> Hist5Res:
-  match w:
-    case Nil{}:
-      Hist5Fallback{seen}
-    case Con{a0, t1}:
-      match t1:
-        case Nil{}:
-          Hist5Fallback{seen}
-        case Con{a1, t2}:
-          match t2:
-            case Nil{}:
-              Hist5Fallback{seen}
-            case Con{a2, t3}:
-              match t3:
-                case Nil{}:
-                  Hist5Fallback{seen}
-                case Con{a3, t4}:
-                  match t4:
-                    case Nil{}:
-                      Hist5Fallback{seen}
-                    case Con{a4, t5}:
-                      match t5:
-                        case Nil{}:
-                          +code = feedback_code5(g0, g1, g2, g3, g4,
-                                                 a0, a1, a2, a3, a4)
-                          hist5_step(seen, gen, m, k, budget, code,
-                            U32.is_eq(code, 682))
-                        case Con{a5, t6}:
-                          Hist5Fallback{seen}
-
-def hist5_go(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-             +S: +List<+List<Nat>>, +gen: Nat, st: Hist5Res) -> Hist5Res:
-  match S:
-    case Nil{}:
-      st
-    case Con{w, rest}:
-      match st:
-        case Hist5Fallback{seen}:
-          Hist5Fallback{seen}
-        case Hist5Pruned{seen}:
-          Hist5Pruned{seen}
-        case Hist5Ok{seen, +m, +k, +budget}:
-          hist5_go(g0, g1, g2, g3, g4, rest, gen,
-            hist5_one(g0, g1, g2, g3, g4, w, seen, gen, m, k, budget))
-
-# Pass 2 (surviving guesses only): O(|S|) bucketing into `buckets` with
-# `touched` recording distinct codes in reverse first-seen order, followed by a
-# single tail-recursive drain that resets every touched slot back to `Nil{}`
-# while emitting exact schedule items with `tail_lb`.
-type Fill5State is Type:
-  Fill5State{buckets: Array<+List<+List<Nat>>>, touched: +List<U32>}
-
-def fill5_get_done(+w: +List<Nat>, +code: U32, +touched: +List<U32>,
-                   r: Array<+List<+List<Nat>>> & +List<+List<Nat>>) -> Fill5State:
-  (b2, +old) = r
-  match old:
-    case Nil{}:
-      Fill5State{Array.set(+List<+List<Nat>>, b2, code, w <> Nil{}),
-                 code <> touched}
-    case Con{h, t}:
-      Fill5State{Array.set(+List<+List<Nat>>, b2, code, w <> (h <> t)),
-                 touched}
-
-def fill5_step(+w: +List<Nat>, +code: U32, same: Bool,
-               buckets: Array<+List<+List<Nat>>>,
-               +touched: +List<U32>) -> Fill5State:
-  match same:
-    case True{}:
-      Fill5State{buckets, touched}
-    case False{}:
-      fill5_get_done(w, code, touched,
-        Array.get(+List<+List<Nat>>, buckets, code))
-
-def fill5_one(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-              +w: +List<Nat>, buckets: Array<+List<+List<Nat>>>,
-              +touched: +List<U32>) -> Fill5State:
-  match w:
-    case Nil{}:
-      Fill5State{buckets, touched}
-    case Con{a0, t1}:
-      match t1:
-        case Nil{}:
-          Fill5State{buckets, touched}
-        case Con{a1, t2}:
-          match t2:
-            case Nil{}:
-              Fill5State{buckets, touched}
-            case Con{a2, t3}:
-              match t3:
-                case Nil{}:
-                  Fill5State{buckets, touched}
-                case Con{a3, t4}:
-                  match t4:
-                    case Nil{}:
-                      Fill5State{buckets, touched}
-                    case Con{a4, t5}:
-                      match t5:
-                        case Nil{}:
-                          +code = feedback_code5(g0, g1, g2, g3, g4,
-                                                 a0, a1, a2, a3, a4)
-                          fill5_step(w, code, U32.is_eq(code, 682),
-                            buckets, touched)
-                        case Con{a5, t6}:
-                          Fill5State{buckets, touched}
-
-def fill5_go(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-             +S: +List<+List<Nat>>, st: Fill5State) -> Fill5State:
-  match S:
-    case Nil{}:
-      st
-    case Con{w, rest}:
-      match st:
-        case Fill5State{buckets, +touched}:
-          fill5_go(g0, g1, g2, g3, g4, rest,
-            fill5_one(g0, g1, g2, g3, g4, w, buckets, touched))
-
-type Drain5State is Type:
-  Drain5State{buckets: Array<+List<+List<Nat>>>, rem_lb: Nat, items: +List<Item>}
-
-def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
-                   +items: +List<Item>, buckets: Array<+List<+List<Nat>>>,
-                   rl: RevLen) -> Drain5State:
-  match rl:
-    case RevLen{+len, +ws}:
-      +clb = Nat.sub(Nat.add(len, len), 1n)
-      Drain5State{buckets, Nat.add(clb, rem_lb),
-        ClassItem{fb, ws, len, rem_lb} <> (Add{fb, rem_lb} <> items)}
-
-def drain5_add(+code: U32, +rem_lb: Nat, +items: +List<Item>,
-               buckets: Array<+List<+List<Nat>>>,
-               +rws: +List<+List<Nat>>) -> Drain5State:
-  match rws:
-    case Nil{}:
-      +fb = decode_fb5(code)
-      Drain5State{buckets, rem_lb,
-        ClassItem{fb, Nil{}, 0n, rem_lb} <> (Add{fb, rem_lb} <> items)}
-    case Con{+w, +wt}:
-      match wt:
-        case Nil{}:
-          Drain5State{buckets, Nat.add(1n, rem_lb),
-            OneItem{decode_fb5(code), w} <> items}
-        case Con{+w2, +wt2}:
-          match wt2:
-            case Nil{}:
-              Drain5State{buckets, Nat.add(3n, rem_lb),
-                TwoItem{decode_fb5(code), w2, w} <> items}
-            case Con{+w3, +wt3}:
-              drain5_add_ge2(decode_fb5(code), rem_lb, items, buckets,
-                rev_words_len(wt3, w3 <> (w2 <> (w <> Nil{})), 3n))
-
-def drain5_swap(+code: U32, +rem_lb: Nat, +items: +List<Item>,
-                r: Array<+List<+List<Nat>>> & +List<+List<Nat>>) -> Drain5State:
-  (b2, +rws) = r
-  drain5_add(code, rem_lb, items, b2, rws)
-
-def drain5_go(+touched: +List<U32>, st: Drain5State) -> Drain5State:
-  match touched:
-    case Nil{}:
-      st
-    case Con{+code, +rest}:
-      match st:
-        case Drain5State{buckets, +rem_lb, +items}:
-          drain5_go(rest,
-            drain5_swap(code, rem_lb, items,
-              Array.swap(+List<+List<Nat>>, buckets, code, Nil{})))
-
-def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
-                  dr: Drain5State) -> GuessRes:
-  match dr:
-    case Drain5State{buckets3, rem_lb, +items}:
-      GuessRes{Begin{g} <> items, Buf5{seen, buckets3, gen2}}
-
-def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
-               fs: Fill5State) -> GuessRes:
-  match fs:
-    case Fill5State{buckets2, +touched}:
-      finish_drain5(g, seen, gen2,
-        drain5_go(touched, Drain5State{buckets2, n, End{} <> Nil{}}))
-
-def schedule5_lb(+g: +List<Nat>, +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat,
-                 +g4: Nat, +S: +List<+List<Nat>>, +n: Nat,
-                 seen: Array<Nat>, buckets: Array<+List<+List<Nat>>>,
-                 +gen2: Nat, skip: Bool) -> GuessRes:
-  match skip:
-    case True{}:
-      GuessRes{Nil{}, Buf5{seen, buckets, gen2}}
-    case False{}:
-      run_drain5(g, n, seen, gen2,
-        fill5_go(g0, g1, g2, g3, g4, S, Fill5State{buckets, Nil{}}))
-
-def schedule5_usable(+g: +List<Nat>, +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat,
-                     +g4: Nat, +S: +List<+List<Nat>>, +n: Nat,
-                     +best: SolveRef.Best, seen: Array<Nat>,
-                     buckets: Array<+List<+List<Nat>>>, +gen2: Nat,
-                     +m: Nat, +k: Nat, usable: Bool) -> GuessRes:
-  match usable:
-    case False{}:
-      GuessRes{Nil{}, Buf5{seen, buckets, gen2}}
-    case True{}:
-      +lb = Nat.sub(Nat.add(n, Nat.add(m, m)), k)
-      schedule5_lb(g, g0, g1, g2, g3, g4, S, n, seen, buckets, gen2,
-        skippable(best, lb))
-
-def schedule5_hist(+g: +List<Nat>, +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat,
-                   +g4: Nat, +S: +List<+List<Nat>>, +n: Nat,
-                   +best: SolveRef.Best, buckets: Array<+List<+List<Nat>>>,
-                   +gen: Nat, hr: Hist5Res) -> GuessRes:
-  match hr:
-    case Hist5Fallback{seen2}:
-      +fg = fgroups_build_fast(g, S, Nil{})
-      GuessRes{
-        schedule_fguess(True{}, g, fg, n, best, fgroups_smaller(n, fg)),
-        Buf5{seen2, buckets, Nat.add(1n, gen)}}
-    case Hist5Pruned{seen2}:
-      GuessRes{Nil{}, Buf5{seen2, buckets, Nat.add(1n, gen)}}
-    case Hist5Ok{seen2, +m, +k, budget}:
-      schedule5_usable(g, g0, g1, g2, g3, g4, S, n, best, seen2, buckets,
-        Nat.add(1n, gen), m, k,
-        Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))
-
-def guess_body_buf5(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
-                    +best: SolveRef.Best, seen: Array<Nat>,
-                    buckets: Array<+List<+List<Nat>>>, +gen: Nat) -> GuessRes:
-  match g:
-    case Nil{}:
-      +fg = fgroups_build_fast(Nil{}, S, Nil{})
-      GuessRes{schedule_fguess(True{}, Nil{}, fg, n, best, fgroups_smaller(n, fg)),
-               Buf5{seen, buckets, gen}}
-    case Con{+g0, +t1}:
-      match t1:
-        case Nil{}:
-          +fg = fgroups_build_fast(g0 <> Nil{}, S, Nil{})
-          GuessRes{schedule_fguess(True{}, g0 <> Nil{}, fg, n, best,
-                     fgroups_smaller(n, fg)),
-                   Buf5{seen, buckets, gen}}
-        case Con{+g1, +t2}:
-          match t2:
-            case Nil{}:
-              +gw : +List<Nat> = g0 <> (g1 <> Nil{})
-              +fg = fgroups_build_fast(gw, S, Nil{})
-              GuessRes{schedule_fguess(True{}, gw, fg, n, best,
-                         fgroups_smaller(n, fg)),
-                       Buf5{seen, buckets, gen}}
-            case Con{+g2, +t3}:
-              match t3:
-                case Nil{}:
-                  +gw : +List<Nat> = g0 <> (g1 <> (g2 <> Nil{}))
-                  +fg = fgroups_build_fast(gw, S, Nil{})
-                  GuessRes{schedule_fguess(True{}, gw, fg, n, best,
-                             fgroups_smaller(n, fg)),
-                           Buf5{seen, buckets, gen}}
-                case Con{+g3, +t4}:
-                  match t4:
-                    case Nil{}:
-                      +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> Nil{})))
-                      +fg = fgroups_build_fast(gw, S, Nil{})
-                      GuessRes{schedule_fguess(True{}, gw, fg, n, best,
-                                 fgroups_smaller(n, fg)),
-                               Buf5{seen, buckets, gen}}
-                    case Con{+g4, +t5}:
-                      match t5:
-                        case Nil{}:
-                          +gw : +List<Nat> =
-                            g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                          +budget0 = Nat.sub(best_cost(best), Nat.add(n, n))
-                          schedule5_hist(gw, g0, g1, g2, g3, g4, S, n, best,
-                            buckets, gen,
-                            hist5_go(g0, g1, g2, g3, g4, S, gen,
-                              Hist5Ok{seen, 0n, 0n, budget0}))
-                        case Con{+g5, +t6}:
-                          +gw : +List<Nat> =
-                            g0 <> (g1 <> (g2 <> (g3 <> (g4 <> (g5 <> t6)))))
-                          +fg = fgroups_build_fast(gw, S, Nil{})
-                          GuessRes{schedule_fguess(True{}, gw, fg, n, best,
-                                     fgroups_smaller(n, fg)),
-                                   Buf5{seen, buckets, gen}}
-
-def guess_body_buf_ge2(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
-                       +best: SolveRef.Best, buf: Buf5) -> GuessRes:
-  match buf:
-    case NoBuf{}:
-      +fg = fgroups_build_fast(g, S, Nil{})
-      GuessRes{schedule_fguess(True{}, g, fg, n, best, fgroups_smaller(n, fg)),
-               NoBuf{}}
-    case Buf5{seen, buckets, +gen}:
-      guess_body_buf5(g, S, n, best, seen, buckets, gen)
-
-def guess_body_buf(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
-                   +best: SolveRef.Best, buf: Buf5) -> GuessRes:
-  match S:
-    case Nil{}:
-      +fg = fgroups_build_fast(g, Nil{}, Nil{})
-      GuessRes{schedule_fguess(True{}, g, fg, 0n, best, fgroups_smaller(0n, fg)),
-               buf}
-    case Con{+w, +t}:
-      match t:
-        case Nil{}:
-          GuessRes{schedule_one_guess(g, best, word_eq_fast(g, w)), buf}
-        case Con{+w2, +t2}:
-          guess_body_buf_ge2(g, w <> (w2 <> t2), n, best, buf)
-
-def guess_items_mem_buf(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
-                        +best: SolveRef.Best, buf: Buf5,
-                        in_s: Bool) -> GuessRes:
-  match in_s:
-    case True{}:
-      guess_body_buf(g, S, n, best, buf)
-    case False{}:
-      GuessRes{Nil{}, buf}
-
-def guess_items_nodup_buf(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
-                          +best: SolveRef.Best, buf: Buf5,
-                          le_2n: Bool) -> GuessRes:
-  match le_2n:
-    case False{}:
-      guess_body_buf(g, S, n, best, buf)
-    case True{}:
-      guess_items_mem_buf(g, S, n, best, buf, member_word_fast(g, S))
-
-def guess_items_buf(+nodup: Bool, +g: +List<Nat>, +S: +List<+List<Nat>>,
-                    +n: Nat, +best: SolveRef.Best, buf: Buf5) -> GuessRes:
-  match nodup:
-    case True{}:
-      guess_items_nodup_buf(g, S, n, best, buf,
-        skippable(best, Nat.add(n, n)))
-    case False{}:
-      GuessRes{
-        guess_items_go(False{}, g, S, n, best, skippable(best, pre_lb(n, g, S))),
-        buf}
-
-# Optimal depth-two tree for two distinct candidates `[w1, w2]` (exact cost 3).
-def two_tree(+w1: +List<Nat>, +w2: +List<Nat>) -> Tree.Tree:
-  Tree.Node{w1, Tree.Child{feedback_fast(w1, w2), Tree.Node{w2, Nil{}}} <> Nil{}}
-
-# Staged guess queue: `GTry{g, rest}` tries guess `g`; `GThen{rest}` marks the
-# boundary after every candidate in `S` has been tried, raising the early-exit
-# floor from `2*n - 1` to `2*n` (since no non-candidate can beat `2*n`) and
-# lazily allocating `Buf5` only for nodes that reach `G`.
+# Staged guess queue carrying each guess's precomputed row offset in `tbl`.
 type GList is Data:
   GEnd{}
-  GTry{g: +List<Nat>, rest: GList}
+  GTry{row: U32, g: +List<Nat>, rest: GList}
   GThen{rest: GList}
 
-def glist_of(+ws: +List<+List<Nat>>, +tail: GList) -> GList:
+def glist_of_words(+ws: +List<+List<Nat>>, +tail: GList) -> GList:
   match ws:
     case Nil{}:
       tail
     case Con{w, rest}:
-      GTry{w, glist_of(rest, tail)}
+      GTry{0, w, glist_of_words(rest, tail)}
 
-def child_glist_nodup(+words: +List<+List<Nat>>, +glist_G: GList,
+def glist_of_cwords(+cs: +List<CWord>, +tail: GList) -> GList:
+  match cs:
+    case Nil{}:
+      tail
+    case Con{cw, rest}:
+      match cw:
+        case CWord{ci, grow, w}:
+          GTry{grow, w, glist_of_cwords(rest, tail)}
+
+def glist_of_guesses(+G: +List<+List<Nat>>, +row: U32, +stride: U32) -> GList:
+  match G:
+    case Nil{}:
+      GEnd{}
+    case Con{g, rest}:
+      GTry{row, g, glist_of_guesses(rest, U32.add(row, stride), stride)}
+
+def child_glist_nodup(+words: +List<CWord>, +glist_G: GList,
                       le_2n: Bool) -> GList:
   match le_2n:
     case True{}:
-      glist_of(words, GEnd{})
+      glist_of_cwords(words, GEnd{})
     case False{}:
-      glist_of(words, GThen{glist_G})
+      glist_of_cwords(words, GThen{glist_G})
 
-def child_glist(+nodup: Bool, +words: +List<+List<Nat>>, +wlen: Nat,
+def child_glist(+nodup: Bool, +words: +List<CWord>, +wlen: Nat,
                 +b0: SolveRef.Best, +glist_G: GList) -> GList:
   match nodup:
     case True{}:
@@ -1444,84 +1063,749 @@ def child_glist(+nodup: Bool, +words: +List<+List<Nat>>, +wlen: Nat,
     case False{}:
       glist_G
 
-# One step of the pruned search. Lexicographic structural recursion on
-# `(fuel, gs, phase, cs)` builds each guess lazily into `gres` when `cs`
-# becomes `Nil{}`, unpacks `gres` on `phase = 1n`, caches `n = |S|`, `nodup`,
-# `glist_G`, and the active early-exit `floor`, threads the node's reusable
-# `Buf5` across guesses, and exits immediately once `done` signals
-# `best_cost(best) <= floor` in duplicate-free mode.
+type Buf5 is Type:
+  NoBuf{}
+  Buf5{seen: Array<Nat>, buckets: Array<+List<CWord>>, tbl: Array<U32>, gen: Nat}
+
+type GuessRes is Type:
+  GuessRes{items: +List<Item>, buf: Buf5}
+
+# Length-5 check and root feedback table construction.
+def is_len5(+w: +List<Nat>) -> Bool:
+  match w:
+    case Nil{}:
+      False{}
+    case Con{a0, t1}:
+      match t1:
+        case Nil{}:
+          False{}
+        case Con{a1, t2}:
+          match t2:
+            case Nil{}:
+              False{}
+            case Con{a2, t3}:
+              match t3:
+                case Nil{}:
+                  False{}
+                case Con{a3, t4}:
+                  match t4:
+                    case Nil{}:
+                      False{}
+                    case Con{a4, t5}:
+                      match t5:
+                        case Nil{}:
+                          True{}
+                        case Con{_, _}:
+                          False{}
+
+def next_len5(+ws: +List<+List<Nat>>) -> Bool:
+  match ws:
+    case Nil{}:
+      True{}
+    case Con{w, _}:
+      is_len5(w)
+
+def all_len5_go(+ws: +List<+List<Nat>>, ok: Bool) -> Bool:
+  match ws:
+    case Nil{}:
+      True{}
+    case Con{w, t}:
+      match ok:
+        case True{}:
+          all_len5_go(t, next_len5(t))
+        case False{}:
+          False{}
+
+def all_len5(+ws: +List<+List<Nat>>) -> Bool:
+  all_len5_go(ws, next_len5(ws))
+
+def depth_for_go(+rem: Nat, +target: Nat, +pow: Nat, +d: Nat,
+                 ok: Bool) -> Maybe<Nat>:
+  match rem:
+    case 0n:
+      match ok:
+        case True{}:
+          Some{d}
+        case False{}:
+          None{}
+    case 1n+p:
+      match ok:
+        case True{}:
+          Some{d}
+        case False{}:
+          +pow2 = Nat.add(pow, pow)
+          depth_for_go(p, target, pow2, Nat.add(1n, d), Nat.is_le(target, pow2))
+
+def depth_for(+target: Nat) -> Maybe<Nat>:
+  depth_for_go(25n, target, 1n, 0n, Nat.is_le(target, 1n))
+
+def find_grow_go(+w: +List<Nat>, +G: +List<+List<Nat>>, +row: U32,
+                 +stride: U32, hit: Bool) -> U32:
+  match G:
+    case Nil{}:
+      0
+    case Con{g, rest}:
+      match hit:
+        case True{}:
+          row
+        case False{}:
+          find_grow_go(w, rest, U32.add(row, stride), stride,
+            next_word_hit(w, rest))
+
+def find_grow(+w: +List<Nat>, +G: +List<+List<Nat>>, +stride: U32) -> U32:
+  find_grow_go(w, G, 0, stride, next_word_hit(w, G))
+
+def build_cwords(+C: +List<+List<Nat>>, +G: +List<+List<Nat>>,
+                 +ci: U32, +stride: U32) -> +List<CWord>:
+  match C:
+    case Nil{}:
+      Nil{}
+    case Con{+w, +rest}:
+      CWord{ci, find_grow(w, G, stride), w}
+      <> build_cwords(rest, G, U32.inc(ci), stride)
+
+def fill_tbl_row(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
+                 +C: +List<+List<Nat>>, +idx: U32,
+                 tbl: Array<U32>) -> Array<U32>:
+  match C:
+    case Nil{}:
+      tbl
+    case Con{w, rest}:
+      match w:
+        case Nil{}:
+          tbl
+        case Con{a0, t1}:
+          match t1:
+            case Nil{}:
+              tbl
+            case Con{a1, t2}:
+              match t2:
+                case Nil{}:
+                  tbl
+                case Con{a2, t3}:
+                  match t3:
+                    case Nil{}:
+                      tbl
+                    case Con{a3, t4}:
+                      match t4:
+                        case Nil{}:
+                          tbl
+                        case Con{a4, t5}:
+                          match t5:
+                            case Nil{}:
+                              +code = feedback_code5(g0, g1, g2, g3, g4,
+                                                     a0, a1, a2, a3, a4)
+                              fill_tbl_row(g0, g1, g2, g3, g4, rest,
+                                U32.inc(idx),
+                                Array.set(U32, tbl, idx, code))
+                            case Con{_, _}:
+                              tbl
+
+def fill_tbl_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +row: U32,
+                +stride: U32, tbl: Array<U32>) -> Array<U32>:
+  match G:
+    case Nil{}:
+      tbl
+    case Con{g, rest}:
+      match g:
+        case Nil{}:
+          tbl
+        case Con{g0, t1}:
+          match t1:
+            case Nil{}:
+              tbl
+            case Con{g1, t2}:
+              match t2:
+                case Nil{}:
+                  tbl
+                case Con{g2, t3}:
+                  match t3:
+                    case Nil{}:
+                      tbl
+                    case Con{g3, t4}:
+                      match t4:
+                        case Nil{}:
+                          tbl
+                        case Con{g4, t5}:
+                          match t5:
+                            case Nil{}:
+                              fill_tbl_go(rest, C, U32.add(row, stride), stride,
+                                fill_tbl_row(g0, g1, g2, g3, g4, C, row, tbl))
+                            case Con{_, _}:
+                              tbl
+
+def mk_buf_tbl_depth(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+                     +stride: U32, md: Maybe<Nat>) -> Buf5:
+  match md:
+    case None{}:
+      NoBuf{}
+    case Some{+d}:
+      Buf5{Array.new(Nat, 10n, 0n), Array.new(+List<CWord>, 10n, Nil{}),
+           fill_tbl_go(G, C, 0, stride, Array.new(U32, d, 0)), 1n}
+
+def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+                  +n: Nat) -> Buf5:
+  match ok:
+    case False{}:
+      NoBuf{}
+    case True{}:
+      +gl = Groups.len_words(G)
+      mk_buf_tbl_depth(G, C, U32.from_nat(n), depth_for(Nat.mul(gl, n)))
+
+def mk_buf_tbl(+nodup: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+               +n: Nat) -> Buf5:
+  match nodup:
+    case False{}:
+      NoBuf{}
+    case True{}:
+      mk_buf_tbl_if(Bool.and(all_len5(G), all_len5(C)), G, C, n)
+
+# Pass 1: O(1) table-backed generation-stamped histogram with early abort.
+type Hist5Res is Type:
+  Hist5Ok{seen: Array<Nat>, tbl: Array<U32>, m: Nat, k: Nat, budget: Nat}
+  Hist5Pruned{seen: Array<Nat>, tbl: Array<U32>}
+
+def hist5_hit(seen: Array<Nat>, tbl: Array<U32>, +m: Nat, +k: Nat,
+              seen_before: Bool, budget: Nat) -> Hist5Res:
+  match seen_before:
+    case True{}:
+      match budget:
+        case 0n:
+          Hist5Pruned{seen, tbl}
+        case 1n+bp:
+          Hist5Ok{seen, tbl, Nat.add(1n, m), k, bp}
+    case False{}:
+      Hist5Ok{seen, tbl, Nat.add(1n, m), Nat.add(1n, k), budget}
+
+def hist5_swap(tbl: Array<U32>, +gen: Nat, +m: Nat, +k: Nat, +budget: Nat,
+               r: Array<Nat> & Nat) -> Hist5Res:
+  (seen2, +old) = r
+  hist5_hit(seen2, tbl, m, k, Nat.is_eq(old, gen), budget)
+
+def hist5_same(seen: Array<Nat>, tbl: Array<U32>, +m: Nat, +k: Nat,
+               +budget: Nat, skip_self: Bool) -> Hist5Res:
+  match skip_self:
+    case True{}:
+      Hist5Pruned{seen, tbl}
+    case False{}:
+      Hist5Ok{seen, tbl, m, k, budget}
+
+def hist5_step(seen: Array<Nat>, tbl: Array<U32>, +gen: Nat, +m: Nat, +k: Nat,
+               +budget: Nat, +skip_self: Bool, +code: U32, same: Bool) -> Hist5Res:
+  match same:
+    case True{}:
+      hist5_same(seen, tbl, m, k, budget, skip_self)
+    case False{}:
+      hist5_swap(tbl, gen, m, k, budget, Array.swap(Nat, seen, code, gen))
+
+def hist5_tbl_done(seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget: Nat,
+                   +skip_self: Bool, r: Array<U32> & U32) -> Hist5Res:
+  (tbl2, +code) = r
+  hist5_step(seen, tbl2, gen, m, k, budget, skip_self, code, U32.is_eq(code, 682))
+
+def hist5_one(+row: U32, +cw: CWord, seen: Array<Nat>, tbl: Array<U32>,
+              +gen: Nat, +m: Nat, +k: Nat, +budget: Nat,
+              +skip_self: Bool) -> Hist5Res:
+  match cw:
+    case CWord{+ci, grow, w}:
+      hist5_tbl_done(seen, gen, m, k, budget, skip_self,
+        Array.get(U32, tbl, U32.add(row, ci)))
+
+def hist5_go(+row: U32, +S: +List<CWord>, +gen: Nat, +skip_self: Bool,
+             st: Hist5Res) -> Hist5Res:
+  match S:
+    case Nil{}:
+      st
+    case Con{cw, rest}:
+      match st:
+        case Hist5Pruned{seen, tbl}:
+          Hist5Pruned{seen, tbl}
+        case Hist5Ok{seen, tbl, +m, +k, +budget}:
+          hist5_go(row, rest, gen, skip_self,
+            hist5_one(row, cw, seen, tbl, gen, m, k, budget, skip_self))
+
+# Pass 2: O(1) table-backed bucketing + LCF drain + O(1) exact ThreeItem solver.
+type Fill5State is Type:
+  Fill5State{buckets: Array<+List<CWord>>, tbl: Array<U32>, touched: +List<U32>}
+
+def fill5_get_done(+cw: CWord, +code: U32, tbl: Array<U32>,
+                   +touched: +List<U32>,
+                   r: Array<+List<CWord>> & +List<CWord>) -> Fill5State:
+  (b2, +old) = r
+  match old:
+    case Nil{}:
+      Fill5State{Array.set(+List<CWord>, b2, code, cw <> Nil{}), tbl,
+                 code <> touched}
+    case Con{h, t}:
+      Fill5State{Array.set(+List<CWord>, b2, code, cw <> (h <> t)), tbl,
+                 touched}
+
+def fill5_step(+cw: CWord, +code: U32, same: Bool,
+               buckets: Array<+List<CWord>>, tbl: Array<U32>,
+               +touched: +List<U32>) -> Fill5State:
+  match same:
+    case True{}:
+      Fill5State{buckets, tbl, touched}
+    case False{}:
+      fill5_get_done(cw, code, tbl, touched,
+        Array.get(+List<CWord>, buckets, code))
+
+def fill5_tbl_done(+cw: CWord, buckets: Array<+List<CWord>>,
+                   +touched: +List<U32>,
+                   r: Array<U32> & U32) -> Fill5State:
+  (tbl2, +code) = r
+  fill5_step(cw, code, U32.is_eq(code, 682), buckets, tbl2, touched)
+
+def fill5_one(+row: U32, +cw: CWord, buckets: Array<+List<CWord>>,
+              tbl: Array<U32>, +touched: +List<U32>) -> Fill5State:
+  match cw:
+    case CWord{+ci, +grow, +w}:
+      fill5_tbl_done(CWord{ci, grow, w}, buckets, touched,
+        Array.get(U32, tbl, U32.add(row, ci)))
+
+def fill5_go(+row: U32, +S: +List<CWord>, st: Fill5State) -> Fill5State:
+  match S:
+    case Nil{}:
+      st
+    case Con{cw, rest}:
+      match st:
+        case Fill5State{buckets, tbl, +touched}:
+          fill5_go(row, rest, fill5_one(row, cw, buckets, tbl, touched))
+
+type RevCWordsLen is Data:
+  RevCWordsLen{len: Nat, words: +List<CWord>}
+
+def rev_cwords_len(+xs: +List<CWord>, +acc: +List<CWord>,
+                   +len: Nat) -> RevCWordsLen:
+  match xs:
+    case Nil{}:
+      RevCWordsLen{len, acc}
+    case Con{cw, t}:
+      rev_cwords_len(t, cw <> acc, Nat.add(1n, len))
+
+type BigClass is Data:
+  BigClass{fb: +List<Feedback.Color>, ws: +List<CWord>, len: Nat}
+
+def next_big_le(+len: Nat, +bs: +List<BigClass>) -> Bool:
+  match bs:
+    case Nil{}:
+      True{}
+    case Con{h, t}:
+      match h:
+        case BigClass{fb2, ws2, len2}:
+          Nat.is_le(len, len2)
+
+def insert_big(+bc: BigClass, +len: Nat, +bs: +List<BigClass>,
+               le: Bool) -> +List<BigClass>:
+  match bs:
+    case Nil{}:
+      bc <> Nil{}
+    case Con{h, t}:
+      match le:
+        case True{}:
+          bc <> (h <> t)
+        case False{}:
+          h <> insert_big(bc, len, t, next_big_le(len, t))
+
+def emit_bigs(+bs: +List<BigClass>, +rem_lb: Nat, +acc: +List<Item>) -> +List<Item>:
+  match bs:
+    case Nil{}:
+      acc
+    case Con{bc, rest}:
+      match bc:
+        case BigClass{+fb, +ws, +len}:
+          +clb = Nat.sub(Nat.add(len, len), 1n)
+          emit_bigs(rest, Nat.add(clb, rem_lb),
+            ClassItem{fb, ws, len, rem_lb} <> (Add{fb, rem_lb} <> acc))
+
+def two_tree(+w1: +List<Nat>, +w2: +List<Nat>) -> Tree.Tree:
+  Tree.Node{w1, Tree.Child{feedback_fast(w1, w2), Tree.Node{w2, Nil{}}} <> Nil{}}
+
+type ThreeRes is Type:
+  ThreeRes{tree: Tree.Tree, cost: Nat, tbl: Array<U32>}
+
+def three_tree_sep(+g: +List<Nat>, +c1: U32, +w1: +List<Nat>,
+                   +c2: U32, +w2: +List<Nat>) -> Tree.Tree:
+  Tree.Node{g,
+    Tree.Child{decode_fb5(c1), Tree.Node{w1, Nil{}}}
+    <> (Tree.Child{decode_fb5(c2), Tree.Node{w2, Nil{}}} <> Nil{})}
+
+def three_tree_6(+w1: +List<Nat>, +c12: U32, +w2: +List<Nat>,
+                 +c23: U32, +w3: +List<Nat>) -> Tree.Tree:
+  Tree.Node{w1,
+    Tree.Child{decode_fb5(c12),
+      Tree.Node{w2, Tree.Child{decode_fb5(c23), Tree.Node{w3, Nil{}}} <> Nil{}}}
+    <> Nil{}}
+
+def three_s3_cmp(+w1: +List<Nat>, +c12: U32, +w2: +List<Nat>, +c23: U32,
+                 +w3: +List<Nat>, +c31: U32, +c32: U32,
+                 same: Bool, tbl: Array<U32>) -> ThreeRes:
+  match same:
+    case False{}:
+      ThreeRes{three_tree_sep(w3, c31, w1, c32, w2), 5n, tbl}
+    case True{}:
+      ThreeRes{three_tree_6(w1, c12, w2, c23, w3), 6n, tbl}
+
+def three_s3_b(+w1: +List<Nat>, +c12: U32, +w2: +List<Nat>, +c23: U32,
+               +w3: +List<Nat>, +c31: U32, r: Array<U32> & U32) -> ThreeRes:
+  (tbl, +c32) = r
+  three_s3_cmp(w1, c12, w2, c23, w3, c31, c32, U32.is_eq(c31, c32), tbl)
+
+def three_s3_a(+w1: +List<Nat>, +c12: U32, +ci2: U32, +w2: +List<Nat>,
+               +c23: U32, +gr3: U32, +w3: +List<Nat>,
+               r: Array<U32> & U32) -> ThreeRes:
+  (tbl, +c31) = r
+  three_s3_b(w1, c12, w2, c23, w3, c31, Array.get(U32, tbl, U32.add(gr3, ci2)))
+
+def three_s2_cmp(+ci1: U32, +w1: +List<Nat>, +c12: U32,
+                 +ci2: U32, +w2: +List<Nat>, +c21: U32, +c23: U32,
+                 +gr3: U32, +w3: +List<Nat>,
+                 same: Bool, tbl: Array<U32>) -> ThreeRes:
+  match same:
+    case False{}:
+      ThreeRes{three_tree_sep(w2, c21, w1, c23, w3), 5n, tbl}
+    case True{}:
+      three_s3_a(w1, c12, ci2, w2, c23, gr3, w3,
+        Array.get(U32, tbl, U32.add(gr3, ci1)))
+
+def three_s2_b(+ci1: U32, +w1: +List<Nat>, +c12: U32, +ci2: U32, +w2: +List<Nat>,
+               +c21: U32, +gr3: U32, +w3: +List<Nat>,
+               r: Array<U32> & U32) -> ThreeRes:
+  (tbl, +c23) = r
+  three_s2_cmp(ci1, w1, c12, ci2, w2, c21, c23, gr3, w3,
+    U32.is_eq(c21, c23), tbl)
+
+def three_s2_a(+ci1: U32, +w1: +List<Nat>, +c12: U32, +ci2: U32, +gr2: U32,
+               +w2: +List<Nat>, +ci3: U32, +gr3: U32, +w3: +List<Nat>,
+               r: Array<U32> & U32) -> ThreeRes:
+  (tbl, +c21) = r
+  three_s2_b(ci1, w1, c12, ci2, w2, c21, gr3, w3,
+    Array.get(U32, tbl, U32.add(gr2, ci3)))
+
+def three_s1_cmp(+ci1: U32, +w1: +List<Nat>, +c12: U32, +c13: U32,
+                 +ci2: U32, +gr2: U32, +w2: +List<Nat>,
+                 +ci3: U32, +gr3: U32, +w3: +List<Nat>,
+                 same: Bool, tbl: Array<U32>) -> ThreeRes:
+  match same:
+    case False{}:
+      ThreeRes{three_tree_sep(w1, c12, w2, c13, w3), 5n, tbl}
+    case True{}:
+      three_s2_a(ci1, w1, c12, ci2, gr2, w2, ci3, gr3, w3,
+        Array.get(U32, tbl, U32.add(gr2, ci1)))
+
+def three_s1_b(+ci1: U32, +w1: +List<Nat>, +c12: U32,
+               +ci2: U32, +gr2: U32, +w2: +List<Nat>,
+               +ci3: U32, +gr3: U32, +w3: +List<Nat>,
+               r: Array<U32> & U32) -> ThreeRes:
+  (tbl, +c13) = r
+  three_s1_cmp(ci1, w1, c12, c13, ci2, gr2, w2, ci3, gr3, w3,
+    U32.is_eq(c12, c13), tbl)
+
+def three_s1_a(+ci1: U32, +gr1: U32, +w1: +List<Nat>,
+               +ci2: U32, +gr2: U32, +w2: +List<Nat>,
+               +ci3: U32, +gr3: U32, +w3: +List<Nat>,
+               r: Array<U32> & U32) -> ThreeRes:
+  (tbl, +c12) = r
+  three_s1_b(ci1, w1, c12, ci2, gr2, w2, ci3, gr3, w3,
+    Array.get(U32, tbl, U32.add(gr1, ci3)))
+
+def solve_three_tbl(+cw1: CWord, +cw2: CWord, +cw3: CWord,
+                    tbl: Array<U32>) -> ThreeRes:
+  match cw1:
+    case CWord{+ci1, +gr1, +w1}:
+      match cw2:
+        case CWord{+ci2, +gr2, +w2}:
+          match cw3:
+            case CWord{+ci3, +gr3, +w3}:
+              three_s1_a(ci1, gr1, w1, ci2, gr2, w2, ci3, gr3, w3,
+                Array.get(U32, tbl, U32.add(gr1, ci2)))
+
+type Drain5State is Type:
+  Drain5State{buckets: Array<+List<CWord>>, tbl: Array<U32>, rem_lb: Nat,
+              items: +List<Item>, bigs: +List<BigClass>}
+
+def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
+                   +items: +List<Item>, +bigs: +List<BigClass>,
+                   buckets: Array<+List<CWord>>, tbl: Array<U32>,
+                   rl: RevCWordsLen) -> Drain5State:
+  match rl:
+    case RevCWordsLen{+len, +ws}:
+      Drain5State{buckets, tbl, rem_lb, items,
+        insert_big(BigClass{fb, ws, len}, len, bigs, next_big_le(len, bigs))}
+
+def drain5_add_three(+fb: +List<Feedback.Color>, +rem_lb: Nat,
+                     +items: +List<Item>, +bigs: +List<BigClass>,
+                     buckets: Array<+List<CWord>>,
+                     tr: ThreeRes) -> Drain5State:
+  match tr:
+    case ThreeRes{tree, +cost, tbl2}:
+      Drain5State{buckets, tbl2, Nat.add(cost, rem_lb),
+        DoneItem{fb, tree, cost} <> items, bigs}
+
+def cword_w(+cw: CWord) -> +List<Nat>:
+  match cw:
+    case CWord{ci, grow, w}:
+      w
+
+def drain5_add(+code: U32, +rem_lb: Nat, +items: +List<Item>,
+               +bigs: +List<BigClass>, buckets: Array<+List<CWord>>,
+               tbl: Array<U32>, +rws: +List<CWord>) -> Drain5State:
+  match rws:
+    case Nil{}:
+      +fb = decode_fb5(code)
+      Drain5State{buckets, tbl, rem_lb,
+        ClassItem{fb, Nil{}, 0n, rem_lb} <> (Add{fb, rem_lb} <> items), bigs}
+    case Con{+cw, +wt}:
+      match wt:
+        case Nil{}:
+          Drain5State{buckets, tbl, Nat.add(1n, rem_lb),
+            OneItem{decode_fb5(code), cword_w(cw)} <> items, bigs}
+        case Con{+cw2, +wt2}:
+          match wt2:
+            case Nil{}:
+              Drain5State{buckets, tbl, Nat.add(3n, rem_lb),
+                TwoItem{decode_fb5(code), cword_w(cw2), cword_w(cw)} <> items, bigs}
+            case Con{+cw3, +wt3}:
+              match wt3:
+                case Nil{}:
+                  drain5_add_three(decode_fb5(code), rem_lb, items, bigs, buckets,
+                    solve_three_tbl(cw3, cw2, cw, tbl))
+                case Con{+cw4, +wt4}:
+                  drain5_add_ge2(decode_fb5(code), rem_lb, items, bigs, buckets, tbl,
+                    rev_cwords_len(wt4, cw4 <> (cw3 <> (cw2 <> (cw <> Nil{}))), 4n))
+
+def drain5_swap(+code: U32, +rem_lb: Nat, +items: +List<Item>,
+                +bigs: +List<BigClass>, tbl: Array<U32>,
+                r: Array<+List<CWord>> & +List<CWord>) -> Drain5State:
+  (b2, +rws) = r
+  drain5_add(code, rem_lb, items, bigs, b2, tbl, rws)
+
+def drain5_go(+touched: +List<U32>, st: Drain5State) -> Drain5State:
+  match touched:
+    case Nil{}:
+      st
+    case Con{+code, +rest}:
+      match st:
+        case Drain5State{buckets, tbl, +rem_lb, +items, +bigs}:
+          drain5_go(rest,
+            drain5_swap(code, rem_lb, items, bigs, tbl,
+              Array.swap(+List<CWord>, buckets, code, Nil{})))
+
+def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
+                  dr: Drain5State) -> GuessRes:
+  match dr:
+    case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
+      GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
+               Buf5{seen, buckets3, tbl3, gen2}}
+
+def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
+               fs: Fill5State) -> GuessRes:
+  match fs:
+    case Fill5State{buckets2, tbl2, +touched}:
+      finish_drain5(g, seen, gen2,
+        drain5_go(touched, Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
+
+def schedule5_lb(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                 seen: Array<Nat>, buckets: Array<+List<CWord>>,
+                 tbl: Array<U32>, +gen2: Nat, skip: Bool) -> GuessRes:
+  match skip:
+    case True{}:
+      GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2}}
+    case False{}:
+      run_drain5(g, n, seen, gen2,
+        fill5_go(row, S, Fill5State{buckets, tbl, Nil{}}))
+
+def schedule5_usable(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                     +best: SolveRef.Best, seen: Array<Nat>,
+                     buckets: Array<+List<CWord>>, tbl: Array<U32>,
+                     +gen2: Nat, +m: Nat, +k: Nat, usable: Bool) -> GuessRes:
+  match usable:
+    case False{}:
+      GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2}}
+    case True{}:
+      +lb = Nat.sub(Nat.add(n, Nat.add(m, m)), k)
+      schedule5_lb(row, g, S, n, seen, buckets, tbl, gen2,
+        skippable(best, lb))
+
+def schedule5_hist(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                   +best: SolveRef.Best, buckets: Array<+List<CWord>>,
+                   +gen: Nat, hr: Hist5Res) -> GuessRes:
+  match hr:
+    case Hist5Pruned{seen2, tbl2}:
+      GuessRes{Nil{}, Buf5{seen2, buckets, tbl2, Nat.add(1n, gen)}}
+    case Hist5Ok{seen2, tbl2, +m, +k, budget}:
+      schedule5_usable(row, g, S, n, best, seen2, buckets, tbl2,
+        Nat.add(1n, gen), m, k,
+        Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))
+
+def budget_for(+n: Nat, +best: SolveRef.Best, skip_self: Bool) -> Nat:
+  match skip_self:
+    case True{}:
+      Nat.sub(Nat.sub(best_cost(best), Nat.add(n, n)), 1n)
+    case False{}:
+      Nat.sub(best_cost(best), Nat.add(n, n))
+
+def guess_body_buf_ge2(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                       +best: SolveRef.Best, +skip_self: Bool, buf: Buf5) -> GuessRes:
+  match buf:
+    case NoBuf{}:
+      +fg = fgroups_build_fast(g, cwords_words(S), Nil{})
+      GuessRes{schedule_fguess(True{}, g, fg, n, best, fgroups_smaller(n, fg)),
+               NoBuf{}}
+    case Buf5{seen, buckets, tbl, +gen}:
+      +budget0 = budget_for(n, best, skip_self)
+      schedule5_hist(row, g, S, n, best, buckets, gen,
+        hist5_go(row, S, gen, skip_self, Hist5Ok{seen, tbl, 0n, 0n, budget0}))
+
+def guess_body_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                   +best: SolveRef.Best, +skip_self: Bool, buf: Buf5) -> GuessRes:
+  match S:
+    case Nil{}:
+      +fg = fgroups_build_fast(g, Nil{}, Nil{})
+      GuessRes{schedule_fguess(True{}, g, fg, 0n, best, fgroups_smaller(0n, fg)),
+               buf}
+    case Con{+cw, +t}:
+      match t:
+        case Nil{}:
+          GuessRes{schedule_one_guess(g, best, word_eq_fast(g, cword_w(cw))), buf}
+        case Con{+cw2, +t2}:
+          guess_body_buf_ge2(row, g, cw <> (cw2 <> t2), n, best, skip_self, buf)
+
+def guess_items_mem_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                        +best: SolveRef.Best, +skip_self: Bool, buf: Buf5,
+                        in_s: Bool) -> GuessRes:
+  match in_s:
+    case True{}:
+      guess_body_buf(row, g, S, n, best, skip_self, buf)
+    case False{}:
+      GuessRes{Nil{}, buf}
+
+def guess_items_nodup_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                          +best: SolveRef.Best, +skip_self: Bool, buf: Buf5,
+                          le_2n: Bool) -> GuessRes:
+  match le_2n:
+    case False{}:
+      guess_body_buf(row, g, S, n, best, skip_self, buf)
+    case True{}:
+      guess_items_mem_buf(row, g, S, n, best, skip_self, buf,
+        member_word_fast(g, cwords_words(S)))
+
+def guess_items_buf(+nodup: Bool, +row: U32, +g: +List<Nat>, +S: +List<CWord>,
+                    +n: Nat, +floor: Nat, +best: SolveRef.Best, buf: Buf5) -> GuessRes:
+  match nodup:
+    case True{}:
+      +skip_self = Nat.is_eq(floor, Nat.add(n, n))
+      guess_items_nodup_buf(row, g, S, n, best, skip_self, buf,
+        skippable(best, Nat.add(n, n)))
+    case False{}:
+      +ws = cwords_words(S)
+      GuessRes{
+        guess_items_go(False{}, g, ws, n, best, skippable(best, pre_lb(n, g, ws))),
+        buf}
+
+type StepRes is Type:
+  StepRes{best: SolveRef.Best, buf: Buf5}
+
+def step_res_best(r: StepRes) -> SolveRef.Best:
+  match r:
+    case StepRes{best, buf}:
+      best
+
+def step_res_buf(r: StepRes) -> Buf5:
+  match r:
+    case StepRes{best, buf}:
+      buf
+
+def gres_buf(gres: GuessRes) -> Buf5:
+  match gres:
+    case GuessRes{_, buf}:
+      buf
+
+def dummy_step_zero() -> StepRes:
+  StepRes{dummy_zero(), NoBuf{}}
+
 def step(+fuel: Nat, +gs: GList, +phase: Nat, +cs: +List<Item>,
-         +glist_G: GList, +S: +List<+List<Nat>>, +n: Nat, +nodup: Bool,
+         +glist_G: GList, +S: +List<CWord>, +n: Nat, +nodup: Bool,
          +floor: Nat, +inf: Nat, +g: +List<Nat>, +kids: +List<Tree.Child>,
-         +sum: Nat, +best: SolveRef.Best, +pending: SolveRef.Best, skip: Bool,
-         done: Bool, gres: GuessRes) -> SolveRef.Best:
+         +sum: Nat, +best: SolveRef.Best, pending: StepRes, skip: Bool,
+         done: Bool, gres: GuessRes) -> StepRes:
   match fuel:
     case 0n:
       match gs:
         case GEnd{}:
           match cs:
             case Nil{}:
-              best
+              StepRes{best, gres_buf(gres)}
             case Con{item, rest}:
               match item:
                 case Begin{g2}:
-                  step(0n, GEnd{}, phase, rest, glist_G, S, n, nodup, floor,
-                       inf, g2, Nil{}, 0n, best, pending, False{}, False{}, gres)
+                  step(0n, GEnd{}, phase, rest, glist_G, S, n, nodup,
+                       floor, inf, g2, Nil{}, 0n, best, pending, False{},
+                       False{}, gres)
                 case ClassItem{fb, words, wlen, tail_lb}:
-                  dummy_inf(inf)
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
                 case OneItem{fb, w}:
-                  dummy_inf(inf)
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
                 case TwoItem{fb, w1, w2}:
-                  dummy_inf(inf)
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
+                case DoneItem{fb, tree, cost}:
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
                 case Add{fb, tail_lb}:
                   match pending:
-                    case SolveRef.Best{tree, cost}:
-                      step(0n, GEnd{}, phase, rest, glist_G, S, n, nodup, floor,
-                           inf, g, Tree.Child{fb, tree} <> kids,
-                           SolveRef.sat_add(inf, sum, cost), best,
-                           dummy_zero(), skip, False{}, gres)
+                    case StepRes{pbest, pbuf}:
+                      match pbest:
+                        case SolveRef.Best{tree, cost}:
+                          step(0n, GEnd{}, phase, rest, glist_G, S, n, nodup,
+                               floor, inf, g, Tree.Child{fb, tree} <> kids,
+                               SolveRef.sat_add(inf, sum, cost), best,
+                               dummy_step_zero(), skip, False{}, gres)
                 case End{}:
-                  step(0n, GEnd{}, phase, rest, glist_G, S, n, nodup, floor,
-                       inf, Nil{}, Nil{}, 0n,
+                  step(0n, GEnd{}, phase, rest, glist_G, S, n, nodup,
+                       floor, inf, Nil{}, Nil{}, 0n,
                        SolveRef.finish_guess(inf, g, kids, sum, n, best),
-                       dummy_zero(), False{}, False{}, gres)
-        case GThen{+grest}:
+                       dummy_step_zero(), False{}, False{}, gres)
+        case GThen{grest}:
           match cs:
             case Nil{}:
-              step(0n, grest, phase, Nil{}, glist_G, S, n, nodup, floor, inf,
-                   Nil{}, Nil{}, 0n, best, dummy_zero(), False{}, False{}, gres)
+              step(0n, grest, phase, Nil{}, glist_G, S, n, nodup,
+                   floor, inf, Nil{}, Nil{}, 0n, best, dummy_step_zero(),
+                   False{}, False{}, gres)
             case Con{item, rest}:
-              dummy_inf(inf)
-        case GTry{+g2, +grest}:
+              StepRes{dummy_inf(inf), gres_buf(gres)}
+        case GTry{+row2, +g2, +grest}:
           match cs:
             case Nil{}:
               step(0n, grest, phase, Begin{g2} <> (End{} <> Nil{}),
                    glist_G, S, n, nodup, floor, inf, Nil{}, Nil{}, 0n, best,
-                   dummy_zero(), False{}, False{}, gres)
+                   dummy_step_zero(), False{}, False{}, gres)
             case Con{item, rest}:
               match item:
                 case Begin{g3}:
-                  step(0n, GTry{g2, grest}, phase, rest, glist_G, S, n, nodup,
-                       floor, inf, g3, Nil{}, 0n, best, pending, False{},
+                  step(0n, GTry{row2, g2, grest}, phase, rest, glist_G, S, n,
+                       nodup, floor, inf, g3, Nil{}, 0n, best, pending, False{},
                        False{}, gres)
                 case ClassItem{fb, words, wlen, tail_lb}:
-                  dummy_inf(inf)
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
                 case OneItem{fb, w}:
-                  dummy_inf(inf)
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
                 case TwoItem{fb, w1, w2}:
-                  dummy_inf(inf)
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
+                case DoneItem{fb, tree, cost}:
+                  StepRes{dummy_inf(inf), gres_buf(gres)}
                 case Add{fb, tail_lb}:
                   match pending:
-                    case SolveRef.Best{tree, cost}:
-                      step(0n, GTry{g2, grest}, phase, rest, glist_G, S, n,
-                           nodup, floor, inf, g, Tree.Child{fb, tree} <> kids,
-                           SolveRef.sat_add(inf, sum, cost), best,
-                           dummy_zero(), skip, False{}, gres)
+                    case StepRes{pbest, pbuf}:
+                      match pbest:
+                        case SolveRef.Best{tree, cost}:
+                          step(0n, GTry{row2, g2, grest}, phase, rest, glist_G, S,
+                               n, nodup, floor, inf, g, Tree.Child{fb, tree} <> kids,
+                               SolveRef.sat_add(inf, sum, cost), best,
+                               dummy_step_zero(), skip, False{}, gres)
                 case End{}:
-                  step(0n, GTry{g2, grest}, phase, rest, glist_G, S, n, nodup,
-                       floor, inf, Nil{}, Nil{}, 0n,
+                  step(0n, GTry{row2, g2, grest}, phase, rest, glist_G, S, n,
+                       nodup, floor, inf, Nil{}, Nil{}, 0n,
                        SolveRef.finish_guess(inf, g, kids, sum, n, best),
-                       dummy_zero(), False{}, False{}, gres)
+                       dummy_step_zero(), False{}, False{}, gres)
     case 1n+p:
       match gs:
         case GEnd{}:
@@ -1529,278 +1813,326 @@ def step(+fuel: Nat, +gs: GList, +phase: Nat, +cs: +List<Item>,
             case 1n+q:
               match gres:
                 case GuessRes{items, buf2}:
-                  step(fuel, GEnd{}, q, items, glist_G, S, n, nodup, floor,
-                       inf, Nil{}, Nil{}, 0n, best, dummy_zero(), False{},
-                       False{}, GuessRes{Nil{}, buf2})
+                  step(fuel, GEnd{}, q, items, glist_G, S, n, nodup,
+                       floor, inf, Nil{}, Nil{}, 0n, best, dummy_step_zero(),
+                       False{}, False{}, GuessRes{Nil{}, buf2})
             case 0n:
               match cs:
                 case Nil{}:
-                  best
+                  StepRes{best, gres_buf(gres)}
                 case Con{item, rest}:
                   match item:
                     case Begin{g2}:
-                      step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup, floor,
-                           inf, g2, Nil{}, 0n, best, dummy_zero(), False{},
-                           False{}, gres)
+                      step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
+                           floor, inf, g2, Nil{}, 0n, best, dummy_step_zero(),
+                           False{}, False{}, gres)
                     case ClassItem{fb, words, +wlen, +tail_lb}:
                       match skip:
                         case True{}:
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, g, kids, sum, best, dummy_zero(),
-                               True{}, False{}, gres)
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
-                          +fl = init_floor(wlen)
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, g, kids, sum, best,
-                               step(p, child_glist(nodup, words, wlen, b0, glist_G),
-                                    0n, Nil{}, glist_G, words, wlen, nodup, fl,
-                                    inf, Nil{}, Nil{}, 0n, b0, dummy_zero(),
-                                    False{}, is_floor_hit(nodup, fl, b0),
-                                    GuessRes{Nil{}, mk_buf_init(nodup, wlen, b0)}),
-                               False{}, False{}, gres)
+                          match gres:
+                            case GuessRes{_, buf}:
+                              +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
+                              +fl = init_floor(wlen)
+                              step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                                   nodup, floor, inf, g, kids, sum, best,
+                                   step(p, child_glist(nodup, words, wlen, b0, glist_G),
+                                        0n, Nil{}, glist_G, words, wlen, nodup, fl,
+                                        inf, Nil{}, Nil{}, 0n, b0, dummy_step_zero(),
+                                        False{}, is_floor_hit(nodup, fl, b0),
+                                        GuessRes{Nil{}, buf}),
+                                   False{}, False{}, GuessRes{Nil{}, NoBuf{}})
                     case OneItem{fb, w}:
                       match skip:
                         case True{}:
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, g, kids, sum, best, dummy_zero(),
-                               True{}, False{}, gres)
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, g,
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g,
                                Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                                SolveRef.sat_add(inf, sum, 1n), best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
                     case TwoItem{fb, w1, w2}:
                       match skip:
                         case True{}:
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, g, kids, sum, best, dummy_zero(),
-                               True{}, False{}, gres)
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, g,
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g,
                                Tree.Child{fb, two_tree(w1, w2)} <> kids,
                                SolveRef.sat_add(inf, sum, 3n), best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
+                    case DoneItem{fb, tree, cost}:
+                      match skip:
+                        case True{}:
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
+                        case False{}:
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g,
+                               Tree.Child{fb, tree} <> kids,
+                               SolveRef.sat_add(inf, sum, cost), best,
+                               dummy_step_zero(), False{}, False{}, gres)
                     case Add{fb, +tail_lb}:
                       match pending:
-                        case SolveRef.Best{tree, +cost}:
-                          match skip:
-                            case True{}:
-                              step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
-                                   nodup, floor, inf, g, kids, sum, best,
-                                   dummy_zero(), True{}, False{}, gres)
-                            case False{}:
-                              +sum2 = SolveRef.sat_add(inf, sum, cost)
-                              step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
-                                   nodup, floor, inf, g,
-                                   Tree.Child{fb, tree} <> kids,
-                                   sum2, best, dummy_zero(),
-                                   skippable(best, Nat.add(sum2, tail_lb)),
-                                   False{}, gres)
+                        case StepRes{pbest, pbuf}:
+                          match pbest:
+                            case SolveRef.Best{tree, +cost}:
+                              match skip:
+                                case True{}:
+                                  step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                                       nodup, floor, inf, g, kids, sum, best,
+                                       dummy_step_zero(), True{}, False{}, gres)
+                                case False{}:
+                                  +sum2 = SolveRef.sat_add(inf, sum, cost)
+                                  step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                                       nodup, floor, inf, g,
+                                       Tree.Child{fb, tree} <> kids,
+                                       sum2, best, dummy_step_zero(),
+                                       skippable(best, Nat.add(sum2, tail_lb)),
+                                       False{}, GuessRes{Nil{}, pbuf})
                     case End{}:
                       match skip:
                         case True{}:
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, Nil{}, Nil{}, 0n, best,
-                               dummy_zero(), False{}, False{}, gres)
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, Nil{}, Nil{}, 0n, best,
+                               dummy_step_zero(), False{}, False{}, gres)
                         case False{}:
                           +best2 = SolveRef.finish_guess(inf, g, kids, sum, n, best)
-                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n, nodup,
-                               floor, inf, Nil{}, Nil{}, 0n, best2,
-                               dummy_zero(), False{},
+                          step(fuel, GEnd{}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, Nil{}, Nil{}, 0n, best2,
+                               dummy_step_zero(), False{},
                                is_floor_hit(nodup, floor, best2), gres)
-        case GThen{+grest}:
+        case GThen{grest}:
           match phase:
             case 1n+q:
               match gres:
                 case GuessRes{items, buf2}:
                   step(fuel, GThen{grest}, q, items, glist_G, S, n, nodup,
-                       floor, inf, Nil{}, Nil{}, 0n, best, dummy_zero(),
+                       floor, inf, Nil{}, Nil{}, 0n, best, dummy_step_zero(),
                        False{}, False{}, GuessRes{Nil{}, buf2})
             case 0n:
               match cs:
                 case Nil{}:
                   match done:
                     case True{}:
-                      best
+                      StepRes{best, gres_buf(gres)}
                     case False{}:
                       +fl2 = Nat.add(n, n)
                       step(fuel, grest, 0n, Nil{}, glist_G, S, n, nodup, fl2,
-                           inf, Nil{}, Nil{}, 0n, best, dummy_zero(), False{},
-                           is_floor_hit(nodup, fl2, best),
-                           ensure_buf(nodup, n, best, gres))
+                           inf, Nil{}, Nil{}, 0n, best, dummy_step_zero(),
+                           False{}, is_floor_hit(nodup, fl2, best), gres)
                 case Con{item, rest}:
                   match item:
                     case Begin{g2}:
                       step(fuel, GThen{grest}, 0n, rest, glist_G, S, n, nodup,
-                           floor, inf, g2, Nil{}, 0n, best, dummy_zero(),
+                           floor, inf, g2, Nil{}, 0n, best, dummy_step_zero(),
                            False{}, False{}, gres)
                     case ClassItem{fb, words, +wlen, +tail_lb}:
                       match skip:
                         case True{}:
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, g, kids, sum, best,
-                               dummy_zero(), True{}, False{}, gres)
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
-                          +fl = init_floor(wlen)
-                          step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g, kids, sum, best,
-                               step(p, child_glist(nodup, words, wlen, b0, glist_G),
-                                    0n, Nil{}, glist_G, words, wlen, nodup, fl,
-                                    inf, Nil{}, Nil{}, 0n, b0, dummy_zero(),
-                                    False{}, is_floor_hit(nodup, fl, b0),
-                                    GuessRes{Nil{}, mk_buf_init(nodup, wlen, b0)}),
-                               False{}, False{}, gres)
+                          match gres:
+                            case GuessRes{_, buf}:
+                              +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
+                              +fl = init_floor(wlen)
+                              step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
+                                   nodup, floor, inf, g, kids, sum, best,
+                                   step(p, child_glist(nodup, words, wlen, b0, glist_G),
+                                        0n, Nil{}, glist_G, words, wlen, nodup, fl,
+                                        inf, Nil{}, Nil{}, 0n, b0, dummy_step_zero(),
+                                        False{}, is_floor_hit(nodup, fl, b0),
+                                        GuessRes{Nil{}, buf}),
+                                   False{}, False{}, GuessRes{Nil{}, NoBuf{}})
                     case OneItem{fb, w}:
                       match skip:
                         case True{}:
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, g, kids, sum, best,
-                               dummy_zero(), True{}, False{}, gres)
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, g,
                                Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                                SolveRef.sat_add(inf, sum, 1n), best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
                     case TwoItem{fb, w1, w2}:
                       match skip:
                         case True{}:
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, g, kids, sum, best,
-                               dummy_zero(), True{}, False{}, gres)
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, g,
                                Tree.Child{fb, two_tree(w1, w2)} <> kids,
                                SolveRef.sat_add(inf, sum, 3n), best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
+                    case DoneItem{fb, tree, cost}:
+                      match skip:
+                        case True{}:
+                          step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
+                        case False{}:
+                          step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
+                               nodup, floor, inf, g,
+                               Tree.Child{fb, tree} <> kids,
+                               SolveRef.sat_add(inf, sum, cost), best,
+                               dummy_step_zero(), False{}, False{}, gres)
                     case Add{fb, +tail_lb}:
                       match pending:
-                        case SolveRef.Best{tree, +cost}:
-                          match skip:
-                            case True{}:
-                              step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
-                                   nodup, floor, inf, g, kids, sum, best,
-                                   dummy_zero(), True{}, False{}, gres)
-                            case False{}:
-                              +sum2 = SolveRef.sat_add(inf, sum, cost)
-                              step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
-                                   nodup, floor, inf, g,
-                                   Tree.Child{fb, tree} <> kids,
-                                   sum2, best, dummy_zero(),
-                                   skippable(best, Nat.add(sum2, tail_lb)),
-                                   False{}, gres)
+                        case StepRes{pbest, pbuf}:
+                          match pbest:
+                            case SolveRef.Best{tree, +cost}:
+                              match skip:
+                                case True{}:
+                                  step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
+                                       nodup, floor, inf, g, kids, sum, best,
+                                       dummy_step_zero(), True{}, False{}, gres)
+                                case False{}:
+                                  +sum2 = SolveRef.sat_add(inf, sum, cost)
+                                  step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
+                                       nodup, floor, inf, g,
+                                       Tree.Child{fb, tree} <> kids,
+                                       sum2, best, dummy_step_zero(),
+                                       skippable(best, Nat.add(sum2, tail_lb)),
+                                       False{}, GuessRes{Nil{}, pbuf})
                     case End{}:
                       match skip:
                         case True{}:
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, Nil{}, Nil{}, 0n, best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
                         case False{}:
                           +best2 = SolveRef.finish_guess(inf, g, kids, sum, n, best)
                           step(fuel, GThen{grest}, 0n, rest, glist_G, S, n,
                                nodup, floor, inf, Nil{}, Nil{}, 0n, best2,
-                               dummy_zero(), False{},
+                               dummy_step_zero(), False{},
                                is_floor_hit(nodup, floor, best2), gres)
-        case GTry{+g2, +grest}:
+        case GTry{+row2, +g2, +grest}:
           match phase:
             case 1n+q:
               match gres:
                 case GuessRes{items, buf2}:
-                  step(fuel, GTry{g2, grest}, q, items, glist_G, S, n, nodup,
-                       floor, inf, Nil{}, Nil{}, 0n, best, dummy_zero(),
+                  step(fuel, GTry{row2, g2, grest}, q, items, glist_G, S, n,
+                       nodup, floor, inf, Nil{}, Nil{}, 0n, best, dummy_step_zero(),
                        False{}, False{}, GuessRes{Nil{}, buf2})
             case 0n:
               match cs:
                 case Nil{}:
                   match done:
                     case True{}:
-                      best
+                      StepRes{best, gres_buf(gres)}
                     case False{}:
                       match gres:
                         case GuessRes{old_items, buf}:
-                          step(fuel, grest, 1n, Nil{}, glist_G, S, n, nodup,
-                               floor, inf, Nil{}, Nil{}, 0n, best,
-                               dummy_zero(), False{}, False{},
-                               guess_items_buf(nodup, g2, S, n, best, buf))
+                          step(fuel, grest, 1n, Nil{}, glist_G, S, n,
+                               nodup, floor, inf, Nil{}, Nil{}, 0n, best,
+                               dummy_step_zero(), False{}, False{},
+                               guess_items_buf(nodup, row2, g2, S, n, floor, best, buf))
                 case Con{item, rest}:
                   match item:
                     case Begin{g3}:
-                      step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                           nodup, floor, inf, g3, Nil{}, 0n, best,
-                           dummy_zero(), False{}, False{}, gres)
+                      step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G, S,
+                           n, nodup, floor, inf, g3, Nil{}, 0n, best,
+                           dummy_step_zero(), False{}, False{}, gres)
                     case ClassItem{fb, words, +wlen, +tail_lb}:
                       match skip:
                         case True{}:
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g, kids, sum, best,
-                               dummy_zero(), True{}, False{}, gres)
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
-                          +fl = init_floor(wlen)
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g, kids, sum, best,
-                               step(p, child_glist(nodup, words, wlen, b0, glist_G),
-                                    0n, Nil{}, glist_G, words, wlen, nodup, fl,
-                                    inf, Nil{}, Nil{}, 0n, b0, dummy_zero(),
-                                    False{}, is_floor_hit(nodup, fl, b0),
-                                    GuessRes{Nil{}, mk_buf_init(nodup, wlen, b0)}),
-                               False{}, False{}, gres)
+                          match gres:
+                            case GuessRes{_, buf}:
+                              +b0 = dummy_inf(Nat.sub(best_cost(best), Nat.add(sum, tail_lb)))
+                              +fl = init_floor(wlen)
+                              step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                                   S, n, nodup, floor, inf, g, kids, sum, best,
+                                   step(p, child_glist(nodup, words, wlen, b0, glist_G),
+                                        0n, Nil{}, glist_G, words, wlen, nodup, fl,
+                                        inf, Nil{}, Nil{}, 0n, b0, dummy_step_zero(),
+                                        False{}, is_floor_hit(nodup, fl, b0),
+                                        GuessRes{Nil{}, buf}),
+                                   False{}, False{}, GuessRes{Nil{}, NoBuf{}})
                     case OneItem{fb, w}:
                       match skip:
                         case True{}:
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g, kids, sum, best,
-                               dummy_zero(), True{}, False{}, gres)
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g,
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g,
                                Tree.Child{fb, Tree.Node{w, Nil{}}} <> kids,
                                SolveRef.sat_add(inf, sum, 1n), best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
                     case TwoItem{fb, w1, w2}:
                       match skip:
                         case True{}:
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g, kids, sum, best,
-                               dummy_zero(), True{}, False{}, gres)
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
                         case False{}:
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, g,
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g,
                                Tree.Child{fb, two_tree(w1, w2)} <> kids,
                                SolveRef.sat_add(inf, sum, 3n), best,
-                               dummy_zero(), False{}, False{}, gres)
+                               dummy_step_zero(), False{}, False{}, gres)
+                    case DoneItem{fb, tree, cost}:
+                      match skip:
+                        case True{}:
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g, kids, sum, best,
+                               dummy_step_zero(), True{}, False{}, gres)
+                        case False{}:
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, g,
+                               Tree.Child{fb, tree} <> kids,
+                               SolveRef.sat_add(inf, sum, cost), best,
+                               dummy_step_zero(), False{}, False{}, gres)
                     case Add{fb, +tail_lb}:
                       match pending:
-                        case SolveRef.Best{tree, +cost}:
-                          match skip:
-                            case True{}:
-                              step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S,
-                                   n, nodup, floor, inf, g, kids, sum, best,
-                                   dummy_zero(), True{}, False{}, gres)
-                            case False{}:
-                              +sum2 = SolveRef.sat_add(inf, sum, cost)
-                              step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S,
-                                   n, nodup, floor, inf, g,
-                                   Tree.Child{fb, tree} <> kids,
-                                   sum2, best, dummy_zero(),
-                                   skippable(best, Nat.add(sum2, tail_lb)),
-                                   False{}, gres)
+                        case StepRes{pbest, pbuf}:
+                          match pbest:
+                            case SolveRef.Best{tree, +cost}:
+                              match skip:
+                                case True{}:
+                                  step(fuel, GTry{row2, g2, grest}, 0n, rest,
+                                       glist_G, S, n, nodup, floor, inf, g, kids,
+                                       sum, best, dummy_step_zero(), True{}, False{},
+                                       gres)
+                                case False{}:
+                                  +sum2 = SolveRef.sat_add(inf, sum, cost)
+                                  step(fuel, GTry{row2, g2, grest}, 0n, rest,
+                                       glist_G, S, n, nodup, floor, inf, g,
+                                       Tree.Child{fb, tree} <> kids, sum2, best,
+                                       dummy_step_zero(),
+                                       skippable(best, Nat.add(sum2, tail_lb)),
+                                       False{}, GuessRes{Nil{}, pbuf})
                     case End{}:
                       match skip:
                         case True{}:
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, Nil{}, Nil{}, 0n, best,
-                               dummy_zero(), False{}, False{}, gres)
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, Nil{}, Nil{}, 0n, best,
+                               dummy_step_zero(), False{}, False{}, gres)
                         case False{}:
                           +best2 = SolveRef.finish_guess(inf, g, kids, sum, n, best)
-                          step(fuel, GTry{g2, grest}, 0n, rest, glist_G, S, n,
-                               nodup, floor, inf, Nil{}, Nil{}, 0n, best2,
-                               dummy_zero(), False{},
+                          step(fuel, GTry{row2, g2, grest}, 0n, rest, glist_G,
+                               S, n, nodup, floor, inf, Nil{}, Nil{}, 0n, best2,
+                               dummy_step_zero(), False{},
                                is_floor_hit(nodup, floor, best2), gres)
 
 def solve_fast_two(+w: +List<Nat>, +w2: +List<Nat>, same: Bool) -> Maybe<Tree.Tree>:
@@ -1810,24 +2142,19 @@ def solve_fast_two(+w: +List<Nat>, +w2: +List<Nat>, same: Bool) -> Maybe<Tree.Tr
     case False{}:
       Some{two_tree(w, w2)}
 
-# The pruned search on a guess list and candidate list. Checks once at the root
-# that every candidate belongs to `guesses` (returning `None{}` immediately if
-# not) and whether `candidates` is duplicate-free (enabling O(1) `class_lb`,
-# O(1) `TwoItem` resolution, candidate-first staged search with `2*|S|` floor
-# exit after candidates, lazy `Buf5` allocation, fast pre-bound filtering, and
-# the flat 1024-entry 5-letter histogram and bucketing path throughout).
 def solve_fast_valid(+guesses: +List<+List<Nat>>,
                      +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
   match candidates:
     case Nil{}:
       +inf = SolveRef.inf_of(0n)
       +b0 = dummy_inf(inf)
-      +gG = glist_of(guesses, GEnd{})
+      +gG = glist_of_words(guesses, GEnd{})
       SolveRef.best_to_maybe(inf,
-        step(0n, gG, 0n, Nil{}, gG, Nil{}, 0n, True{}, 0n, inf,
-             Nil{}, Nil{}, 0n, b0, dummy_zero(), False{},
-             is_floor_hit(True{}, 0n, b0),
-             GuessRes{Nil{}, mk_buf(True{}, 0n, b0)}))
+        step_res_best(
+          step(0n, gG, 0n, Nil{}, gG, Nil{}, 0n, True{}, 0n, inf,
+               Nil{}, Nil{}, 0n, b0, dummy_step_zero(), False{},
+               is_floor_hit(True{}, 0n, b0),
+               GuessRes{Nil{}, NoBuf{}})))
     case Con{+w, +t}:
       match t:
         case Nil{}:
@@ -1837,18 +2164,21 @@ def solve_fast_valid(+guesses: +List<+List<Nat>>,
             case Nil{}:
               solve_fast_two(w, w2, word_eq_fast(w, w2))
             case Con{+w3, +t3}:
-              +cs : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
-              +n = Groups.len_words(cs)
+              +ws : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
+              +n = Groups.len_words(ws)
+              +stride = U32.from_nat(n)
               +inf = SolveRef.inf_of(n)
-              +nd = no_dup_fast(cs)
+              +nd = no_dup_fast(ws)
               +b0 = dummy_inf(inf)
               +fl = init_floor(n)
-              +gG = glist_of(guesses, GEnd{})
+              +gG = glist_of_guesses(guesses, 0, stride)
+              +cs = build_cwords(ws, guesses, 0, stride)
               SolveRef.best_to_maybe(inf,
-                step(n, gG, 0n, Nil{}, gG, cs, n, nd, fl, inf,
-                     Nil{}, Nil{}, 0n, b0, dummy_zero(), False{},
-                     is_floor_hit(nd, fl, b0),
-                     GuessRes{Nil{}, mk_buf(nd, n, b0)}))
+                step_res_best(
+                  step(n, gG, 0n, Nil{}, gG, cs, n, nd, fl, inf,
+                       Nil{}, Nil{}, 0n, b0, dummy_step_zero(), False{},
+                       is_floor_hit(nd, fl, b0),
+                       GuessRes{Nil{}, mk_buf_tbl(nd, guesses, ws, n)})))
 
 def solve_fast_checked(ok: Bool, +guesses: +List<+List<Nat>>,
                        +candidates: +List<+List<Nat>>) -> Maybe<Tree.Tree>:
