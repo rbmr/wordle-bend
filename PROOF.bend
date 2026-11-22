@@ -48,6 +48,7 @@ import ./proofs/par_fold.bend as ParFold
 import ./proofs/lb_nodup.bend as LBProof4
 import ./proofs/lb_classes.bend as LBProof5
 import ./proofs/lb_decomp.bend as LBProof6
+import ./proofs/lb_adsplit.bend as LBProof7
 
 def Bool.disc(b: Bool) -> Type:
   match b:
