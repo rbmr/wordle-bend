@@ -39,6 +39,7 @@ import ./fast_lb.bend as FLB
 import ./fast_cutoff.bend as FC
 import ./fast_one.bend as FO
 import ./fast_nodup.bend as FN
+import ./fast_perm.bend as FP
 
 # ---------------------------------------------------------------------------
 # Small Bool, Nat, and saturating-addition helpers
@@ -801,25 +802,32 @@ def FV.sat_add_3_eq(+inf: Nat, +sum: Nat, +tail: Nat, +B: Nat,
   {SolveRef.sat_add(inf, sum, 3n) == Nat.add(sum, 3n) : Nat}:
   FV.sat_add_k_eq(inf, sum, 3n, tail, B, hB, alive)
 
+def FV.alive_k(+inf: Nat, +sum: Nat, +k: Nat, +tail: Nat, +B: Nat,
+    +hB: {Nat.is_le(B, inf) == True{} : Bool},
+    +alive: {Nat.is_lt(Nat.add(sum, Nat.add(k, tail)), B) == True{} : Bool}) ->
+  {Nat.is_lt(Nat.add(SolveRef.sat_add(inf, sum, k), tail), B)
+   == True{} : Bool}:
+  +hlt : {Nat.is_lt(Nat.add(Nat.add(sum, k), tail), B) == True{} : Bool} =
+    CBN.CB.lt_eq_l(B, Nat.add(sum, Nat.add(k, tail)),
+      Nat.add(Nat.add(sum, k), tail),
+      Equal.sym(Nat, Nat.add(Nat.add(sum, k), tail),
+        Nat.add(sum, Nat.add(k, tail)), NatProof.NatPrf.add_assoc(sum, k, tail)),
+      alive)
+  +esat : {SolveRef.sat_add(inf, sum, k) == Nat.add(sum, k) : Nat} =
+    FC.FC.sat_add_lt_eq(inf, sum, k, tail, B, hB, hlt)
+  CBN.CB.lt_eq_l(B, Nat.add(Nat.add(sum, k), tail),
+    Nat.add(SolveRef.sat_add(inf, sum, k), tail),
+    Equal.cong(Nat, Nat, x => Nat.add(x, tail),
+      Nat.add(sum, k), SolveRef.sat_add(inf, sum, k),
+      Equal.sym(Nat, SolveRef.sat_add(inf, sum, k), Nat.add(sum, k), esat)),
+    hlt)
+
 def FV.alive_two(+inf: Nat, +sum: Nat, +tail: Nat, +B: Nat,
     +hB: {Nat.is_le(B, inf) == True{} : Bool},
     +alive: {Nat.is_lt(Nat.add(sum, Nat.add(3n, tail)), B) == True{} : Bool}) ->
   {Nat.is_lt(Nat.add(SolveRef.sat_add(inf, sum, 3n), tail), B)
    == True{} : Bool}:
-  +hlt : {Nat.is_lt(Nat.add(Nat.add(sum, 3n), tail), B) == True{} : Bool} =
-    CBN.CB.lt_eq_l(B, Nat.add(sum, Nat.add(3n, tail)),
-      Nat.add(Nat.add(sum, 3n), tail),
-      Equal.sym(Nat, Nat.add(Nat.add(sum, 3n), tail),
-        Nat.add(sum, Nat.add(3n, tail)), NatProof.NatPrf.add_assoc(sum, 3n, tail)),
-      alive)
-  +esat : {SolveRef.sat_add(inf, sum, 3n) == Nat.add(sum, 3n) : Nat} =
-    FC.FC.sat_add_lt_eq(inf, sum, 3n, tail, B, hB, hlt)
-  CBN.CB.lt_eq_l(B, Nat.add(Nat.add(sum, 3n), tail),
-    Nat.add(SolveRef.sat_add(inf, sum, 3n), tail),
-    Equal.cong(Nat, Nat, x => Nat.add(x, tail),
-      Nat.add(sum, 3n), SolveRef.sat_add(inf, sum, 3n),
-      Equal.sym(Nat, SolveRef.sat_add(inf, sum, 3n), Nat.add(sum, 3n), esat)),
-    hlt)
+  FV.alive_k(inf, sum, 3n, tail, B, hB, alive)
 
 # ---------------------------------------------------------------------------
 # Finished node reconstruction: validity and cost from matched children
@@ -1408,6 +1416,158 @@ def FV.end_node_ok(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
         FV.total_eq_kids_cost_sum(G, full, rkids,
           CBK.CBK.distinctB_build(g, S), hm_full),
         ecs_full))
+  +hkid_le : {Nat.is_le(NodeCost.NodeCost.kid_sum(g, rkids, S), sum)
+              == True{} : Bool} =
+    Fold.OQ.le_cong_l(NodeCost.NodeCost.kid_sum(g, rkids, S),
+      FV.kids_cost_sum(done_rev, kids), sum, ekid_eq, hcs)
+  +hcost : {Nat.is_le(Tree.cost(Tree.Node{g, rkids}, S),
+              Nat.add(Groups.len_words(S), sum)) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(
+      Tree.cost(Tree.Node{g, rkids}, S),
+      Nat.add(Groups.len_words(S), NodeCost.NodeCost.kid_sum(g, rkids, S)),
+      Nat.add(Groups.len_words(S), sum),
+      OC.OC.cost_node_le(g, rkids, S),
+      NatProof.Nat.is_le_add_l(NodeCost.NodeCost.kid_sum(g, rkids, S),
+        sum, Groups.len_words(S), hkid_le))
+  FO.FO.bool_and_intro(FV.valid_b(Tree.Node{g, rkids}, G, S),
+    Nat.is_le(Tree.cost(Tree.Node{g, rkids}, S),
+      Nat.add(Groups.len_words(S), sum)),
+    hvalid, hcost)
+
+def FV.word_depth_of_match_perm(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +ord: +List<Groups.Group>, +rkids: +List<Tree.Child>,
+    +w: +List<Nat>, iw: Grp.Grp.InWords(w, S),
+    +perm: FP.FP.Perm,
+    +hperm: FP.FP.PermOk(perm, Groups.groups_build(g, S, Nil{}), ord),
+    +hm: {FV.kids_match_b(G, ord, rkids) == True{} : Bool},
+    b: Bool, +eb: {b == Feedback.word_eq(g, w) : Bool}) ->
+  {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, rkids}, w))
+   == True{} : Bool}:
+  match b:
+    case True{}:
+      Equal.cong(Maybe<Nat>, Bool, m => Maybe.is_some(&1, Nat, m),
+        Tree.depth(Tree.Node{g, rkids}, w), Some{1n},
+        FV.depth_eq_word(g, w, rkids,
+          Equal.sym(Bool, True{}, Feedback.word_eq(g, w), eb)))
+    case False{}:
+      +hne : {Feedback.word_eq(g, w) == False{} : Bool} =
+        Equal.sym(Bool, False{}, Feedback.word_eq(g, w), eb)
+      +hdist : {CBK.CBK.distinctB(ord) == True{} : Bool} =
+        Equal.trans(Bool,
+          CBK.CBK.distinctB(ord),
+          CBK.CBK.distinctB(Groups.groups_build(g, S, Nil{})),
+          True{},
+          Equal.sym(Bool,
+            CBK.CBK.distinctB(Groups.groups_build(g, S, Nil{})),
+            CBK.CBK.distinctB(ord),
+            FP.FP.distinctB_perm(perm, Groups.groups_build(g, S, Nil{}), ord, hperm)),
+          CBK.CBK.distinctB_build(g, S))
+      +hgo : {Maybe.is_some(&1, Nat,
+                Tree.depth.go(rkids, Feedback.feedback(g, w), w))
+              == True{} : Bool} =
+        FV.depth_go_of_match(G, ord, rkids, w,
+          Feedback.feedback(g, w), hdist, hm,
+          FP.FP.in_groups_fb_perm(perm, Groups.groups_build(g, S, Nil{}), ord,
+            hperm, w, Feedback.feedback(g, w),
+            NV.NV.groups_build_contains_fb(g, S, w, iw, hne, Nil{})))
+      DG.DG.node_depth_bool(g, rkids, w, Feedback.word_eq(g, w), {==}, hgo)
+
+def FV.all_have_depth_of_match_perm(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +ord: +List<Groups.Group>, +rkids: +List<Tree.Child>,
+    +rem: +List<+List<Nat>>, +wpre: +List<+List<Nat>>,
+    +eS: {S == List.append(&2, +List<Nat>, wpre, rem) : +List<+List<Nat>>},
+    +perm: FP.FP.Perm,
+    +hperm: FP.FP.PermOk(perm, Groups.groups_build(g, S, Nil{}), ord),
+    +hm: {FV.kids_match_b(G, ord, rkids) == True{} : Bool}) ->
+  {FV.all_have_depth_b(Tree.Node{g, rkids}, rem) == True{} : Bool}:
+  match rem:
+    case Nil{}:
+      {==}
+    case Con{+w, +wt}:
+      iw : Grp.Grp.InWords(w, S) =
+        SV.SV.in_words_transport(
+          List.append(&2, +List<Nat>, wpre, w <> wt), S,
+          Equal.sym(+List<+List<Nat>>, S,
+            List.append(&2, +List<Nat>, wpre, w <> wt), eS),
+          w, SV.SV.in_words_at(wpre, w, wt))
+      +eS2 : {S == List.append(&2, +List<Nat>,
+                     List.append(&2, +List<Nat>, wpre, w <> Nil{}), wt)
+              : +List<+List<Nat>>} =
+        Equal.trans(+List<+List<Nat>>, S,
+          List.append(&2, +List<Nat>, wpre, w <> wt),
+          List.append(&2, +List<Nat>,
+            List.append(&2, +List<Nat>, wpre, w <> Nil{}), wt),
+          eS, SV.SV.append_singleton(wpre, w, wt))
+      FO.FO.bool_and_intro(
+        Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, rkids}, w)),
+        FV.all_have_depth_b(Tree.Node{g, rkids}, wt),
+        FV.word_depth_of_match_perm(G, S, g, ord, rkids, w, iw, perm, hperm, hm,
+          Feedback.word_eq(g, w), {==}),
+        FV.all_have_depth_of_match_perm(G, S, g, ord, rkids, wt,
+          List.append(&2, +List<Nat>, wpre, w <> Nil{}), eS2, perm, hperm, hm))
+
+def FV.end_node_ok_perm(+G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
+    +g: +List<Nat>, +done_rev: +List<Groups.Group>, +kids: +List<Tree.Child>,
+    +sum: Nat,
+    +wg: {Tree.member_word(g, G) == True{} : Bool},
+    +perm: FP.FP.Perm,
+    +hperm: FP.FP.PermOk(perm, Groups.groups_build(g, S, Nil{}),
+              FV.rev_groups(done_rev, Nil{})),
+    +hm: {FV.kids_match_b(G, done_rev, kids) == True{} : Bool},
+    +hcs: {Nat.is_le(FV.kids_cost_sum(done_rev, kids), sum) == True{} : Bool}) ->
+  {Bool.and(
+     FV.valid_b(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, G, S),
+     Nat.is_le(Tree.cost(Tree.Node{g, SolveRef.rev_kids(kids, Nil{})}, S),
+       Nat.add(Groups.len_words(S), sum))) == True{} : Bool}:
+  +full : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+  +ord : +List<Groups.Group> = FV.rev_groups(done_rev, Nil{})
+  +rkids : +List<Tree.Child> = SolveRef.rev_kids(kids, Nil{})
+  +hm_ord : {FV.kids_match_b(G, ord, rkids) == True{} : Bool} =
+    FV.rev_kids_match_ok(G, done_rev, kids, Nil{}, Nil{}, hm, {==})
+  +hdist_ord : {CBK.CBK.distinctB(ord) == True{} : Bool} =
+    Equal.trans(Bool,
+      CBK.CBK.distinctB(ord),
+      CBK.CBK.distinctB(full),
+      True{},
+      Equal.sym(Bool, CBK.CBK.distinctB(full), CBK.CBK.distinctB(ord),
+        FP.FP.distinctB_perm(perm, full, ord, hperm)),
+      CBK.CBK.distinctB_build(g, S))
+  +hvalid : {FV.valid_b(Tree.Node{g, rkids}, G, S) == True{} : Bool} =
+    FO.FO.bool_and_intro(FV.tree_in_b(Tree.Node{g, rkids}, G),
+      FV.all_have_depth_b(Tree.Node{g, rkids}, S),
+      FO.FO.bool_and_intro(Tree.member_word(g, G), FV.kids_in_b(rkids, G),
+        wg, FV.kids_in_of_match(G, ord, rkids, hm_ord)),
+      FV.all_have_depth_of_match_perm(G, S, g, ord, rkids, S, Nil{}, {==},
+        perm, hperm, hm_ord))
+  +ecs_ord : {FV.kids_cost_sum(ord, rkids) == FV.kids_cost_sum(done_rev, kids) : Nat} =
+    Equal.trans(Nat,
+      FV.kids_cost_sum(ord, rkids),
+      Nat.add(FV.kids_cost_sum(done_rev, kids), 0n),
+      FV.kids_cost_sum(done_rev, kids),
+      FV.rev_kids_cost_sum_eq(G, done_rev, kids, Nil{}, Nil{}, hm),
+      NatProof.NatPrf.add_zero(FV.kids_cost_sum(done_rev, kids)))
+  +etotal : {GC.GC.Total(rkids, full) == GC.GC.Total(rkids, ord) : Nat} =
+    FP.FP.total_perm(perm, rkids, full, ord, hperm)
+  +ekid_eq : {NodeCost.NodeCost.kid_sum(g, rkids, S)
+              == FV.kids_cost_sum(done_rev, kids) : Nat} =
+    Equal.trans(Nat,
+      NodeCost.NodeCost.kid_sum(g, rkids, S),
+      GC.GC.Total(rkids, full),
+      FV.kids_cost_sum(done_rev, kids),
+      Equal.sym(Nat, GC.GC.Total(rkids, full),
+        NodeCost.NodeCost.kid_sum(g, rkids, S),
+        GC.GC.groups_build_total(g, rkids, S)),
+      Equal.trans(Nat,
+        GC.GC.Total(rkids, full),
+        GC.GC.Total(rkids, ord),
+        FV.kids_cost_sum(done_rev, kids),
+        etotal,
+        Equal.trans(Nat,
+          GC.GC.Total(rkids, ord),
+          FV.kids_cost_sum(ord, rkids),
+          FV.kids_cost_sum(done_rev, kids),
+          FV.total_eq_kids_cost_sum(G, ord, rkids, hdist_ord, hm_ord),
+          ecs_ord)))
   +hkid_le : {Nat.is_le(NodeCost.NodeCost.kid_sum(g, rkids, S), sum)
               == True{} : Bool} =
     Fold.OQ.le_cong_l(NodeCost.NodeCost.kid_sum(g, rkids, S),

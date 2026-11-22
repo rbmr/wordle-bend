@@ -6,8 +6,5 @@
 *.bak
 *.tmp
 
-# Benchmark results are machine-specific measurements, not source.
-/bench/results.csv
-
 # Detached run directories: metadata, console logs and per-run rows.
 /bench/runs/

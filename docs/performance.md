@@ -4,14 +4,16 @@
 
 The exact solver in `src/solve.bend` (delegating to `src/solve_fast.bend`) is proved directly valid
 and optimal for every input (`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend`). It uses
-depth-two lower bounds, tight recursive cutoff propagation, O(1) singleton and duplicate-free
-two-word class resolution, candidate-first staged search (`S` before `G` with a `2*|S|` post-`S`
-floor), and lazy reusable 1024-entry flat-array histograms/buckets with collision-budget early
-abort for 5-letter duplicate-free nodes. The exhaustive reference solver in `src/solve_ref.bend`
-(`Ref.solve_valid`, `Ref.solve_optimal`) and the parallel root solver in `src/solve_par.bend`
-(`Par.solve_eq`) stay in the tree as specifications. The full bundled lists in `words/` still need
-stronger move ordering, child ordering, and deeper bounds; speed is the remaining work, correctness
-is not.
+a precomputed `|G| x |C|` `Array<U32>` feedback table and single root-threaded `Buf5` scratch
+buffer for 5-letter duplicate-free runs, depth-two lower bounds, tight recursive cutoff propagation,
+O(1) singleton, duplicate-free two-word, and table-backed three-word (`DoneItem`) class resolution,
+largest-class-first child ordering, candidate-first staged search (`S` before `G` with a `2*|S|`
+post-`S` floor and stage-2 self-guess skipping), and mid-histogram collision-budget early abort. The
+exhaustive reference solver in `src/solve_ref.bend` (`Ref.solve_valid`, `Ref.solve_optimal`) and the
+parallel root solver in `src/solve_par.bend` (`Par.solve_eq`) stay in the tree as specifications.
+The full bundled lists in `words/` still need stronger move ordering, greedy upper-bound seeding,
+deeper capacity bounds, and multi-core root parallelism; speed is the remaining work, correctness is
+not.
 
 ## Smoke baseline
 
@@ -54,10 +56,11 @@ is not. New timing numbers belong in the benchmark CSV, not in this document.
 
 ## Recording results
 
-Benchmarks append rows to `bench/results.csv`. The file is gitignored because its numbers are
-machine-specific measurements, not source. Each row records the commit, whether the tree was dirty,
-the caller's hardware label, the CPU and GPU, the requested size, the seed, the repeat number, the
-wall-clock seconds, the exit code, the output hash and the repeatability flag.
+Benchmarks append rows to `bench/results.csv`, which is committed alongside pull requests that
+claim a speedup (while per-run logs under `bench/runs/` stay gitignored). Each row records the
+commit, whether the tree was dirty, the caller's hardware label, the CPU and GPU, the requested
+size, the seed, the repeat number, the wall-clock seconds, the exit code, the output hash and the
+repeatability flag.
 
 The full protocol, the column meanings and the remote run helper are in
 [benchmarking.md](benchmarking.md). Compare rows only within one `(commit, dirty, label, cpu_model,
