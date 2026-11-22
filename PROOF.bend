@@ -40,6 +40,7 @@ import ./proofs/lb_capacity.bend as LBProof3
 import ./src/solve_fast.bend as SolveFast
 import ./proofs/fast_step.bend as FSProof
 import ./proofs/fast_better.bend as FSPrune
+import ./proofs/fast_bound.bend as FSBound
 
 def Bool.disc(b: Bool) -> Type:
   match b:
