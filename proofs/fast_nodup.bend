@@ -1372,7 +1372,7 @@ def FN.group_items_ge3_eq(+nodup: Bool, +n: Nat, +f: +List<Feedback.Color>,
     +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>,
     +k: Nat, +ek: {Groups.len_words(ws) == Nat.add(3n, k) : Nat}) ->
   {SolveFast.group_items(nodup, n, Groups.Group{f, ws} <> rest)
-   == SolveFast.ClassItem{f, ws, Groups.len_words(ws),
+   == SolveFast.ClassItem{f, SolveFast.dummy_cwords(ws), Groups.len_words(ws),
         SolveFast.lower_bound(n, rest)}
       <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
           <> SolveFast.group_items(nodup, n, rest))
@@ -1393,7 +1393,7 @@ def FN.group_items_ge3_eq(+nodup: Bool, +n: Nat, +f: +List<Feedback.Color>,
             NatProof.NatPrf.pred_succ(0n, Nat.add(2n, k), ek)
           Empty.absurd(
             {SolveFast.group_items(nodup, n, Groups.Group{f, w <> Nil{}} <> rest)
-             == SolveFast.ClassItem{f, w <> Nil{}, 1n,
+             == SolveFast.ClassItem{f, SolveFast.dummy_cwords(w <> Nil{}), 1n,
                   SolveFast.lower_bound(n, rest)}
                 <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
                     <> SolveFast.group_items(nodup, n, rest))
@@ -1409,7 +1409,7 @@ def FN.group_items_ge3_eq(+nodup: Bool, +n: Nat, +f: +List<Feedback.Color>,
               +ws2 : +List<+List<Nat>> = w <> (w2 <> Nil{})
               Empty.absurd(
                 {SolveFast.group_items(nodup, n, Groups.Group{f, ws2} <> rest)
-                 == SolveFast.ClassItem{f, ws2, 2n,
+                 == SolveFast.ClassItem{f, SolveFast.dummy_cwords(ws2), 2n,
                       SolveFast.lower_bound(n, rest)}
                     <> (SolveFast.Add{f, SolveFast.lower_bound(n, rest)}
                         <> SolveFast.group_items(nodup, n, rest))
@@ -1720,7 +1720,8 @@ def FN.fgroup_items_build_eq(+nodup: Bool, +n: Nat,
                              == Nat.add(3n, Groups.len_words(wt3)) : Nat} =
                         FN.len_rev_nil(rws3)
                       +egi : {SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg)
-                              == SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                              == SolveFast.ClassItem{f, SolveFast.dummy_cwords(ws3),
+                                   Groups.len_words(ws3),
                                    SolveFast.lower_bound(n, rg)}
                                  <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
                                      <> SolveFast.group_items(nodup, n, rg))
@@ -1729,7 +1730,8 @@ def FN.fgroup_items_build_eq(+nodup: Bool, +n: Nat,
                           Groups.len_words(wt3), ek)
                       +e3 : {SolveFast.ItemsBound{
                                SolveFast.lower_bound(n, Groups.Group{f, ws3} <> rg),
-                               SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                               SolveFast.ClassItem{f, SolveFast.dummy_cwords(ws3),
+                                 Groups.len_words(ws3),
                                  SolveFast.lower_bound(n, rg)}
                                <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
                                    <> List.append(&2, SolveFast.Item,
@@ -1746,14 +1748,16 @@ def FN.fgroup_items_build_eq(+nodup: Bool, +n: Nat,
                                    SolveFast.lower_bound(n,
                                      Groups.Group{f, ws3} <> rg),
                                    List.append(&2, SolveFast.Item, its, tail)},
-                          SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                          SolveFast.ClassItem{f, SolveFast.dummy_cwords(ws3),
+                            Groups.len_words(ws3),
                             SolveFast.lower_bound(n, rg)}
                           <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
                               <> SolveFast.group_items(nodup, n, rg)),
                           SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg),
                           Equal.sym(+List<SolveFast.Item>,
                             SolveFast.group_items(nodup, n, Groups.Group{f, ws3} <> rg),
-                            SolveFast.ClassItem{f, ws3, Groups.len_words(ws3),
+                            SolveFast.ClassItem{f, SolveFast.dummy_cwords(ws3),
+                              Groups.len_words(ws3),
                               SolveFast.lower_bound(n, rg)}
                             <> (SolveFast.Add{f, SolveFast.lower_bound(n, rg)}
                                 <> SolveFast.group_items(nodup, n, rg)),
