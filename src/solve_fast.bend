@@ -1657,19 +1657,53 @@ def guess_body_buf_ge2(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
       schedule5_hist(row, g, S, n, best, buckets, gen,
         hist5_go(row, S, gen, skip_self, Hist5Ok{seen, tbl, 0n, 0n, budget0}))
 
-def guess_body_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                   +best: SolveRef.Best, +skip_self: Bool, buf: Buf5) -> GuessRes:
+# How many candidates `S` holds, capped at two. Reading the shape in a
+# definition of its own keeps `S` intact, so the caller can pass the same list
+# on instead of rebuilding it.
+type CWordsShape is Type:
+  ShapeNil{}
+  ShapeOne{}
+  ShapeMany{}
+
+def cwords_shape(+S: +List<CWord>) -> CWordsShape:
   match S:
     case Nil{}:
+      ShapeNil{}
+    case Con{cw, t}:
+      match t:
+        case Nil{}:
+          ShapeOne{}
+        case Con{cw2, t2}:
+          ShapeMany{}
+
+# The one-candidate case, reached only when `cwords_shape` reported one. The
+# empty arm cannot be reached with a length that matches `n`, and it returns
+# the neutral result so the definition stays total.
+def guess_body_buf_one(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                       +best: SolveRef.Best, +skip_self: Bool,
+                       buf: Buf5) -> GuessRes:
+  match S:
+    case Nil{}:
+      GuessRes{Nil{}, buf}
+    case Con{cw, t}:
+      GuessRes{schedule_one_guess(g, best, word_eq_fast(g, cword_w(cw))), buf}
+
+def guess_body_shape(sh: CWordsShape, +row: U32, +g: +List<Nat>,
+                     +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                     +skip_self: Bool, buf: Buf5) -> GuessRes:
+  match sh:
+    case ShapeNil{}:
       +fg = fgroups_build_fast(g, Nil{}, Nil{})
       GuessRes{schedule_fguess(True{}, g, fg, 0n, best, fgroups_smaller(0n, fg)),
                buf}
-    case Con{+cw, +t}:
-      match t:
-        case Nil{}:
-          GuessRes{schedule_one_guess(g, best, word_eq_fast(g, cword_w(cw))), buf}
-        case Con{+cw2, +t2}:
-          guess_body_buf_ge2(row, g, cw <> (cw2 <> t2), n, best, skip_self, buf)
+    case ShapeOne{}:
+      guess_body_buf_one(row, g, S, n, best, skip_self, buf)
+    case ShapeMany{}:
+      guess_body_buf_ge2(row, g, S, n, best, skip_self, buf)
+
+def guess_body_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
+                   +best: SolveRef.Best, +skip_self: Bool, buf: Buf5) -> GuessRes:
+  guess_body_shape(cwords_shape(S), row, g, S, n, best, skip_self, buf)
 
 def guess_items_mem_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
                         +best: SolveRef.Best, +skip_self: Bool, buf: Buf5,
