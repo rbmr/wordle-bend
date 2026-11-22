@@ -5,13 +5,24 @@ prints the decision tree as JSON.
 
 ## Building and running
 
-`bend` parses its own options before the program's, so a flag such as `--guesses` is taken by
-`bend` instead of reaching the program. Build the binary first, then run it:
+Build the binary, then run it:
 
 ```sh
 bend src/main.bend -o wordle-bend
 ./wordle-bend --guesses words/guesses.txt --candidates words/candidates.txt
 ```
+
+The program can also run without a build. `bend` reads every argument that starts with `-` as
+one of its own options and stops with `unknown option` on the rest, so put `--` before the
+program's flags. Everything after `--` reaches the program unchanged, and the program's exit
+code is `bend`'s exit code:
+
+```sh
+bend src/main.bend -- --guesses words/guesses.txt --candidates words/candidates.txt
+```
+
+`bend` checks the files and starts the program each time, which costs about half a second
+before the solver begins. A built binary skips that, so use it for benchmarks and repeated runs.
 
 ## Usage
 
