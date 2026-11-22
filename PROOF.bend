@@ -42,7 +42,7 @@ import ./proofs/fast_step.bend as FSProof
 import ./proofs/fast_better.bend as FSPrune
 import ./proofs/fast_groups.bend as FSGroups
 import ./proofs/fast_lb.bend as FSLB
-import ./proofs/fast_eq.bend as FSEq
+import ./proofs/fast_opt.bend as FSOpt
 import ./src/solve_par.bend as SolvePar
 import ./proofs/par_fold.bend as ParFold
 
@@ -1526,10 +1526,23 @@ def Laws.tree_json_wellformed(t):
 
 # The law: a tree returned by the solver is valid.
 def Laws.solve_valid(G, C, T, e):
-  MVProof.MV.solve_valid(G, C, T, e)
+  FSOpt.FOpt.solve_valid(G, C, T, e)
 
 # The law: the tree returned by the solver is optimal.
 def Laws.solve_optimal(G, C, T2, v):
+  FSOpt.FOpt.solve_optimal(G, C, T2, v)
+
+# The reference solver remains verified as the exact specification.
+def Ref.solve_valid(G: +List<+List<Nat>>, C: +List<+List<Nat>>, T: Tree.Tree,
+    e: {SolveRef.solve(G, C) == Some{T} : Maybe<Tree.Tree>}) ->
+  Tree.Valid(T, G, C):
+  MVProof.MV.solve_valid(G, C, T, e)
+
+def Ref.solve_optimal(G: +List<+List<Nat>>, C: +List<+List<Nat>>, T2: Tree.Tree,
+    v: Tree.Valid(T2, G, C)) ->
+  Exists(Tree.Tree, T =>
+    {SolveRef.solve(G, C) == Some{T} : Maybe<Tree.Tree>}
+    & {Nat.is_le(Tree.cost(T, C), Tree.cost(T2, C)) == True{} : Bool}):
   +guesses : +List<+List<Nat>> = G
   +cands : +List<+List<Nat>> = C
   +t2 : Tree.Tree = T2
@@ -1575,8 +1588,3 @@ def Laws.solve_optimal(G, C, T2, v):
 def Par.solve_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
   {SolvePar.solve(G, C) == SolveRef.solve(G, C) : Maybe<Tree.Tree>}:
   ParFold.ParFold.solve_eq(G, C)
-
-# The bound-pruned solver returns exactly the reference tree for every input.
-def Fast.solve_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
-  {SolveFast.solve_fast(G, C) == SolveRef.solve(G, C) : Maybe<Tree.Tree>}:
-  FSEq.FE.solve_fast_eq(G, C)

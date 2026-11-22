@@ -24,6 +24,7 @@ import ../src/solve_fast.bend as SolveFast
 import ./logic.bend as Logic
 import ./nat.bend as NatProof
 import ./fast_groups.bend as FG
+import ./fast_nodup.bend as FN
 import ./array.bend as Arr
 import ./fast_fb5.bend as FF5
 
@@ -2858,13 +2859,311 @@ def FH.seen_ok_eq_gen_iff(+fg: +List<SolveFast.FGroup>, +gen: Nat, +c: U32,
       Equal.trans(Bool, Nat.is_eq(v, gen), False{}, FH.has_code(c, fg),
         hne, eb)
 
+# ---------------------------------------------------------------------------
+# Collision-budget pruning helpers (`Hist5Pruned`)
+# ---------------------------------------------------------------------------
+
+def FH.is_le_add_r(+a: Nat, +b: Nat, +c: Nat,
+    +h: {Nat.is_le(a, b) == True{} : Bool}) ->
+  {Nat.is_le(Nat.add(a, c), Nat.add(b, c)) == True{} : Bool}:
+  NatProof.Nat.is_le_eq_l(Nat.add(b, c), Nat.add(c, a), Nat.add(a, c),
+    NatProof.NatPrf.add_comm(c, a),
+    NatProof.Nat.is_le_eq_r(Nat.add(c, a), Nat.add(c, b), Nat.add(b, c),
+      NatProof.NatPrf.add_comm(c, b),
+      NatProof.Nat.is_le_add_l(a, b, c, h)))
+
+def FH.le_add_sub(+b: Nat, +a: Nat) ->
+  {Nat.is_le(b, Nat.add(a, Nat.sub(b, a))) == True{} : Bool}:
+  match b a:
+    case 0n _:
+      NatProof.Nat.is_le_zero_l(Nat.add(a, Nat.sub(0n, a)))
+    case 1n++bp 0n:
+      NatProof.Nat.is_le_refl(1n+bp)
+    case 1n++bp 1n++ap:
+      FH.le_add_sub(bp, ap)
+
+def FH.le_sub_of_add_le(+z: Nat, +y: Nat, +x: Nat,
+    +h: {Nat.is_le(Nat.add(x, z), y) == True{} : Bool}) ->
+  {Nat.is_le(x, Nat.sub(y, z)) == True{} : Bool}:
+  match z y:
+    case 0n _:
+      NatProof.Nat.is_le_eq_r(x, y, Nat.sub(y, 0n),
+        Equal.sym(Nat, Nat.sub(y, 0n), y, FH.nat_sub_zero(y)),
+        NatProof.Nat.is_le_eq_l(y, Nat.add(x, 0n), x,
+          NatProof.NatPrf.add_zero(x), h))
+    case 1n++zp 0n:
+      +h1 : {Nat.is_le(Nat.add(1n, Nat.add(x, zp)), 0n) == True{} : Bool} =
+        NatProof.Nat.is_le_eq_l(0n, Nat.add(x, 1n+zp),
+          Nat.add(1n, Nat.add(x, zp)), NatProof.NatPrf.add_succ(x, zp), h)
+      Empty.absurd({Nat.is_le(x, 0n) == True{} : Bool},
+        Logic.Proof.false_ne_true(h1))
+    case 1n++zp 1n++yp:
+      +h1 : {Nat.is_le(Nat.add(1n, Nat.add(x, zp)), 1n+yp) == True{} : Bool} =
+        NatProof.Nat.is_le_eq_l(1n+yp, Nat.add(x, 1n+zp),
+          Nat.add(1n, Nat.add(x, zp)), NatProof.NatPrf.add_succ(x, zp), h)
+      FH.le_sub_of_add_le(zp, yp, x, h1)
+
+def FH.fgroup_add_total(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+    +fg: +List<SolveFast.FGroup>, hit: Bool) ->
+  {FH.fgroups_total(SolveFast.fgroup_add_go(w, fb, fg, hit))
+   == Nat.add(1n, FH.fgroups_total(fg)) : Nat}:
+  match fg:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case SolveFast.FGroup{+f, +len, +rws}:
+          match hit:
+            case True{}:
+              {==}
+            case False{}:
+              Equal.trans(Nat,
+                Nat.add(len,
+                  FH.fgroups_total(
+                    SolveFast.fgroup_add_go(w, fb, rest,
+                      SolveFast.next_fgroup_hit(fb, rest)))),
+                Nat.add(len, Nat.add(1n, FH.fgroups_total(rest))),
+                Nat.add(1n, Nat.add(len, FH.fgroups_total(rest))),
+                Equal.cong(Nat, Nat, x => Nat.add(len, x),
+                  FH.fgroups_total(
+                    SolveFast.fgroup_add_go(w, fb, rest,
+                      SolveFast.next_fgroup_hit(fb, rest))),
+                  Nat.add(1n, FH.fgroups_total(rest)),
+                  FH.fgroup_add_total(w, fb, rest,
+                    SolveFast.next_fgroup_hit(fb, rest))),
+                NatProof.NatPrf.add_succ(len, FH.fgroups_total(rest)))
+
+def FH.fgroup_add_count_le(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+    +fg: +List<SolveFast.FGroup>, hit: Bool) ->
+  {Nat.is_le(FH.fgroups_count(SolveFast.fgroup_add_go(w, fb, fg, hit)),
+             Nat.add(1n, FH.fgroups_count(fg))) == True{} : Bool}:
+  match fg:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case SolveFast.FGroup{+f, +len, +rws}:
+          match hit:
+            case True{}:
+              NatProof.Nat.is_le_of_lt(FH.fgroups_count(rest),
+                Nat.add(1n, FH.fgroups_count(rest)),
+                NatProof.Nat.is_lt_succ_self(FH.fgroups_count(rest)))
+            case False{}:
+              FH.fgroup_add_count_le(w, fb, rest,
+                SolveFast.next_fgroup_hit(fb, rest))
+
+def FH.fgroup_add_pos(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+    +fg: +List<SolveFast.FGroup>, hit: Bool,
+    +hp: {FH.fgroups_pos(fg) == True{} : Bool}) ->
+  {FH.fgroups_pos(SolveFast.fgroup_add_go(w, fb, fg, hit)) == True{} : Bool}:
+  match fg:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case SolveFast.FGroup{+f, +len, +rws}:
+          match hit:
+            case True{}:
+              +hr = Logic.Proof.and_true_r(Nat.is_le(1n, len),
+                      FH.fgroups_pos(rest), hp)
+              FH.bool_and_intro(Nat.is_le(1n, Nat.add(1n, len)),
+                FH.fgroups_pos(rest), NatProof.Nat.is_le_zero_l(len), hr)
+            case False{}:
+              +hl = Logic.Proof.and_true_l(Nat.is_le(1n, len),
+                      FH.fgroups_pos(rest), hp)
+              +hr = Logic.Proof.and_true_r(Nat.is_le(1n, len),
+                      FH.fgroups_pos(rest), hp)
+              FH.bool_and_intro(Nat.is_le(1n, len),
+                FH.fgroups_pos(SolveFast.fgroup_add_go(w, fb, rest,
+                  SolveFast.next_fgroup_hit(fb, rest))),
+                hl,
+                FH.fgroup_add_pos(w, fb, rest,
+                  SolveFast.next_fgroup_hit(fb, rest), hr))
+
+def FH.fgroups_next_pos(+g: +List<Nat>, +w: +List<Nat>,
+    +acc: +List<SolveFast.FGroup>, same: Bool,
+    +hp: {FH.fgroups_pos(acc) == True{} : Bool}) ->
+  {FH.fgroups_pos(SolveFast.fgroups_next_acc(g, w, acc, same))
+   == True{} : Bool}:
+  match same:
+    case True{}:
+      hp
+    case False{}:
+      FH.fgroup_add_pos(w, SolveFast.feedback_fast(g, w), acc,
+        SolveFast.next_fgroup_hit(SolveFast.feedback_fast(g, w), acc), hp)
+
+def FH.fgroups_build_pos(+g: +List<Nat>, +S: +List<+List<Nat>>,
+    +acc: +List<SolveFast.FGroup>,
+    +hp: {FH.fgroups_pos(acc) == True{} : Bool}) ->
+  {FH.fgroups_pos(SolveFast.fgroups_build_fast(g, S, acc)) == True{} : Bool}:
+  match S:
+    case Nil{}:
+      hp
+    case Con{+w, +rest}:
+      FH.fgroups_build_pos(g, rest,
+        SolveFast.fgroups_next_acc(g, w, acc, SolveFast.word_eq_fast(g, w)),
+        FH.fgroups_next_pos(g, w, acc, SolveFast.word_eq_fast(g, w), hp))
+
+def FH.fgroups_build_total_step(+g: +List<Nat>, +w: +List<Nat>,
+    +rest: +List<+List<Nat>>, +acc: +List<SolveFast.FGroup>, same: Bool,
+    +ih: {FH.fgroups_total(
+            SolveFast.fgroups_build_fast(g, rest,
+              SolveFast.fgroups_next_acc(g, w, acc, same)))
+          == Nat.add(SolveFast.keep_fast(g, rest),
+               FH.fgroups_total(SolveFast.fgroups_next_acc(g, w, acc, same)))
+          : Nat}) ->
+  {FH.fgroups_total(
+     SolveFast.fgroups_build_fast(g, rest,
+       SolveFast.fgroups_next_acc(g, w, acc, same)))
+   == Nat.add(SolveFast.keep_step(SolveFast.keep_fast(g, rest), same),
+        FH.fgroups_total(acc)) : Nat}:
+  match same:
+    case True{}:
+      ih
+    case False{}:
+      +et : {FH.fgroups_total(
+               SolveFast.fgroup_add_fast(w, SolveFast.feedback_fast(g, w), acc))
+             == Nat.add(1n, FH.fgroups_total(acc)) : Nat} =
+        FH.fgroup_add_total(w, SolveFast.feedback_fast(g, w), acc,
+          SolveFast.next_fgroup_hit(SolveFast.feedback_fast(g, w), acc))
+      Equal.trans(Nat,
+        FH.fgroups_total(
+          SolveFast.fgroups_build_fast(g, rest,
+            SolveFast.fgroup_add_fast(w, SolveFast.feedback_fast(g, w), acc))),
+        Nat.add(SolveFast.keep_fast(g, rest), Nat.add(1n, FH.fgroups_total(acc))),
+        Nat.add(Nat.add(1n, SolveFast.keep_fast(g, rest)), FH.fgroups_total(acc)),
+        Equal.trans(Nat,
+          FH.fgroups_total(
+            SolveFast.fgroups_build_fast(g, rest,
+              SolveFast.fgroup_add_fast(w, SolveFast.feedback_fast(g, w), acc))),
+          Nat.add(SolveFast.keep_fast(g, rest),
+            FH.fgroups_total(
+              SolveFast.fgroup_add_fast(w, SolveFast.feedback_fast(g, w), acc))),
+          Nat.add(SolveFast.keep_fast(g, rest),
+            Nat.add(1n, FH.fgroups_total(acc))),
+          ih,
+          Equal.cong(Nat, Nat, x => Nat.add(SolveFast.keep_fast(g, rest), x),
+            FH.fgroups_total(
+              SolveFast.fgroup_add_fast(w, SolveFast.feedback_fast(g, w), acc)),
+            Nat.add(1n, FH.fgroups_total(acc)), et)),
+        NatProof.NatPrf.add_succ(SolveFast.keep_fast(g, rest),
+          FH.fgroups_total(acc)))
+
+def FH.fgroups_build_total_eq_keep(+g: +List<Nat>, +S: +List<+List<Nat>>,
+    +acc: +List<SolveFast.FGroup>) ->
+  {FH.fgroups_total(SolveFast.fgroups_build_fast(g, S, acc))
+   == Nat.add(SolveFast.keep_fast(g, S), FH.fgroups_total(acc)) : Nat}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{+w, +rest}:
+      FH.fgroups_build_total_step(g, w, rest, acc, SolveFast.word_eq_fast(g, w),
+        FH.fgroups_build_total_eq_keep(g, rest,
+          SolveFast.fgroups_next_acc(g, w, acc, SolveFast.word_eq_fast(g, w))))
+
+def FH.pruned_step_mono(+g: +List<Nat>, +w: +List<Nat>,
+    +fg: +List<SolveFast.FGroup>, +budget0: Nat, same: Bool,
+    +h: {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg))),
+                   FH.fgroups_total(fg)) == True{} : Bool}) ->
+  {Nat.is_le(
+     Nat.add(1n, Nat.add(budget0,
+       FH.fgroups_count(SolveFast.fgroups_next_acc(g, w, fg, same)))),
+     FH.fgroups_total(SolveFast.fgroups_next_acc(g, w, fg, same)))
+   == True{} : Bool}:
+  match same:
+    case True{}:
+      h
+    case False{}:
+      +fg1 = SolveFast.fgroup_add_fast(w, SolveFast.feedback_fast(g, w), fg)
+      +et : {FH.fgroups_total(fg1) == Nat.add(1n, FH.fgroups_total(fg)) : Nat} =
+        FH.fgroup_add_total(w, SolveFast.feedback_fast(g, w), fg,
+          SolveFast.next_fgroup_hit(SolveFast.feedback_fast(g, w), fg))
+      +hc : {Nat.is_le(FH.fgroups_count(fg1), Nat.add(1n, FH.fgroups_count(fg)))
+             == True{} : Bool} =
+        FH.fgroup_add_count_le(w, SolveFast.feedback_fast(g, w), fg,
+          SolveFast.next_fgroup_hit(SolveFast.feedback_fast(g, w), fg))
+      +h1 : {Nat.is_le(
+               Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+               Nat.add(1n, Nat.add(budget0, Nat.add(1n, FH.fgroups_count(fg)))))
+             == True{} : Bool} =
+        NatProof.Nat.is_le_add_l(FH.fgroups_count(fg1),
+          Nat.add(1n, FH.fgroups_count(fg)), budget0, hc)
+      +e1 : {Nat.add(1n, Nat.add(budget0, Nat.add(1n, FH.fgroups_count(fg))))
+             == Nat.add(1n, Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg))))
+             : Nat} =
+        Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+          Nat.add(budget0, Nat.add(1n, FH.fgroups_count(fg))),
+          Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg))),
+          NatProof.NatPrf.add_succ(budget0, FH.fgroups_count(fg)))
+      +h2 : {Nat.is_le(
+               Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+               Nat.add(1n, FH.fgroups_total(fg))) == True{} : Bool} =
+        NatProof.Nat.is_le_trans(
+          Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+          Nat.add(1n, Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg)))),
+          Nat.add(1n, FH.fgroups_total(fg)),
+          NatProof.Nat.is_le_eq_r(
+            Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+            Nat.add(1n, Nat.add(budget0, Nat.add(1n, FH.fgroups_count(fg)))),
+            Nat.add(1n, Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg)))),
+            e1, h1),
+          h)
+      NatProof.Nat.is_le_eq_r(
+        Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+        Nat.add(1n, FH.fgroups_total(fg)),
+        FH.fgroups_total(fg1),
+        Equal.sym(Nat, FH.fgroups_total(fg1), Nat.add(1n, FH.fgroups_total(fg)),
+          et),
+        h2)
+
+def FH.pruned_build_mono(+g: +List<Nat>, +rest: +List<+List<Nat>>,
+    +fg: +List<SolveFast.FGroup>, +budget0: Nat,
+    +h: {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg))),
+                   FH.fgroups_total(fg)) == True{} : Bool}) ->
+  {Nat.is_le(
+     Nat.add(1n, Nat.add(budget0,
+       FH.fgroups_count(SolveFast.fgroups_build_fast(g, rest, fg)))),
+     FH.fgroups_total(SolveFast.fgroups_build_fast(g, rest, fg)))
+   == True{} : Bool}:
+  match rest:
+    case Nil{}:
+      h
+    case Con{+w, +t}:
+      FH.pruned_build_mono(g, t,
+        SolveFast.fgroups_next_acc(g, w, fg, SolveFast.word_eq_fast(g, w)),
+        budget0,
+        FH.pruned_step_mono(g, w, fg, budget0, SolveFast.word_eq_fast(g, w), h))
+
+def FH.seen_tree_bump_erased(-seen2: Array<Nat>, +gen: Nat,
+    +fg: +List<SolveFast.FGroup>,
+    +hs: FH.SeenTree(10n, 0, seen2, gen, fg),
+    dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
+        {s1 == seen2 : Array<Nat>} & {s2 == s1 : Array<Nat>}) ->
+  FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}):
+  (s1, dp2) = dp
+  (s2, pe) = dp2
+  (+es1, +es2) = pe
+  +es2_s : {s2 == seen2 : Array<Nat>} =
+    Equal.trans(Array<Nat>, s2, s1, seen2, es2, es1)
+  +hs2 = FH.seen_tree_transport(10n, 0, seen2, s2, gen, fg,
+           Equal.sym(Array<Nat>, s2, seen2, es2_s), hs)
+  FH.seen_tree_transport(10n, 0, s2, seen2, Nat.add(1n, gen), Nil{}, es2_s,
+    FH.seen_tree_bump(10n, 0, s2, gen, fg, hs2))
+
 # Result predicate for `hist5_go` (`-> Data` so freely copyable!).
 def FH.HistSpec(+g: +List<Nat>, +S: +List<+List<Nat>>,
-    +fg0: +List<SolveFast.FGroup>, +gen: Nat, res: SolveFast.Hist5Res) -> Data:
+    +fg0: +List<SolveFast.FGroup>, +gen: Nat, +budget0: Nat,
+    res: SolveFast.Hist5Res) -> Data:
   match res:
     case SolveFast.Hist5Fallback{seen2}:
       FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{})
-    case SolveFast.Hist5Ok{seen2, m, k}:
+    case SolveFast.Hist5Pruned{seen2}:
+      +fg1 : +List<SolveFast.FGroup> = SolveFast.fgroups_build_fast(g, S, fg0)
+      Arr.Arr.DPair<
+        FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+        {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+                   FH.fgroups_total(fg1)) == True{} : Bool}>
+    case SolveFast.Hist5Ok{seen2, m, k, budget}:
       +fg1 : +List<SolveFast.FGroup> = SolveFast.fgroups_build_fast(g, S, fg0)
       Arr.Arr.DPair<
         FH.SeenTree(10n, 0, seen2, gen, fg1),
@@ -2876,24 +3175,34 @@ def FH.HistSpec(+g: +List<Nat>, +S: +List<+List<Nat>>,
               {m == FH.fgroups_total(fg1) : Nat},
               Arr.Arr.DPair<
                 {k == FH.fgroups_count(fg1) : Nat},
-                {Nat.is_le(m, Nat.add(Groups.len_words(S),
-                                      FH.fgroups_total(fg0))) == True{} : Bool}>>>>>
+                Arr.Arr.DPair<
+                  {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
+                  {Nat.is_le(m, Nat.add(Groups.len_words(S),
+                                        FH.fgroups_total(fg0))) == True{} : Bool}>>>>>>
 
 def FH.hist_spec_transport(+g: +List<Nat>, +S: +List<+List<Nat>>,
-    +fg0: +List<SolveFast.FGroup>, +gen: Nat,
+    +fg0: +List<SolveFast.FGroup>, +gen: Nat, +budget0: Nat,
     -r1: SolveFast.Hist5Res, -r2: SolveFast.Hist5Res,
     +er: {r1 == r2 : SolveFast.Hist5Res},
-    +h: FH.HistSpec(g, S, fg0, gen, r1)) ->
-  FH.HistSpec(g, S, fg0, gen, r2):
-  %er : FH.HistSpec(g, S, fg0, gen, _)
+    +h: FH.HistSpec(g, S, fg0, gen, budget0, r1)) ->
+  FH.HistSpec(g, S, fg0, gen, budget0, r2):
+  %er : FH.HistSpec(g, S, fg0, gen, budget0, _)
   h
 
 def FH.HistOneSpec(+g: +List<Nat>, +w: +List<Nat>,
-    +fg0: +List<SolveFast.FGroup>, +gen: Nat, res: SolveFast.Hist5Res) -> Data:
+    +fg0: +List<SolveFast.FGroup>, +gen: Nat, +budget0: Nat,
+    res: SolveFast.Hist5Res) -> Data:
   match res:
     case SolveFast.Hist5Fallback{seen2}:
       FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{})
-    case SolveFast.Hist5Ok{seen2, m, k}:
+    case SolveFast.Hist5Pruned{seen2}:
+      +fg1 : +List<SolveFast.FGroup> =
+        SolveFast.fgroups_next_acc(g, w, fg0, SolveFast.word_eq_fast(g, w))
+      Arr.Arr.DPair<
+        FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+        {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+                   FH.fgroups_total(fg1)) == True{} : Bool}>
+    case SolveFast.Hist5Ok{seen2, m, k, budget}:
       +fg1 : +List<SolveFast.FGroup> =
         SolveFast.fgroups_next_acc(g, w, fg0, SolveFast.word_eq_fast(g, w))
       Arr.Arr.DPair<
@@ -2906,23 +3215,26 @@ def FH.HistOneSpec(+g: +List<Nat>, +w: +List<Nat>,
               {m == FH.fgroups_total(fg1) : Nat},
               Arr.Arr.DPair<
                 {k == FH.fgroups_count(fg1) : Nat},
-                {Nat.is_le(m, Nat.add(1n, FH.fgroups_total(fg0)))
-                 == True{} : Bool}>>>>>
+                Arr.Arr.DPair<
+                  {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
+                  {Nat.is_le(m, Nat.add(1n, FH.fgroups_total(fg0)))
+                   == True{} : Bool}>>>>>>
 
 def FH.hist_one_transport(+g: +List<Nat>, +w: +List<Nat>,
-    +fg0: +List<SolveFast.FGroup>, +gen: Nat,
+    +fg0: +List<SolveFast.FGroup>, +gen: Nat, +budget0: Nat,
     -r1: SolveFast.Hist5Res, -r2: SolveFast.Hist5Res,
     +er: {r1 == r2 : SolveFast.Hist5Res},
-    +h: FH.HistOneSpec(g, w, fg0, gen, r1)) ->
-  FH.HistOneSpec(g, w, fg0, gen, r2):
-  %er : FH.HistOneSpec(g, w, fg0, gen, _)
+    +h: FH.HistOneSpec(g, w, fg0, gen, budget0, r1)) ->
+  FH.HistOneSpec(g, w, fg0, gen, budget0, r2):
+  %er : FH.HistOneSpec(g, w, fg0, gen, budget0, _)
   h
 
 def FH.hist5_hit_branch(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
-    -seen2: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat,
-    seen_before: Bool,
+    -seen2: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat,
+    seen_before: Bool, budget: Nat,
     +esb: {seen_before == FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0) : Bool},
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +efg1: {SolveFast.fgroups_next_acc(g, w, fg0, SolveFast.word_eq_fast(g, w))
             == SolveFast.fgroup_add_fast(w, fb, fg0) : +List<SolveFast.FGroup>},
@@ -2943,39 +3255,104 @@ def FH.hist5_hit_branch(+g: +List<Nat>, +w: +List<Nat>,
             == Feedback.Bool.case(Nat,
                  FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0),
                  FH.fgroups_count(fg0),
-                 Nat.add(1n, FH.fgroups_count(fg0))) : Nat}) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_hit(seen2, m, k, seen_before)):
+                 Nat.add(1n, FH.fgroups_count(fg0))) : Nat},
+    dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
+        {s1 == seen2 : Array<Nat>} & {s2 == s1 : Array<Nat>}) ->
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_hit(seen2, m, k, seen_before, budget)):
   match seen_before:
     case True{}:
-      +fg1 = SolveFast.fgroup_add_fast(w, fb, fg0)
-      +fg_next = SolveFast.fgroups_next_acc(g, w, fg0,
-                   SolveFast.word_eq_fast(g, w))
-      +ec : {FH.fgroups_count(fg1) == FH.fgroups_count(fg0) : Nat} =
-        Equal.trans(Nat,
-          FH.fgroups_count(fg1),
-          Feedback.Bool.case(Nat,
-            FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0),
-            FH.fgroups_count(fg0), Nat.add(1n, FH.fgroups_count(fg0))),
-          FH.fgroups_count(fg0),
-          cnt2,
-          Equal.cong(Bool, Nat,
-            b => Feedback.Bool.case(Nat, b,
-                   FH.fgroups_count(fg0), Nat.add(1n, FH.fgroups_count(fg0))),
-            FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0), True{},
-            Equal.sym(Bool, True{},
-              FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0), esb)))
-      +ek1 : {k == FH.fgroups_count(fg_next) : Nat} =
-        Equal.trans(Nat, k, FH.fgroups_count(fg0), FH.fgroups_count(fg_next),
-          hk,
-          Equal.trans(Nat, FH.fgroups_count(fg0), FH.fgroups_count(fg1),
-            FH.fgroups_count(fg_next),
-            Equal.sym(Nat, FH.fgroups_count(fg1), FH.fgroups_count(fg0), ec),
-            Equal.cong(+List<SolveFast.FGroup>, Nat, x => FH.fgroups_count(x),
-              fg1, fg_next,
-              Equal.sym(+List<SolveFast.FGroup>, fg_next, fg1, efg1))))
-      Arr.DPair{hs_next, Arr.DPair{h5w, Arr.DPair{wf_next,
-        Arr.DPair{em1, Arr.DPair{ek1, hle1}}}}}
+      match budget:
+        case 0n:
+          +fg1 = SolveFast.fgroup_add_fast(w, fb, fg0)
+          +fg_next = SolveFast.fgroups_next_acc(g, w, fg0,
+                       SolveFast.word_eq_fast(g, w))
+          +ec : {FH.fgroups_count(fg1) == FH.fgroups_count(fg0) : Nat} =
+            Equal.trans(Nat,
+              FH.fgroups_count(fg1),
+              Feedback.Bool.case(Nat,
+                FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0),
+                FH.fgroups_count(fg0), Nat.add(1n, FH.fgroups_count(fg0))),
+              FH.fgroups_count(fg0),
+              cnt2,
+              Equal.cong(Bool, Nat,
+                b => Feedback.Bool.case(Nat, b,
+                       FH.fgroups_count(fg0), Nat.add(1n, FH.fgroups_count(fg0))),
+                FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0), True{},
+                Equal.sym(Bool, True{},
+                  FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0), esb)))
+          +ek1 : {k == FH.fgroups_count(fg_next) : Nat} =
+            Equal.trans(Nat, k, FH.fgroups_count(fg0), FH.fgroups_count(fg_next),
+              hk,
+              Equal.trans(Nat, FH.fgroups_count(fg0), FH.fgroups_count(fg1),
+                FH.fgroups_count(fg_next),
+                Equal.sym(Nat, FH.fgroups_count(fg1), FH.fgroups_count(fg0), ec),
+                Equal.cong(+List<SolveFast.FGroup>, Nat, x => FH.fgroups_count(x),
+                  fg1, fg_next,
+                  Equal.sym(+List<SolveFast.FGroup>, fg_next, fg1, efg1))))
+          +eeq : {Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg_next)))
+                  == FH.fgroups_total(fg_next) : Nat} =
+            Equal.trans(Nat,
+              Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg_next))),
+              Nat.add(1n, m),
+              FH.fgroups_total(fg_next),
+              Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+                Nat.add(budget0, FH.fgroups_count(fg_next)), m,
+                Equal.trans(Nat,
+                  Nat.add(budget0, FH.fgroups_count(fg_next)),
+                  Nat.add(budget0, k), m,
+                  Equal.cong(Nat, Nat, x => Nat.add(budget0, x),
+                    FH.fgroups_count(fg_next), k,
+                    Equal.sym(Nat, k, FH.fgroups_count(fg_next), ek1)),
+                  Equal.sym(Nat, m, Nat.add(budget0, k), hbgt))),
+              em1)
+          +hpr : {Nat.is_le(
+                    Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg_next))),
+                    FH.fgroups_total(fg_next)) == True{} : Bool} =
+            NatProof.Nat.is_le_eq_r(
+              Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg_next))),
+              Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg_next))),
+              FH.fgroups_total(fg_next), eeq,
+              NatProof.Nat.is_le_refl(
+                Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg_next)))))
+          Arr.DPair{
+            FH.seen_tree_bump_erased(seen2, gen, fg_next, hs_next, dp),
+            hpr}
+        case 1n++bp:
+          +fg1 = SolveFast.fgroup_add_fast(w, fb, fg0)
+          +fg_next = SolveFast.fgroups_next_acc(g, w, fg0,
+                       SolveFast.word_eq_fast(g, w))
+          +ec : {FH.fgroups_count(fg1) == FH.fgroups_count(fg0) : Nat} =
+            Equal.trans(Nat,
+              FH.fgroups_count(fg1),
+              Feedback.Bool.case(Nat,
+                FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0),
+                FH.fgroups_count(fg0), Nat.add(1n, FH.fgroups_count(fg0))),
+              FH.fgroups_count(fg0),
+              cnt2,
+              Equal.cong(Bool, Nat,
+                b => Feedback.Bool.case(Nat, b,
+                       FH.fgroups_count(fg0), Nat.add(1n, FH.fgroups_count(fg0))),
+                FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0), True{},
+                Equal.sym(Bool, True{},
+                  FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0), esb)))
+          +ek1 : {k == FH.fgroups_count(fg_next) : Nat} =
+            Equal.trans(Nat, k, FH.fgroups_count(fg0), FH.fgroups_count(fg_next),
+              hk,
+              Equal.trans(Nat, FH.fgroups_count(fg0), FH.fgroups_count(fg1),
+                FH.fgroups_count(fg_next),
+                Equal.sym(Nat, FH.fgroups_count(fg1), FH.fgroups_count(fg0), ec),
+                Equal.cong(+List<SolveFast.FGroup>, Nat, x => FH.fgroups_count(x),
+                  fg1, fg_next,
+                  Equal.sym(+List<SolveFast.FGroup>, fg_next, fg1, efg1))))
+          +hbgt1 : {Nat.add(bp, Nat.add(1n, m)) == Nat.add(budget0, k) : Nat} =
+            Equal.trans(Nat,
+              Nat.add(bp, Nat.add(1n, m)),
+              Nat.add(1n, Nat.add(bp, m)),
+              Nat.add(budget0, k),
+              NatProof.NatPrf.add_succ(bp, m), hbgt)
+          Arr.DPair{hs_next, Arr.DPair{h5w, Arr.DPair{wf_next,
+            Arr.DPair{em1, Arr.DPair{ek1, Arr.DPair{hbgt1, hle1}}}}}}
     case False{}:
       +fg1 = SolveFast.fgroup_add_fast(w, fb, fg0)
       +fg_next = SolveFast.fgroups_next_acc(g, w, fg0,
@@ -3006,14 +3383,31 @@ def FH.hist5_hit_branch(+g: +List<Nat>, +w: +List<Nat>,
             Equal.cong(+List<SolveFast.FGroup>, Nat, x => FH.fgroups_count(x),
               fg1, fg_next,
               Equal.sym(+List<SolveFast.FGroup>, fg_next, fg1, efg1))))
+      +hbgt1 : {Nat.add(budget, Nat.add(1n, m))
+                == Nat.add(budget0, Nat.add(1n, k)) : Nat} =
+        Equal.trans(Nat,
+          Nat.add(budget, Nat.add(1n, m)),
+          Nat.add(1n, Nat.add(budget, m)),
+          Nat.add(budget0, Nat.add(1n, k)),
+          NatProof.NatPrf.add_succ(budget, m),
+          Equal.trans(Nat,
+            Nat.add(1n, Nat.add(budget, m)),
+            Nat.add(1n, Nat.add(budget0, k)),
+            Nat.add(budget0, Nat.add(1n, k)),
+            Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+              Nat.add(budget, m), Nat.add(budget0, k), hbgt),
+            Equal.sym(Nat, Nat.add(budget0, Nat.add(1n, k)),
+              Nat.add(1n, Nat.add(budget0, k)),
+              NatProof.NatPrf.add_succ(budget0, k))))
       Arr.DPair{hs_next, Arr.DPair{h5w, Arr.DPair{wf_next,
-        Arr.DPair{em1, Arr.DPair{ek1, hle1}}}}}
+        Arr.DPair{em1, Arr.DPair{ek1, Arr.DPair{hbgt1, hle1}}}}}}
 
 def FH.hist5_hit_spec(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
-    -seen2: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat,
-    seen_before: Bool,
+    -seen2: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat,
+    seen_before: Bool, +budget: Nat,
     +esb: {seen_before == FH.has_code(FF5.FF5.encode_fb5_list(fb), fg0) : Bool},
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +efg1: {SolveFast.fgroups_next_acc(g, w, fg0, SolveFast.word_eq_fast(g, w))
             == SolveFast.fgroup_add_fast(w, fb, fg0) : +List<SolveFast.FGroup>},
@@ -3021,9 +3415,11 @@ def FH.hist5_hit_spec(+g: +List<Nat>, +w: +List<Nat>,
     +hk: {k == FH.fgroups_count(fg0) : Nat},
     +hs_new: FH.SeenTree(10n, 0, seen2, gen,
                SolveFast.fgroup_add_fast(w, fb, fg0)),
-    facts: FH.AddFacts<w, fb, fg0, SolveFast.fgroup_add_fast(w, fb, fg0)>) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_hit(seen2, m, k, seen_before)):
+    facts: FH.AddFacts<w, fb, fg0, SolveFast.fgroup_add_fast(w, fb, fg0)>,
+    dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
+        {s1 == seen2 : Array<Nat>} & {s2 == s1 : Array<Nat>}) ->
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_hit(seen2, m, k, seen_before, budget)):
   match facts:
     case AddFacts{+wf2, +tot2, +cnt2, +has2, +lkp2}:
       +fg1 = SolveFast.fgroup_add_fast(w, fb, fg0)
@@ -3055,12 +3451,14 @@ def FH.hist5_hit_spec(+g: +List<Nat>, +w: +List<Nat>,
           Equal.cong(Nat, Nat, x => Nat.add(1n, x), FH.fgroups_total(fg0), m,
             Equal.sym(Nat, m, FH.fgroups_total(fg0), hm)),
           NatProof.Nat.is_le_refl(Nat.add(1n, FH.fgroups_total(fg0))))
-      FH.hist5_hit_branch(g, w, fb, fg0, seen2, gen, m, k, seen_before, esb,
-        h5w, efg1, hk, hs_next, wf_next, em1, hle1, cnt2)
+      FH.hist5_hit_branch(g, w, fb, fg0, seen2, gen, m, k, budget0,
+        seen_before, budget, esb, hbgt, h5w, efg1, hk, hs_next, wf_next, em1,
+        hle1, cnt2, dp)
 
 def FH.hist5_swap_spec_go(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>, +gen: Nat,
-    +m: Nat, +k: Nat, r: Array<Nat> & Nat,
+    +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat, r: Array<Nat> & Nat,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +ewf: {SolveFast.word_eq_fast(g, w) == False{} : Bool},
     +efbeq: {SolveFast.feedback_fast(g, w) == fb : +List<Feedback.Color>},
@@ -3072,7 +3470,8 @@ def FH.hist5_swap_spec_go(+g: +List<Nat>, +w: +List<Nat>,
                SolveFast.fgroup_add_fast(w, fb, fg0)),
     +hok: {FH.seen_ok(fg0, gen, FF5.FF5.encode_fb5_list(fb),
              Arr.Arr.snd(Array<Nat>, Nat, r)) == True{} : Bool}) ->
-  FH.HistOneSpec(g, w, fg0, gen, SolveFast.hist5_swap(gen, m, k, r)):
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_swap(gen, m, k, budget, r)):
   (seen2, +old) = r
   +c = FF5.FF5.encode_fb5_list(fb)
   +hold : {Nat.is_eq(old, gen) == FH.has_code(c, fg0) : Bool} =
@@ -3092,8 +3491,9 @@ def FH.hist5_swap_spec_go(+g: +List<Nat>, +w: +List<Nat>,
         SolveFast.feedback_fast(g, w), fb, efbeq))
   +facts = FH.fgroup_add_facts(w, fb, fg0,
              SolveFast.next_fgroup_hit(fb, fg0), {==}, hfb, hwf)
-  FH.hist5_hit_spec(g, w, fb, fg0, seen2, gen, m, k,
-    Nat.is_eq(old, gen), hold, h5w, efg1, hm, hk, hs_new, facts)
+  FH.hist5_hit_spec(g, w, fb, fg0, seen2, gen, m, k, budget0,
+    Nat.is_eq(old, gen), budget, hold, hbgt, h5w, efg1, hm, hk, hs_new, facts,
+    Arr.Arr.dup(Nat, seen2))
 
 def FH.hist5_step_swap_dup4(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
@@ -3103,7 +3503,8 @@ def FH.hist5_step_swap_dup4(+g: +List<Nat>, +w: +List<Nat>,
     -b3: Array<Nat>, +ea_b3: {b3 == s1 : Array<Nat>},
     dp4: &c1: Array<Nat> -> &c2: Array<Nat> ->
          {c1 == b3 : Array<Nat>} & {c2 == c1 : Array<Nat>},
-    +gen: Nat, +m: Nat, +k: Nat, +code: U32,
+    +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat, +code: U32,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +ecode: {code == FF5.FF5.encode_fb5_list(fb) : U32},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +ewf: {SolveFast.word_eq_fast(g, w) == False{} : Bool},
@@ -3115,8 +3516,8 @@ def FH.hist5_step_swap_dup4(+g: +List<Nat>, +w: +List<Nat>,
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0),
     +hself: {FH.has_code(FF5.FF5.encode_fb5_list(fb),
                SolveFast.fgroup_add_fast(w, fb, fg0)) == True{} : Bool}) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_swap(gen, m, k, Array.swap(Nat, seen, code, gen))):
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_swap(gen, m, k, budget, Array.swap(Nat, seen, code, gen))):
   (c1, dp5) = dp4
   (c2, pe4) = dp5
   (+ec1, +ec2) = pe4
@@ -3196,13 +3597,14 @@ def FH.hist5_step_swap_dup4(+g: +List<Nat>, +w: +List<Nat>,
             Equal.trans(Array<Nat>, c2, s1, b2, ea_c2,
               Equal.sym(Array<Nat>, b2, s1, ea_b2))))),
       hok_b2)
-  %ea1 : FH.HistOneSpec(g, w, fg0, gen,
-           SolveFast.hist5_swap(gen, m, k, Array.swap(Nat, _, code, gen)))
+  %ea1 : FH.HistOneSpec(g, w, fg0, gen, budget0,
+           SolveFast.hist5_swap(gen, m, k, budget, Array.swap(Nat, _, code, gen)))
   %Equal.sym(U32, code, c, ecode) :
-    FH.HistOneSpec(g, w, fg0, gen,
-      SolveFast.hist5_swap(gen, m, k, Array.swap(Nat, s1, _, gen)))
-  FH.hist5_swap_spec_go(g, w, fb, fg0, gen, m, k, Array.swap(Nat, s1, c, gen),
-    h5w, ewf, efbeq, hfb, hwf, hm, hk, hs_new_s1, hok_s1)
+    FH.HistOneSpec(g, w, fg0, gen, budget0,
+      SolveFast.hist5_swap(gen, m, k, budget, Array.swap(Nat, s1, _, gen)))
+  FH.hist5_swap_spec_go(g, w, fb, fg0, gen, m, k, budget0, budget,
+    Array.swap(Nat, s1, c, gen), hbgt, h5w, ewf, efbeq, hfb, hwf, hm, hk,
+    hs_new_s1, hok_s1)
 
 def FH.hist5_step_swap_dup3(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
@@ -3211,7 +3613,8 @@ def FH.hist5_step_swap_dup3(+g: +List<Nat>, +w: +List<Nat>,
     -b2: Array<Nat>, +ea_b2: {b2 == s1 : Array<Nat>},
     dp3: &x1: Array<Nat> -> &x2: Array<Nat> ->
          {x1 == b2 : Array<Nat>} & {x2 == x1 : Array<Nat>},
-    +gen: Nat, +m: Nat, +k: Nat, +code: U32,
+    +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat, +code: U32,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +ecode: {code == FF5.FF5.encode_fb5_list(fb) : U32},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +ewf: {SolveFast.word_eq_fast(g, w) == False{} : Bool},
@@ -3223,16 +3626,16 @@ def FH.hist5_step_swap_dup3(+g: +List<Nat>, +w: +List<Nat>,
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0),
     +hself: {FH.has_code(FF5.FF5.encode_fb5_list(fb),
                SolveFast.fgroup_add_fast(w, fb, fg0)) == True{} : Bool}) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_swap(gen, m, k, Array.swap(Nat, seen, code, gen))):
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_swap(gen, m, k, budget, Array.swap(Nat, seen, code, gen))):
   (x1, dpx) = dp3
   (x2, pex) = dpx
   (+ex1, +ex2) = pex
   +ea_x1 : {x1 == s1 : Array<Nat>} = Equal.trans(Array<Nat>, x1, b2, s1, ex1, ea_b2)
   +ea_x2 : {x2 == s1 : Array<Nat>} = Equal.trans(Array<Nat>, x2, x1, s1, ex2, ea_x1)
   FH.hist5_step_swap_dup4(g, w, fb, fg0, seen, s1, ea1, b1, ea_b1, x1, ea_x1,
-    x2, ea_x2, Arr.Arr.dup(Nat, x2), gen, m, k, code, ecode, h5w, ewf, efbeq,
-    hfb, hwf, hm, hk, hs, hself)
+    x2, ea_x2, Arr.Arr.dup(Nat, x2), gen, m, k, budget0, budget, code, hbgt,
+    ecode, h5w, ewf, efbeq, hfb, hwf, hm, hk, hs, hself)
 
 def FH.hist5_step_swap_dup2(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
@@ -3240,7 +3643,8 @@ def FH.hist5_step_swap_dup2(+g: +List<Nat>, +w: +List<Nat>,
     -s2: Array<Nat>, +ea2: {s2 == s1 : Array<Nat>},
     dp2: &b1: Array<Nat> -> &b2: Array<Nat> ->
          {b1 == s2 : Array<Nat>} & {b2 == b1 : Array<Nat>},
-    +gen: Nat, +m: Nat, +k: Nat, +code: U32,
+    +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat, +code: U32,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +ecode: {code == FF5.FF5.encode_fb5_list(fb) : U32},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +ewf: {SolveFast.word_eq_fast(g, w) == False{} : Bool},
@@ -3252,20 +3656,22 @@ def FH.hist5_step_swap_dup2(+g: +List<Nat>, +w: +List<Nat>,
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0),
     +hself: {FH.has_code(FF5.FF5.encode_fb5_list(fb),
                SolveFast.fgroup_add_fast(w, fb, fg0)) == True{} : Bool}) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_swap(gen, m, k, Array.swap(Nat, seen, code, gen))):
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_swap(gen, m, k, budget, Array.swap(Nat, seen, code, gen))):
   (b1, dp3) = dp2
   (b2, pe2) = dp3
   (+eb1, +eb2) = pe2
   +ea_b1 : {b1 == s1 : Array<Nat>} = Equal.trans(Array<Nat>, b1, s2, s1, eb1, ea2)
   +ea_b2 : {b2 == s1 : Array<Nat>} = Equal.trans(Array<Nat>, b2, b1, s1, eb2, ea_b1)
   FH.hist5_step_swap_dup3(g, w, fb, fg0, seen, s1, ea1, b1, ea_b1, b2, ea_b2,
-    Arr.Arr.dup(Nat, b2), gen, m, k, code, ecode, h5w, ewf, efbeq, hfb, hwf,
-    hm, hk, hs, hself)
+    Arr.Arr.dup(Nat, b2), gen, m, k, budget0, budget, code, hbgt, ecode, h5w,
+    ewf, efbeq, hfb, hwf, hm, hk, hs, hself)
 
 def FH.hist5_step_swap_dup(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
-    -seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +code: U32,
+    -seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat,
+    +code: U32,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +ecode: {code == FF5.FF5.encode_fb5_list(fb) : U32},
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +ewf: {SolveFast.word_eq_fast(g, w) == False{} : Bool},
@@ -3279,14 +3685,14 @@ def FH.hist5_step_swap_dup(+g: +List<Nat>, +w: +List<Nat>,
                SolveFast.fgroup_add_fast(w, fb, fg0)) == True{} : Bool},
     dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
         {s1 == seen : Array<Nat>} & {s2 == s1 : Array<Nat>}) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_swap(gen, m, k, Array.swap(Nat, seen, code, gen))):
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_swap(gen, m, k, budget, Array.swap(Nat, seen, code, gen))):
   (s1, dp2) = dp
   (s2, pe) = dp2
   (+ea1, +ea2) = pe
   FH.hist5_step_swap_dup2(g, w, fb, fg0, seen, s1, ea1, s2, ea2,
-    Arr.Arr.dup(Nat, s2), gen, m, k, code, ecode, h5w, ewf, efbeq,
-    hfb, hwf, hm, hk, hs, hself)
+    Arr.Arr.dup(Nat, s2), gen, m, k, budget0, budget, code, hbgt, ecode, h5w,
+    ewf, efbeq, hfb, hwf, hm, hk, hs, hself)
 
 def FH.add_facts_has_self(+w: +List<Nat>, +fb: +List<Feedback.Color>,
     +fg0: +List<SolveFast.FGroup>, +fg1: +List<SolveFast.FGroup>,
@@ -3298,8 +3704,9 @@ def FH.add_facts_has_self(+w: +List<Nat>, +fb: +List<Feedback.Color>,
 
 def FH.hist5_step_spec(+g: +List<Nat>, +w: +List<Nat>,
     +fb: +List<Feedback.Color>, +fg0: +List<SolveFast.FGroup>,
-    seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +code: U32,
-    same: Bool,
+    seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat,
+    +code: U32, same: Bool,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +esame: {same == SolveFast.word_eq_fast(g, w) : Bool},
     +ecode: {code == FF5.FF5.encode_fb5_list(fb) : U32},
     +h5w: {FH.is_word5(w) == True{} : Bool},
@@ -3309,8 +3716,8 @@ def FH.hist5_step_spec(+g: +List<Nat>, +w: +List<Nat>,
     +hm: {m == FH.fgroups_total(fg0) : Nat},
     +hk: {k == FH.fgroups_count(fg0) : Nat},
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0)) ->
-  FH.HistOneSpec(g, w, fg0, gen,
-    SolveFast.hist5_step(seen, gen, m, k, code, same)):
+  FH.HistOneSpec(g, w, fg0, gen, budget0,
+    SolveFast.hist5_step(seen, gen, m, k, budget, code, same)):
   match same:
     case True{}:
       +ewt : {SolveFast.word_eq_fast(g, w) == True{} : Bool} =
@@ -3347,7 +3754,7 @@ def FH.hist5_step_spec(+g: +List<Nat>, +w: +List<Nat>,
             Nat.add(1n, FH.fgroups_total(fg0)),
             NatProof.Nat.is_lt_succ_self(FH.fgroups_total(fg0))))
       Arr.DPair{hs2, Arr.DPair{h5w, Arr.DPair{wf2,
-        Arr.DPair{hm2, Arr.DPair{hk2, hle}}}}}
+        Arr.DPair{hm2, Arr.DPair{hk2, Arr.DPair{hbgt, hle}}}}}}
     case False{}:
       +ewf : {SolveFast.word_eq_fast(g, w) == False{} : Bool} =
         Equal.sym(Bool, False{}, SolveFast.word_eq_fast(g, w), esame)
@@ -3355,18 +3762,21 @@ def FH.hist5_step_spec(+g: +List<Nat>, +w: +List<Nat>,
                  SolveFast.fgroup_add_fast(w, fb, fg0),
                  FH.fgroup_add_facts(w, fb, fg0,
                    SolveFast.next_fgroup_hit(fb, fg0), {==}, hfb, hwf))
-      FH.hist5_step_swap_dup(g, w, fb, fg0, seen, gen, m, k, code, ecode,
-        h5w, ewf, efbeq, hfb, hwf, hm, hk, hs, hself, Arr.Arr.dup(Nat, seen))
+      FH.hist5_step_swap_dup(g, w, fb, fg0, seen, gen, m, k, budget0, budget,
+        code, hbgt, ecode, h5w, ewf, efbeq, hfb, hwf, hm, hk, hs, hself,
+        Arr.Arr.dup(Nat, seen))
 
 def FH.hist5_one_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +w: +List<Nat>, +fg0: +List<SolveFast.FGroup>, seen: Array<Nat>, +gen: Nat,
-    +m: Nat, +k: Nat,
+    +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +hwf: {FH.fgroups_wf(fg0) == True{} : Bool},
     +hm: {m == FH.fgroups_total(fg0) : Nat},
     +hk: {k == FH.fgroups_count(fg0) : Nat},
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0)) ->
   FH.HistOneSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0, gen,
-    SolveFast.hist5_one(g0, g1, g2, g3, g4, w, seen, gen, m, k)):
+    budget0,
+    SolveFast.hist5_one(g0, g1, g2, g3, g4, w, seen, gen, m, k, budget)):
   match w:
     case Nil{}:
       FH.seen_tree_bump(10n, 0, seen, gen, fg0, hs)
@@ -3407,7 +3817,8 @@ def FH.hist5_one_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
                                 Feedback.word_eq(gw, aw),
                                 FG.FG.word_eq_fast_eq(gw, aw)))
                           FH.hist5_step_spec(gw, aw, fb, fg0, seen, gen, m, k,
-                            code, U32.is_eq(code, 682), esame,
+                            budget0, budget, code, U32.is_eq(code, 682), hbgt,
+                            esame,
                             FF5.FF5.feedback_code5_eq(g0, g1, g2, g3, g4,
                               a0, a1, a2, a3, a4),
                             {==}, FG.FG.feedback_eq(gw, aw),
@@ -3419,9 +3830,10 @@ def FH.hist5_one_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
 
 def FH.hist5_fallback_rest(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +w: +List<Nat>, +rest: +List<+List<Nat>>, +fg0: +List<SolveFast.FGroup>,
-    +gen: Nat, -seen2: Array<Nat>,
+    +gen: Nat, +budget0: Nat, -seen2: Array<Nat>,
     +h1: FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{})) ->
   FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w <> rest, fg0, gen,
+    budget0,
     SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
       SolveFast.Hist5Fallback{seen2})):
   match rest:
@@ -3430,8 +3842,48 @@ def FH.hist5_fallback_rest(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     case Con{w2, rest2}:
       h1
 
+def FH.hist5_pruned_rest(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
+    +w: +List<Nat>, +rest: +List<+List<Nat>>, +fg0: +List<SolveFast.FGroup>,
+    +gen: Nat, +budget0: Nat, -seen2: Array<Nat>,
+    +h1: Arr.Arr.DPair<
+           FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+           {Nat.is_le(
+              Nat.add(1n, Nat.add(budget0,
+                FH.fgroups_count(
+                  SolveFast.fgroups_next_acc(
+                    g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
+                    SolveFast.word_eq_fast(
+                      g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w))))),
+              FH.fgroups_total(
+                SolveFast.fgroups_next_acc(
+                  g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
+                  SolveFast.word_eq_fast(
+                    g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w))))
+            == True{} : Bool}>) ->
+  FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w <> rest, fg0, gen,
+    budget0,
+    SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
+      SolveFast.Hist5Pruned{seen2})):
+  match rest:
+    case Nil{}:
+      h1
+    case Con{+w2, +rest2}:
+      +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
+      +fg1 = SolveFast.fgroups_next_acc(gw, w, fg0,
+               SolveFast.word_eq_fast(gw, w))
+      +hs2 = Arr.Arr.dpair_l(
+               FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+               {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+                          FH.fgroups_total(fg1)) == True{} : Bool}, h1)
+      +hpr1 = Arr.Arr.dpair_r(
+                FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+                {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg1))),
+                           FH.fgroups_total(fg1)) == True{} : Bool}, h1)
+      Arr.DPair{hs2, FH.pruned_build_mono(gw, w2 <> rest2, fg1, budget0, hpr1)}
+
 def FH.hist5_go_lift(+gw: +List<Nat>, +w: +List<Nat>, +rest: +List<+List<Nat>>,
-    +fg0: +List<SolveFast.FGroup>, +gen: Nat, res: SolveFast.Hist5Res,
+    +fg0: +List<SolveFast.FGroup>, +gen: Nat, +budget0: Nat,
+    res: SolveFast.Hist5Res,
     +h5w: {FH.is_word5(w) == True{} : Bool},
     +hle_fg1: {Nat.is_le(
                  FH.fgroups_total(
@@ -3440,12 +3892,14 @@ def FH.hist5_go_lift(+gw: +List<Nat>, +w: +List<Nat>, +rest: +List<+List<Nat>>,
                  Nat.add(1n, FH.fgroups_total(fg0))) == True{} : Bool},
     +hrec: FH.HistSpec(gw, rest,
              SolveFast.fgroups_next_acc(gw, w, fg0,
-               SolveFast.word_eq_fast(gw, w)), gen, res)) ->
-  FH.HistSpec(gw, w <> rest, fg0, gen, res):
+               SolveFast.word_eq_fast(gw, w)), gen, budget0, res)) ->
+  FH.HistSpec(gw, w <> rest, fg0, gen, budget0, res):
   match res:
     case SolveFast.Hist5Fallback{seen3}:
       hrec
-    case SolveFast.Hist5Ok{seen3, +m3, +k3}:
+    case SolveFast.Hist5Pruned{seen3}:
+      hrec
+    case SolveFast.Hist5Ok{seen3, +m3, +k3, +b3}:
       +fg1 = SolveFast.fgroups_next_acc(gw, w, fg0,
                SolveFast.word_eq_fast(gw, w))
       +fg2 = SolveFast.fgroups_build_fast(gw, rest, fg1)
@@ -3455,62 +3909,92 @@ def FH.hist5_go_lift(+gw: +List<Nat>, +w: +List<Nat>, +rest: +List<+List<Nat>>,
                  Arr.Arr.DPair<{FH.fgroups_wf(fg2) == True{} : Bool},
                    Arr.Arr.DPair<{m3 == FH.fgroups_total(fg2) : Nat},
                      Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                       {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                              FH.fgroups_total(fg1)))
-                        == True{} : Bool}>>>>, hrec)
+                       Arr.Arr.DPair<
+                         {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                         {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                                FH.fgroups_total(fg1)))
+                          == True{} : Bool}>>>>>, hrec)
       +r1 = Arr.Arr.dpair_r(
               FH.SeenTree(10n, 0, seen3, gen, fg2),
               Arr.Arr.DPair<{FH.all_len5(rest) == True{} : Bool},
                 Arr.Arr.DPair<{FH.fgroups_wf(fg2) == True{} : Bool},
                   Arr.Arr.DPair<{m3 == FH.fgroups_total(fg2) : Nat},
                     Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                      {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                             FH.fgroups_total(fg1)))
-                       == True{} : Bool}>>>>, hrec)
+                      Arr.Arr.DPair<
+                        {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                        {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                               FH.fgroups_total(fg1)))
+                         == True{} : Bool}>>>>>, hrec)
       +h5r = Arr.Arr.dpair_l({FH.all_len5(rest) == True{} : Bool},
                Arr.Arr.DPair<{FH.fgroups_wf(fg2) == True{} : Bool},
                  Arr.Arr.DPair<{m3 == FH.fgroups_total(fg2) : Nat},
                    Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                     {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                            FH.fgroups_total(fg1)))
-                      == True{} : Bool}>>>, r1)
+                     Arr.Arr.DPair<
+                       {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                       {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                              FH.fgroups_total(fg1)))
+                        == True{} : Bool}>>>>, r1)
       +r2 = Arr.Arr.dpair_r({FH.all_len5(rest) == True{} : Bool},
               Arr.Arr.DPair<{FH.fgroups_wf(fg2) == True{} : Bool},
                 Arr.Arr.DPair<{m3 == FH.fgroups_total(fg2) : Nat},
                   Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                    {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                           FH.fgroups_total(fg1)))
-                     == True{} : Bool}>>>, r1)
+                    Arr.Arr.DPair<
+                      {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                      {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                             FH.fgroups_total(fg1)))
+                       == True{} : Bool}>>>>, r1)
       +hwf2 = Arr.Arr.dpair_l({FH.fgroups_wf(fg2) == True{} : Bool},
                 Arr.Arr.DPair<{m3 == FH.fgroups_total(fg2) : Nat},
                   Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                    {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                           FH.fgroups_total(fg1)))
-                     == True{} : Bool}>>, r2)
+                    Arr.Arr.DPair<
+                      {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                      {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                             FH.fgroups_total(fg1)))
+                       == True{} : Bool}>>>, r2)
       +r3 = Arr.Arr.dpair_r({FH.fgroups_wf(fg2) == True{} : Bool},
               Arr.Arr.DPair<{m3 == FH.fgroups_total(fg2) : Nat},
                 Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                  {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                         FH.fgroups_total(fg1)))
-                   == True{} : Bool}>>, r2)
+                  Arr.Arr.DPair<
+                    {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                    {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                           FH.fgroups_total(fg1)))
+                     == True{} : Bool}>>>, r2)
       +hm3 = Arr.Arr.dpair_l({m3 == FH.fgroups_total(fg2) : Nat},
                Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                 {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                        FH.fgroups_total(fg1)))
-                  == True{} : Bool}>, r3)
+                 Arr.Arr.DPair<
+                   {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                   {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                          FH.fgroups_total(fg1)))
+                    == True{} : Bool}>>, r3)
       +r4 = Arr.Arr.dpair_r({m3 == FH.fgroups_total(fg2) : Nat},
               Arr.Arr.DPair<{k3 == FH.fgroups_count(fg2) : Nat},
-                {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                       FH.fgroups_total(fg1)))
-                 == True{} : Bool}>, r3)
+                Arr.Arr.DPair<
+                  {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                  {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                         FH.fgroups_total(fg1)))
+                   == True{} : Bool}>>, r3)
       +hk3 = Arr.Arr.dpair_l({k3 == FH.fgroups_count(fg2) : Nat},
-               {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
-                                      FH.fgroups_total(fg1)))
-                == True{} : Bool}, r4)
-      +hle3 = Arr.Arr.dpair_r({k3 == FH.fgroups_count(fg2) : Nat},
+               Arr.Arr.DPair<
+                 {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                 {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                        FH.fgroups_total(fg1)))
+                  == True{} : Bool}>, r4)
+      +r5 = Arr.Arr.dpair_r({k3 == FH.fgroups_count(fg2) : Nat},
+              Arr.Arr.DPair<
+                {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
                 {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
                                        FH.fgroups_total(fg1)))
-                 == True{} : Bool}, r4)
+                 == True{} : Bool}>, r4)
+      +hbgt3 = Arr.Arr.dpair_l(
+                 {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                 {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                        FH.fgroups_total(fg1)))
+                  == True{} : Bool}, r5)
+      +hle3 = Arr.Arr.dpair_r(
+                {Nat.add(b3, m3) == Nat.add(budget0, k3) : Nat},
+                {Nat.is_le(m3, Nat.add(Groups.len_words(rest),
+                                       FH.fgroups_total(fg1)))
+                 == True{} : Bool}, r5)
       +hle_step : {Nat.is_le(
                      Nat.add(Groups.len_words(rest), FH.fgroups_total(fg1)),
                      Nat.add(Groups.len_words(rest),
@@ -3531,16 +4015,19 @@ def FH.hist5_go_lift(+gw: +List<Nat>, +w: +List<Nat>, +rest: +List<+List<Nat>>,
             hle3, hle_step))
       Arr.DPair{hs3, Arr.DPair{
         FH.bool_and_intro(FH.is_word5(w), FH.all_len5(rest), h5w, h5r),
-        Arr.DPair{hwf2, Arr.DPair{hm3, Arr.DPair{hk3, hle_bound}}}}}
+        Arr.DPair{hwf2, Arr.DPair{hm3, Arr.DPair{hk3,
+          Arr.DPair{hbgt3, hle_bound}}}}}}
 
 def FH.hist5_go_ok_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +w: +List<Nat>, +rest: +List<+List<Nat>>, +fg0: +List<SolveFast.FGroup>,
-    +gen: Nat, -seen2: Array<Nat>, +m2: Nat, +k2: Nat,
+    +gen: Nat, +budget0: Nat, -seen2: Array<Nat>, +m2: Nat, +k2: Nat,
+    +b2: Nat,
     +h1: FH.HistOneSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))),
-           w, fg0, gen, SolveFast.Hist5Ok{seen2, m2, k2}),
+           w, fg0, gen, budget0, SolveFast.Hist5Ok{seen2, m2, k2, b2}),
     dp: &s2a: Array<Nat> -> &s2b: Array<Nat> ->
         {s2a == seen2 : Array<Nat>} & {s2b == s2a : Array<Nat>},
-    rec: @s2: Array<Nat> -> @+m2r: Nat -> @+k2r: Nat ->
+    rec: @s2: Array<Nat> -> @+m2r: Nat -> @+k2r: Nat -> @+b2r: Nat ->
+         {Nat.add(b2r, m2r) == Nat.add(budget0, k2r) : Nat} ->
          {FH.fgroups_wf(
             SolveFast.fgroups_next_acc(
               g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
@@ -3567,12 +4054,13 @@ def FH.hist5_go_ok_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
              g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
              SolveFast.word_eq_fast(
                g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w)),
-           gen,
+           gen, budget0,
            SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-             SolveFast.Hist5Ok{s2, m2r, k2r}))) ->
+             SolveFast.Hist5Ok{s2, m2r, k2r, b2r}))) ->
   FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w <> rest, fg0, gen,
+    budget0,
     SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-      SolveFast.Hist5Ok{seen2, m2, k2})):
+      SolveFast.Hist5Ok{seen2, m2, k2, b2})):
   (s2a, dp2) = dp
   (s2b, pe) = dp2
   (+es2a, +es2b) = pe
@@ -3585,73 +4073,101 @@ def FH.hist5_go_ok_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
              Arr.Arr.DPair<{FH.fgroups_wf(fg1) == True{} : Bool},
                Arr.Arr.DPair<{m2 == FH.fgroups_total(fg1) : Nat},
                  Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-                   {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-                    == True{} : Bool}>>>>, h1)
+                   Arr.Arr.DPair<
+                     {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+                     {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                      == True{} : Bool}>>>>>, h1)
   +r1 = Arr.Arr.dpair_r(
           FH.SeenTree(10n, 0, seen2, gen, fg1),
           Arr.Arr.DPair<{FH.is_word5(w) == True{} : Bool},
             Arr.Arr.DPair<{FH.fgroups_wf(fg1) == True{} : Bool},
               Arr.Arr.DPair<{m2 == FH.fgroups_total(fg1) : Nat},
                 Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-                  {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-                   == True{} : Bool}>>>>, h1)
+                  Arr.Arr.DPair<
+                    {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+                    {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                     == True{} : Bool}>>>>>, h1)
   +h5w = Arr.Arr.dpair_l({FH.is_word5(w) == True{} : Bool},
            Arr.Arr.DPair<{FH.fgroups_wf(fg1) == True{} : Bool},
              Arr.Arr.DPair<{m2 == FH.fgroups_total(fg1) : Nat},
                Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-                 {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-                  == True{} : Bool}>>>, r1)
+                 Arr.Arr.DPair<
+                   {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+                   {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                    == True{} : Bool}>>>>, r1)
   +r2 = Arr.Arr.dpair_r({FH.is_word5(w) == True{} : Bool},
           Arr.Arr.DPair<{FH.fgroups_wf(fg1) == True{} : Bool},
             Arr.Arr.DPair<{m2 == FH.fgroups_total(fg1) : Nat},
               Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-                {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-                 == True{} : Bool}>>>, r1)
+                Arr.Arr.DPair<
+                  {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+                  {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                   == True{} : Bool}>>>>, r1)
   +hwf1 = Arr.Arr.dpair_l({FH.fgroups_wf(fg1) == True{} : Bool},
             Arr.Arr.DPair<{m2 == FH.fgroups_total(fg1) : Nat},
               Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-                {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-                 == True{} : Bool}>>, r2)
+                Arr.Arr.DPair<
+                  {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+                  {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                   == True{} : Bool}>>>, r2)
   +r3 = Arr.Arr.dpair_r({FH.fgroups_wf(fg1) == True{} : Bool},
           Arr.Arr.DPair<{m2 == FH.fgroups_total(fg1) : Nat},
             Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-              {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-               == True{} : Bool}>>, r2)
+              Arr.Arr.DPair<
+                {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+                {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                 == True{} : Bool}>>>, r2)
   +hm2 = Arr.Arr.dpair_l({m2 == FH.fgroups_total(fg1) : Nat},
            Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-             {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-              == True{} : Bool}>, r3)
+             Arr.Arr.DPair<
+               {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+               {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+                == True{} : Bool}>>, r3)
   +r4 = Arr.Arr.dpair_r({m2 == FH.fgroups_total(fg1) : Nat},
           Arr.Arr.DPair<{k2 == FH.fgroups_count(fg1) : Nat},
-            {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-             == True{} : Bool}>, r3)
+            Arr.Arr.DPair<
+              {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+              {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+               == True{} : Bool}>>, r3)
   +hk2 = Arr.Arr.dpair_l({k2 == FH.fgroups_count(fg1) : Nat},
-           {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-            == True{} : Bool}, r4)
-  +hle2 = Arr.Arr.dpair_r({k2 == FH.fgroups_count(fg1) : Nat},
+           Arr.Arr.DPair<
+             {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+             {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+              == True{} : Bool}>, r4)
+  +r5 = Arr.Arr.dpair_r({k2 == FH.fgroups_count(fg1) : Nat},
+          Arr.Arr.DPair<
+            {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
             {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
-             == True{} : Bool}, r4)
+             == True{} : Bool}>, r4)
+  +hbgt2 = Arr.Arr.dpair_l(
+             {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+             {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+              == True{} : Bool}, r5)
+  +hle2 = Arr.Arr.dpair_r(
+            {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat},
+            {Nat.is_le(m2, Nat.add(1n, FH.fgroups_total(fg0)))
+             == True{} : Bool}, r5)
   +es2b_s : {s2b == seen2 : Array<Nat>} =
     Equal.trans(Array<Nat>, s2b, s2a, seen2, es2b, es2a)
   +hs2b = FH.seen_tree_transport(10n, 0, seen2, s2b, gen, fg1,
             Equal.sym(Array<Nat>, s2b, seen2, es2b_s), hs2)
-  +hrec_b = rec(s2b, m2, k2, hwf1, hm2, hk2, hs2b)
-  +hrec_a = FH.hist_spec_transport(gw, rest, fg1, gen,
+  +hrec_b = rec(s2b, m2, k2, b2, hbgt2, hwf1, hm2, hk2, hs2b)
+  +hrec_a = FH.hist_spec_transport(gw, rest, fg1, gen, budget0,
               SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-                SolveFast.Hist5Ok{s2b, m2, k2}),
+                SolveFast.Hist5Ok{s2b, m2, k2, b2}),
               SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-                SolveFast.Hist5Ok{s2a, m2, k2}),
+                SolveFast.Hist5Ok{s2a, m2, k2, b2}),
               Equal.cong(Array<Nat>, SolveFast.Hist5Res,
                 x => SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-                       SolveFast.Hist5Ok{x, m2, k2}),
+                       SolveFast.Hist5Ok{x, m2, k2, b2}),
                 s2b, s2a, es2b),
               hrec_b)
-  %es2a : FH.HistSpec(gw, w <> rest, fg0, gen,
+  %es2a : FH.HistSpec(gw, w <> rest, fg0, gen, budget0,
             SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-              SolveFast.Hist5Ok{_, m2, k2}))
-  FH.hist5_go_lift(gw, w, rest, fg0, gen,
+              SolveFast.Hist5Ok{_, m2, k2, b2}))
+  FH.hist5_go_lift(gw, w, rest, fg0, gen, budget0,
     SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-      SolveFast.Hist5Ok{s2a, m2, k2}),
+      SolveFast.Hist5Ok{s2a, m2, k2, b2}),
     h5w,
     NatProof.Nat.is_le_eq_l(Nat.add(1n, FH.fgroups_total(fg0)),
       m2, FH.fgroups_total(fg1), hm2, hle2),
@@ -3659,10 +4175,11 @@ def FH.hist5_go_ok_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
 
 def FH.hist5_go_step_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +w: +List<Nat>, +rest: +List<+List<Nat>>, +fg0: +List<SolveFast.FGroup>,
-    +gen: Nat, st1: SolveFast.Hist5Res,
+    +gen: Nat, +budget0: Nat, st1: SolveFast.Hist5Res,
     +h1: FH.HistOneSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))),
-           w, fg0, gen, st1),
-    rec: @s2: Array<Nat> -> @+m2: Nat -> @+k2: Nat ->
+           w, fg0, gen, budget0, st1),
+    rec: @s2: Array<Nat> -> @+m2: Nat -> @+k2: Nat -> @+b2: Nat ->
+         {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat} ->
          {FH.fgroups_wf(
             SolveFast.fgroups_next_acc(
               g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
@@ -3689,28 +4206,34 @@ def FH.hist5_go_step_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
              g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
              SolveFast.word_eq_fast(
                g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w)),
-           gen,
+           gen, budget0,
            SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-             SolveFast.Hist5Ok{s2, m2, k2}))) ->
+             SolveFast.Hist5Ok{s2, m2, k2, b2}))) ->
   FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w <> rest, fg0, gen,
-    SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen, st1)):
+    budget0, SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen, st1)):
   match st1:
     case SolveFast.Hist5Fallback{seen2}:
-      FH.hist5_fallback_rest(g0, g1, g2, g3, g4, w, rest, fg0, gen, seen2, h1)
-    case SolveFast.Hist5Ok{seen2, +m2, +k2}:
-      FH.hist5_go_ok_dup(g0, g1, g2, g3, g4, w, rest, fg0, gen, seen2, m2, k2,
-        h1, Arr.Arr.dup(Nat, seen2), rec)
+      FH.hist5_fallback_rest(g0, g1, g2, g3, g4, w, rest, fg0, gen, budget0,
+        seen2, h1)
+    case SolveFast.Hist5Pruned{seen2}:
+      FH.hist5_pruned_rest(g0, g1, g2, g3, g4, w, rest, fg0, gen, budget0,
+        seen2, h1)
+    case SolveFast.Hist5Ok{seen2, +m2, +k2, +b2}:
+      FH.hist5_go_ok_dup(g0, g1, g2, g3, g4, w, rest, fg0, gen, budget0,
+        seen2, m2, k2, b2, h1, Arr.Arr.dup(Nat, seen2), rec)
 
 def FH.hist5_go_cons_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +w: +List<Nat>, +rest: +List<+List<Nat>>, +fg0: +List<SolveFast.FGroup>,
-    -seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat,
+    -seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +hwf: {FH.fgroups_wf(fg0) == True{} : Bool},
     +hm: {m == FH.fgroups_total(fg0) : Nat},
     +hk: {k == FH.fgroups_count(fg0) : Nat},
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0),
     dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
         {s1 == seen : Array<Nat>} & {s2 == s1 : Array<Nat>},
-    rec: @s2: Array<Nat> -> @+m2: Nat -> @+k2: Nat ->
+    rec: @s2: Array<Nat> -> @+m2: Nat -> @+k2: Nat -> @+b2: Nat ->
+         {Nat.add(b2, m2) == Nat.add(budget0, k2) : Nat} ->
          {FH.fgroups_wf(
             SolveFast.fgroups_next_acc(
               g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
@@ -3737,12 +4260,13 @@ def FH.hist5_go_cons_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
              g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w, fg0,
              SolveFast.word_eq_fast(
                g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w)),
-           gen,
+           gen, budget0,
            SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-             SolveFast.Hist5Ok{s2, m2, k2}))) ->
+             SolveFast.Hist5Ok{s2, m2, k2, b2}))) ->
   FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), w <> rest, fg0, gen,
+    budget0,
     SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-      SolveFast.hist5_one(g0, g1, g2, g3, g4, w, seen, gen, m, k))):
+      SolveFast.hist5_one(g0, g1, g2, g3, g4, w, seen, gen, m, k, budget))):
   (s1, dp2) = dp
   (s2, pe) = dp2
   (+es1, +es2) = pe
@@ -3751,40 +4275,41 @@ def FH.hist5_go_cons_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
            Equal.sym(Array<Nat>, s2, seen, es2_s), hs)
   +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
   +h1_s2 = FH.hist5_one_spec(g0, g1, g2, g3, g4, w, fg0, s2, gen, m, k,
-             hwf, hm, hk, hs2)
-  +es1_eq : {SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s2, gen, m, k)
-             == SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k)
+             budget0, budget, hbgt, hwf, hm, hk, hs2)
+  +es1_eq : {SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s2, gen, m, k, budget)
+             == SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k, budget)
              : SolveFast.Hist5Res} =
     Equal.cong(Array<Nat>, SolveFast.Hist5Res,
-      x => SolveFast.hist5_one(g0, g1, g2, g3, g4, w, x, gen, m, k),
+      x => SolveFast.hist5_one(g0, g1, g2, g3, g4, w, x, gen, m, k, budget),
       s2, s1, es2)
-  %es1 : FH.HistSpec(gw, w <> rest, fg0, gen,
+  %es1 : FH.HistSpec(gw, w <> rest, fg0, gen, budget0,
            SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-             SolveFast.hist5_one(g0, g1, g2, g3, g4, w, _, gen, m, k)))
+             SolveFast.hist5_one(g0, g1, g2, g3, g4, w, _, gen, m, k, budget)))
   %Equal.sym(SolveFast.Hist5Res,
-     SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s2, gen, m, k),
-     SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k), es1_eq) :
-    FH.HistSpec(gw, w <> rest, fg0, gen,
+     SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s2, gen, m, k, budget),
+     SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k, budget), es1_eq) :
+    FH.HistSpec(gw, w <> rest, fg0, gen, budget0,
       SolveFast.hist5_go(g0, g1, g2, g3, g4, rest, gen,
-        SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k)))
-  FH.hist5_go_step_dup(g0, g1, g2, g3, g4, w, rest, fg0, gen,
-    SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k),
-    FH.hist_one_transport(gw, w, fg0, gen,
-      SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s2, gen, m, k),
-      SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k),
+        SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k, budget)))
+  FH.hist5_go_step_dup(g0, g1, g2, g3, g4, w, rest, fg0, gen, budget0,
+    SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k, budget),
+    FH.hist_one_transport(gw, w, fg0, gen, budget0,
+      SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s2, gen, m, k, budget),
+      SolveFast.hist5_one(g0, g1, g2, g3, g4, w, s1, gen, m, k, budget),
       es1_eq, h1_s2),
     rec)
 
 def FH.hist5_go_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +S: +List<+List<Nat>>, +fg0: +List<SolveFast.FGroup>,
-    seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat,
+    seen: Array<Nat>, +gen: Nat, +m: Nat, +k: Nat, +budget0: Nat, +budget: Nat,
+    +hbgt: {Nat.add(budget, m) == Nat.add(budget0, k) : Nat},
     +hwf: {FH.fgroups_wf(fg0) == True{} : Bool},
     +hm: {m == FH.fgroups_total(fg0) : Nat},
     +hk: {k == FH.fgroups_count(fg0) : Nat},
     +hs: FH.SeenTree(10n, 0, seen, gen, fg0)) ->
-  FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), S, fg0, gen,
+  FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), S, fg0, gen, budget0,
     SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-      SolveFast.Hist5Ok{seen, m, k})):
+      SolveFast.Hist5Ok{seen, m, k, budget})):
   match S:
     case Nil{}:
       +hle : {Nat.is_le(m, FH.fgroups_total(fg0)) == True{} : Bool} =
@@ -3792,16 +4317,16 @@ def FH.hist5_go_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
           m, Equal.sym(Nat, m, FH.fgroups_total(fg0), hm),
           NatProof.Nat.is_le_refl(FH.fgroups_total(fg0)))
       Arr.DPair{hs, Arr.DPair{{==}, Arr.DPair{hwf,
-        Arr.DPair{hm, Arr.DPair{hk, hle}}}}}
+        Arr.DPair{hm, Arr.DPair{hk, Arr.DPair{hbgt, hle}}}}}}
     case Con{+w, +rest}:
       +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
       +fg1 = SolveFast.fgroups_next_acc(gw, w, fg0,
                SolveFast.word_eq_fast(gw, w))
       FH.hist5_go_cons_dup(g0, g1, g2, g3, g4, w, rest, fg0, seen, gen, m, k,
-        hwf, hm, hk, hs, Arr.Arr.dup(Nat, seen),
-        s2 => m2 => k2 => hwf1 => hm2 => hk2 => hs2 =>
+        budget0, budget, hbgt, hwf, hm, hk, hs, Arr.Arr.dup(Nat, seen),
+        s2 => m2 => k2 => b2 => hbgt2 => hwf1 => hm2 => hk2 => hs2 =>
           FH.hist5_go_spec(g0, g1, g2, g3, g4, rest, fg1, s2, gen, m2, k2,
-            hwf1, hm2, hk2, hs2))
+            budget0, b2, hbgt2, hwf1, hm2, hk2, hs2))
 
 
 # ---------------------------------------------------------------------------
@@ -6170,63 +6695,86 @@ def FH.drain5_add_spec(+pre: +List<SolveFast.FGroup>,
                 SolveFast.fgroup_items_build(True{}, rem_lb, rest, items),
                 eib2))}
         case Con{+w2, +wt2}:
-          +c = FF5.FF5.encode_fb5_list(f)
-          +edec : {SolveFast.decode_fb5(c) == f : +List<Feedback.Color>} =
-            FF5.FF5.decode_encode_list(f, hf5)
-          +acc2 : +List<+List<Nat>> = w2 <> (w <> Nil{})
-          +ws : +List<+List<Nat>> = SolveFast.rev_words(wt2, acc2)
-          +len2 : Nat = Nat.add(2n, Groups.len_words(wt2))
-          +elen : {len2 == len : Nat} =
-            Equal.sym(Nat, len, len2,
-              NatProof.NatPrf.is_eq_true(len, len2, heql))
-          +erl : {SolveFast.rev_words_len(wt2, acc2, 2n)
-                  == SolveFast.RevLen{len2, ws} : SolveFast.RevLen} =
-            FH.rev_words_len_eq(wt2, acc2, 2n)
-          %Equal.sym(SolveFast.RevLen,
-             SolveFast.rev_words_len(wt2, acc2, 2n),
-             SolveFast.RevLen{len2, ws}, erl) :
-            FH.DrainSpec(pre,
-              SolveFast.FGroup{f, len, w <> (w2 <> wt2)} <> rest,
-              rem_lb, items,
-              SolveFast.drain5_add_ge2(SolveFast.decode_fb5(c), lb2, items2,
-                bkts3, _))
-          +clb2 = Nat.sub(Nat.add(len2, len2), 1n)
-          +clb = Nat.sub(Nat.add(len, len), 1n)
-          Arr.DPair{hb3,
-            Equal.trans(SolveFast.ItemsBound,
-              SolveFast.ItemsBound{Nat.add(clb2, lb2),
-                SolveFast.ClassItem{SolveFast.decode_fb5(c), ws, len2, lb2}
-                  <> (SolveFast.Add{SolveFast.decode_fb5(c), lb2} <> items2)},
-              SolveFast.group_items_step(f, ws, len, clb,
-                SolveFast.ItemsBound{lb2, items2}),
-              SolveFast.group_items_step(f, ws, len, clb,
-                SolveFast.fgroup_items_build(True{}, rem_lb, rest, items)),
-              Equal.trans(SolveFast.ItemsBound,
-                SolveFast.ItemsBound{Nat.add(clb2, lb2),
-                  SolveFast.ClassItem{SolveFast.decode_fb5(c), ws, len2, lb2}
-                    <> (SolveFast.Add{SolveFast.decode_fb5(c), lb2} <> items2)},
-                SolveFast.ItemsBound{Nat.add(clb2, lb2),
-                  SolveFast.ClassItem{f, ws, len2, lb2}
-                    <> (SolveFast.Add{f, lb2} <> items2)},
-                SolveFast.ItemsBound{Nat.add(clb, lb2),
-                  SolveFast.ClassItem{f, ws, len, lb2}
-                    <> (SolveFast.Add{f, lb2} <> items2)},
-                Equal.cong(+List<Feedback.Color>, SolveFast.ItemsBound,
-                  fb => SolveFast.ItemsBound{Nat.add(clb2, lb2),
-                          SolveFast.ClassItem{fb, ws, len2, lb2}
-                            <> (SolveFast.Add{fb, lb2} <> items2)},
-                  SolveFast.decode_fb5(c), f, edec),
-                Equal.cong(Nat, SolveFast.ItemsBound,
-                  l => SolveFast.ItemsBound{
-                         Nat.add(Nat.sub(Nat.add(l, l), 1n), lb2),
-                         SolveFast.ClassItem{f, ws, l, lb2}
-                           <> (SolveFast.Add{f, lb2} <> items2)},
-                  len2, len, elen)),
-              Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
-                ib => SolveFast.group_items_step(f, ws, len, clb, ib),
-                SolveFast.ItemsBound{lb2, items2},
-                SolveFast.fgroup_items_build(True{}, rem_lb, rest, items),
-                eib2))}
+          match wt2:
+            case Nil{}:
+              +c = FF5.FF5.encode_fb5_list(f)
+              +edec : {SolveFast.decode_fb5(c) == f : +List<Feedback.Color>} =
+                FF5.FF5.decode_encode_list(f, hf5)
+              Arr.DPair{hb3,
+                Equal.trans(SolveFast.ItemsBound,
+                  SolveFast.ItemsBound{Nat.add(3n, lb2),
+                    SolveFast.TwoItem{SolveFast.decode_fb5(c), w2, w} <> items2},
+                  SolveFast.group_items_two_step(f, w2, w,
+                    SolveFast.ItemsBound{lb2, items2}),
+                  SolveFast.group_items_two_step(f, w2, w,
+                    SolveFast.fgroup_items_build(True{}, rem_lb, rest, items)),
+                  Equal.cong(+List<Feedback.Color>, SolveFast.ItemsBound,
+                    fb => SolveFast.ItemsBound{Nat.add(3n, lb2),
+                            SolveFast.TwoItem{fb, w2, w} <> items2},
+                    SolveFast.decode_fb5(c), f, edec),
+                  Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+                    ib => SolveFast.group_items_two_step(f, w2, w, ib),
+                    SolveFast.ItemsBound{lb2, items2},
+                    SolveFast.fgroup_items_build(True{}, rem_lb, rest, items),
+                    eib2))}
+            case Con{+w3, +wt3}:
+              +c = FF5.FF5.encode_fb5_list(f)
+              +edec : {SolveFast.decode_fb5(c) == f : +List<Feedback.Color>} =
+                FF5.FF5.decode_encode_list(f, hf5)
+              +acc3 : +List<+List<Nat>> = w3 <> (w2 <> (w <> Nil{}))
+              +ws : +List<+List<Nat>> = SolveFast.rev_words(wt3, acc3)
+              +len3 : Nat = Nat.add(3n, Groups.len_words(wt3))
+              +elen : {len3 == len : Nat} =
+                Equal.sym(Nat, len, len3,
+                  NatProof.NatPrf.is_eq_true(len, len3, heql))
+              +erl : {SolveFast.rev_words_len(wt3, acc3, 3n)
+                      == SolveFast.RevLen{len3, ws} : SolveFast.RevLen} =
+                FH.rev_words_len_eq(wt3, acc3, 3n)
+              %Equal.sym(SolveFast.RevLen,
+                 SolveFast.rev_words_len(wt3, acc3, 3n),
+                 SolveFast.RevLen{len3, ws}, erl) :
+                FH.DrainSpec(pre,
+                  SolveFast.FGroup{f, len, w <> (w2 <> (w3 <> wt3))} <> rest,
+                  rem_lb, items,
+                  SolveFast.drain5_add_ge2(SolveFast.decode_fb5(c), lb2, items2,
+                    bkts3, _))
+              +clb3 = Nat.sub(Nat.add(len3, len3), 1n)
+              +clb = Nat.sub(Nat.add(len, len), 1n)
+              Arr.DPair{hb3,
+                Equal.trans(SolveFast.ItemsBound,
+                  SolveFast.ItemsBound{Nat.add(clb3, lb2),
+                    SolveFast.ClassItem{SolveFast.decode_fb5(c), ws, len3, lb2}
+                      <> (SolveFast.Add{SolveFast.decode_fb5(c), lb2} <> items2)},
+                  SolveFast.group_items_step(f, ws, len, clb,
+                    SolveFast.ItemsBound{lb2, items2}),
+                  SolveFast.group_items_step(f, ws, len, clb,
+                    SolveFast.fgroup_items_build(True{}, rem_lb, rest, items)),
+                  Equal.trans(SolveFast.ItemsBound,
+                    SolveFast.ItemsBound{Nat.add(clb3, lb2),
+                      SolveFast.ClassItem{SolveFast.decode_fb5(c), ws, len3, lb2}
+                        <> (SolveFast.Add{SolveFast.decode_fb5(c), lb2} <> items2)},
+                    SolveFast.ItemsBound{Nat.add(clb3, lb2),
+                      SolveFast.ClassItem{f, ws, len3, lb2}
+                        <> (SolveFast.Add{f, lb2} <> items2)},
+                    SolveFast.ItemsBound{Nat.add(clb, lb2),
+                      SolveFast.ClassItem{f, ws, len, lb2}
+                        <> (SolveFast.Add{f, lb2} <> items2)},
+                    Equal.cong(+List<Feedback.Color>, SolveFast.ItemsBound,
+                      fb => SolveFast.ItemsBound{Nat.add(clb3, lb2),
+                              SolveFast.ClassItem{fb, ws, len3, lb2}
+                                <> (SolveFast.Add{fb, lb2} <> items2)},
+                      SolveFast.decode_fb5(c), f, edec),
+                    Equal.cong(Nat, SolveFast.ItemsBound,
+                      l => SolveFast.ItemsBound{
+                             Nat.add(Nat.sub(Nat.add(l, l), 1n), lb2),
+                             SolveFast.ClassItem{f, ws, l, lb2}
+                               <> (SolveFast.Add{f, lb2} <> items2)},
+                      len3, len, elen)),
+                  Equal.cong(SolveFast.ItemsBound, SolveFast.ItemsBound,
+                    ib => SolveFast.group_items_step(f, ws, len, clb, ib),
+                    SolveFast.ItemsBound{lb2, items2},
+                    SolveFast.fgroup_items_build(True{}, rem_lb, rest, items),
+                    eib2))}
 
 def FH.drain5_swap_pair(+pre: +List<SolveFast.FGroup>,
     +f: +List<Feedback.Color>, +len: Nat, +rws: +List<+List<Nat>>,
@@ -6828,6 +7376,41 @@ def FH.mk_buf_ok(+nodup: Bool, +n: Nat, +b0: SolveRef.Best) ->
     case False{}:
       Unit{}
 
+def FH.mk_buf_init_ok(+nodup: Bool, +n: Nat, +b0: SolveRef.Best) ->
+  FH.BufOk(SolveFast.mk_buf_init(nodup, n, b0)):
+  match nodup:
+    case True{}:
+      FH.mk_buf_go_ok(Nat.is_le(8n, n))
+    case False{}:
+      Unit{}
+
+def FH.buf_of_gres(gr: SolveFast.GuessRes) -> SolveFast.Buf5:
+  match gr:
+    case SolveFast.GuessRes{items, buf}:
+      buf
+
+def FH.ensure_buf_eq(+nodup: Bool, +n: Nat, +best: SolveRef.Best,
+    buf: SolveFast.Buf5) ->
+  {SolveFast.ensure_buf(nodup, n, best, SolveFast.GuessRes{Nil{}, buf})
+   == SolveFast.GuessRes{Nil{},
+        FH.buf_of_gres(SolveFast.ensure_buf(nodup, n, best,
+          SolveFast.GuessRes{Nil{}, buf}))} : SolveFast.GuessRes}:
+  match buf:
+    case SolveFast.NoBuf{}:
+      {==}
+    case SolveFast.Buf5{seen, bkts, gen}:
+      {==}
+
+def FH.ensure_buf_ok(+nodup: Bool, +n: Nat, +best: SolveRef.Best,
+    buf: SolveFast.Buf5, +hbuf: FH.BufOk(buf)) ->
+  FH.BufOk(FH.buf_of_gres(SolveFast.ensure_buf(nodup, n, best,
+    SolveFast.GuessRes{Nil{}, buf}))):
+  match buf:
+    case SolveFast.NoBuf{}:
+      FH.mk_buf_ok(nodup, n, best)
+    case SolveFast.Buf5{seen, bkts, gen}:
+      hbuf
+
 def FH.buf_dup_go(-seen: Array<Nat>, -bkts: Array<+List<+List<Nat>>>, +gen: Nat,
     ds: &s1: Array<Nat> -> &s2: Array<Nat> ->
         {s1 == seen : Array<Nat>} & {s2 == s1 : Array<Nat>},
@@ -7131,15 +7714,125 @@ def FH.schedule5_usable_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
       FH.schedule5_lb_spec(g0, g1, g2, g3, g4, S, n, seen, bkts, gen2,
         SolveFast.skippable(best, lb), hall5, hs, hb)
 
+def FH.pruned_skippable_true(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+    +best: SolveRef.Best,
+    +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
+    +hpr: {Nat.is_le(
+             Nat.add(1n, Nat.add(
+               Nat.sub(SolveFast.best_cost(best), Nat.add(n, n)),
+               FH.fgroups_count(SolveFast.fgroups_build_fast(g, S, Nil{})))),
+             FH.fgroups_total(SolveFast.fgroups_build_fast(g, S, Nil{})))
+           == True{} : Bool}) ->
+  {SolveFast.skippable(best,
+     SolveFast.fgroups_lb_nodup(SolveFast.fgroups_build_fast(g, S, Nil{}), n))
+   == True{} : Bool}:
+  +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
+  +B = SolveFast.best_cost(best)
+  +b0 = Nat.sub(B, Nat.add(n, n))
+  +m = FH.fgroups_total(fg)
+  +k = FH.fgroups_count(fg)
+  +em : {m == SolveFast.keep_fast(g, S) : Nat} =
+    Equal.trans(Nat, m, Nat.add(SolveFast.keep_fast(g, S), 0n),
+      SolveFast.keep_fast(g, S),
+      FH.fgroups_build_total_eq_keep(g, S, Nil{}),
+      NatProof.NatPrf.add_zero(SolveFast.keep_fast(g, S)))
+  +hn_le : {Nat.is_le(n, Nat.add(1n, m)) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_l(Nat.add(1n, m), Groups.len_words(S), n,
+      Equal.sym(Nat, n, Groups.len_words(S), en),
+      NatProof.Nat.is_le_eq_r(Groups.len_words(S),
+        Nat.add(1n, SolveFast.keep_fast(g, S)), Nat.add(1n, m),
+        Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+          SolveFast.keep_fast(g, S), m,
+          Equal.sym(Nat, m, SolveFast.keep_fast(g, S), em)),
+        FN.FN.len_le_succ_keep(g, S, hnd)))
+  +hb_le : {Nat.is_le(B, Nat.add(Nat.add(n, n), b0)) == True{} : Bool} =
+    FH.le_add_sub(B, Nat.add(n, n))
+  +hbk1 : {Nat.is_le(Nat.add(B, k),
+             Nat.add(Nat.add(Nat.add(n, n), b0), k)) == True{} : Bool} =
+    FH.is_le_add_r(B, Nat.add(Nat.add(n, n), b0), k, hb_le)
+  +eassoc : {Nat.add(Nat.add(Nat.add(n, n), b0), k)
+             == Nat.add(n, Nat.add(n, Nat.add(b0, k))) : Nat} =
+    Equal.trans(Nat,
+      Nat.add(Nat.add(Nat.add(n, n), b0), k),
+      Nat.add(Nat.add(n, n), Nat.add(b0, k)),
+      Nat.add(n, Nat.add(n, Nat.add(b0, k))),
+      NatProof.NatPrf.add_assoc(Nat.add(n, n), b0, k),
+      NatProof.NatPrf.add_assoc(n, n, Nat.add(b0, k)))
+  +hbk2 : {Nat.is_le(Nat.add(B, k),
+             Nat.add(n, Nat.add(n, Nat.add(b0, k)))) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_r(Nat.add(B, k),
+      Nat.add(Nat.add(Nat.add(n, n), b0), k),
+      Nat.add(n, Nat.add(n, Nat.add(b0, k))), eassoc, hbk1)
+  +hinner1 : {Nat.is_le(Nat.add(n, Nat.add(b0, k)),
+                Nat.add(Nat.add(1n, m), Nat.add(b0, k))) == True{} : Bool} =
+    FH.is_le_add_r(n, Nat.add(1n, m), Nat.add(b0, k), hn_le)
+  +einner : {Nat.add(Nat.add(1n, m), Nat.add(b0, k))
+             == Nat.add(m, Nat.add(1n, Nat.add(b0, k))) : Nat} =
+    Equal.sym(Nat,
+      Nat.add(m, Nat.add(1n, Nat.add(b0, k))),
+      Nat.add(1n, Nat.add(m, Nat.add(b0, k))),
+      NatProof.NatPrf.add_succ(m, Nat.add(b0, k)))
+  +hinner2 : {Nat.is_le(Nat.add(n, Nat.add(b0, k)), Nat.add(m, m))
+              == True{} : Bool} =
+    NatProof.Nat.is_le_trans(
+      Nat.add(n, Nat.add(b0, k)),
+      Nat.add(m, Nat.add(1n, Nat.add(b0, k))),
+      Nat.add(m, m),
+      NatProof.Nat.is_le_eq_r(Nat.add(n, Nat.add(b0, k)),
+        Nat.add(Nat.add(1n, m), Nat.add(b0, k)),
+        Nat.add(m, Nat.add(1n, Nat.add(b0, k))), einner, hinner1),
+      NatProof.Nat.is_le_add_l(Nat.add(1n, Nat.add(b0, k)), m, m, hpr))
+  +hbk3 : {Nat.is_le(Nat.add(B, k), Nat.add(n, Nat.add(m, m)))
+           == True{} : Bool} =
+    NatProof.Nat.is_le_trans(
+      Nat.add(B, k),
+      Nat.add(n, Nat.add(n, Nat.add(b0, k))),
+      Nat.add(n, Nat.add(m, m)),
+      hbk2,
+      NatProof.Nat.is_le_add_l(Nat.add(n, Nat.add(b0, k)), Nat.add(m, m), n,
+        hinner2))
+  +hsub : {Nat.is_le(B, Nat.sub(Nat.add(n, Nat.add(m, m)), k))
+           == True{} : Bool} =
+    FH.le_sub_of_add_le(k, Nat.add(n, Nat.add(m, m)), B, hbk3)
+  +elb : {SolveFast.fgroups_lb_nodup(fg, n)
+          == Nat.sub(Nat.add(n, Nat.add(m, m)), k) : Nat} =
+    FH.fgroups_lb_nodup_formula(n, fg, FH.fgroups_build_pos(g, S, Nil{}, {==}))
+  NatProof.Nat.is_le_eq_r(B,
+    Nat.sub(Nat.add(n, Nat.add(m, m)), k),
+    SolveFast.fgroups_lb_nodup(fg, n),
+    Equal.sym(Nat, SolveFast.fgroups_lb_nodup(fg, n),
+      Nat.sub(Nat.add(n, Nat.add(m, m)), k), elb),
+    hsub)
+
+def FH.schedule_fguess_nil_of_skip(+g: +List<Nat>, +fg: +List<SolveFast.FGroup>,
+    +n: Nat, +best: SolveRef.Best, usable: Bool,
+    +hsk: {SolveFast.skippable(best, SolveFast.fgroups_lb_nodup(fg, n))
+           == True{} : Bool}) ->
+  {Nil{} == SolveFast.schedule_fguess(True{}, g, fg, n, best, usable)
+   : +List<SolveFast.Item>}:
+  match usable:
+    case False{}:
+      {==}
+    case True{}:
+      Equal.cong(Bool, +List<SolveFast.Item>,
+        s => SolveFast.schedule_fguess_lb(True{}, g, fg, n, s),
+        True{},
+        SolveFast.skippable(best, SolveFast.fgroups_lb_nodup(fg, n)),
+        Equal.sym(Bool,
+          SolveFast.skippable(best, SolveFast.fgroups_lb_nodup(fg, n)),
+          True{}, hsk))
+
 def FH.schedule5_hist_ok_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +S: +List<+List<Nat>>, +n: Nat, +best: SolveRef.Best,
     -seen2: Array<Nat>, bkts: Array<+List<+List<Nat>>>, +gen: Nat,
-    +m: Nat, +k: Nat,
+    +m: Nat, +k: Nat, +b: Nat,
     +hge1: {Nat.is_le(1n, n) == True{} : Bool},
     +en: {n == Groups.len_words(S) : Nat},
     +hb: FH.BktTree(10n, 0, bkts, Nil{}),
     +hhr: FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), S, Nil{},
-            gen, SolveFast.Hist5Ok{seen2, m, k}),
+            gen, Nat.sub(SolveFast.best_cost(best), Nat.add(n, n)),
+            SolveFast.Hist5Ok{seen2, m, k, b}),
     dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
         {s1 == seen2 : Array<Nat>} & {s2 == s1 : Array<Nat>}) ->
   FH.GuessResSpec(
@@ -7159,56 +7852,83 @@ def FH.schedule5_hist_ok_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
   (+es1, +es2) = pe
   +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
   +fg = SolveFast.fgroups_build_fast(gw, S, Nil{})
+  +budget0 = Nat.sub(SolveFast.best_cost(best), Nat.add(n, n))
   +hs2 = Arr.Arr.dpair_l(
            FH.SeenTree(10n, 0, seen2, gen, fg),
            Arr.Arr.DPair<{FH.all_len5(S) == True{} : Bool},
              Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
                Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
                  Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                   {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-                    == True{} : Bool}>>>>, hhr)
+                   Arr.Arr.DPair<
+                     {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+                     {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+                      == True{} : Bool}>>>>>, hhr)
   +r1 = Arr.Arr.dpair_r(
           FH.SeenTree(10n, 0, seen2, gen, fg),
           Arr.Arr.DPair<{FH.all_len5(S) == True{} : Bool},
             Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
               Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
                 Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                  {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-                   == True{} : Bool}>>>>, hhr)
+                  Arr.Arr.DPair<
+                    {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+                    {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+                     == True{} : Bool}>>>>>, hhr)
   +hall5 = Arr.Arr.dpair_l({FH.all_len5(S) == True{} : Bool},
              Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
                Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
                  Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                   {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-                    == True{} : Bool}>>>, r1)
+                   Arr.Arr.DPair<
+                     {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+                     {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+                      == True{} : Bool}>>>>, r1)
   +r2 = Arr.Arr.dpair_r({FH.all_len5(S) == True{} : Bool},
           Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
             Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
               Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-                 == True{} : Bool}>>>, r1)
+                Arr.Arr.DPair<
+                  {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+                  {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+                   == True{} : Bool}>>>>, r1)
   +hwf = Arr.Arr.dpair_l({FH.fgroups_wf(fg) == True{} : Bool},
            Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
              Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-               {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-                == True{} : Bool}>>, r2)
+               Arr.Arr.DPair<
+                 {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+                 {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+                  == True{} : Bool}>>>, r2)
   +r3 = Arr.Arr.dpair_r({FH.fgroups_wf(fg) == True{} : Bool},
           Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
             Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-              {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-               == True{} : Bool}>>, r2)
+              Arr.Arr.DPair<
+                {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+                {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+                 == True{} : Bool}>>>, r2)
   +hm = Arr.Arr.dpair_l({m == FH.fgroups_total(fg) : Nat},
           Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-            {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-             == True{} : Bool}>, r3)
+            Arr.Arr.DPair<
+              {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+              {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+               == True{} : Bool}>>, r3)
   +r4 = Arr.Arr.dpair_r({m == FH.fgroups_total(fg) : Nat},
           Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-            {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
-             == True{} : Bool}>, r3)
+            Arr.Arr.DPair<
+              {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+              {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+               == True{} : Bool}>>, r3)
   +hk = Arr.Arr.dpair_l({k == FH.fgroups_count(fg) : Nat},
-          {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n)) == True{} : Bool}, r4)
-  +hle0 = Arr.Arr.dpair_r({k == FH.fgroups_count(fg) : Nat},
-            {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n)) == True{} : Bool}, r4)
+          Arr.Arr.DPair<
+            {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+            {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+             == True{} : Bool}>, r4)
+  +r5 = Arr.Arr.dpair_r({k == FH.fgroups_count(fg) : Nat},
+          Arr.Arr.DPair<
+            {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+            {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n))
+             == True{} : Bool}>, r4)
+  +hle0 = Arr.Arr.dpair_r(
+            {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
+            {Nat.is_le(m, Nat.add(Groups.len_words(S), 0n)) == True{} : Bool},
+            r5)
   +es2_seen : {s2 == seen2 : Array<Nat>} =
     Equal.trans(Array<Nat>, s2, s1, seen2, es2, es1)
   +hs_s2 = FH.seen_tree_transport(10n, 0, seen2, s2, gen, fg,
@@ -7259,9 +7979,10 @@ def FH.schedule5_hist_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     bkts: Array<+List<+List<Nat>>>, +gen: Nat, hr: SolveFast.Hist5Res,
     +hge1: {Nat.is_le(1n, n) == True{} : Bool},
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hb: FH.BktTree(10n, 0, bkts, Nil{}),
     +hhr: FH.HistSpec(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))), S, Nil{},
-            gen, hr)) ->
+            gen, Nat.sub(SolveFast.best_cost(best), Nat.add(n, n)), hr)) ->
   FH.GuessResSpec(
     SolveFast.schedule_fguess(True{},
       g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))),
@@ -7276,15 +7997,35 @@ def FH.schedule5_hist_spec(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
   match hr:
     case SolveFast.Hist5Fallback{seen2}:
       Arr.DPair{{==}, Arr.DPair{hhr, hb}}
-    case SolveFast.Hist5Ok{seen2, +m, +k}:
+    case SolveFast.Hist5Pruned{seen2}:
+      +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
+      +fg = SolveFast.fgroups_build_fast(gw, S, Nil{})
+      +budget0 = Nat.sub(SolveFast.best_cost(best), Nat.add(n, n))
+      +hs2 = Arr.Arr.dpair_l(
+               FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+               {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg))),
+                          FH.fgroups_total(fg)) == True{} : Bool}, hhr)
+      +hpr = Arr.Arr.dpair_r(
+               FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
+               {Nat.is_le(Nat.add(1n, Nat.add(budget0, FH.fgroups_count(fg))),
+                          FH.fgroups_total(fg)) == True{} : Bool}, hhr)
+      +hsk : {SolveFast.skippable(best, SolveFast.fgroups_lb_nodup(fg, n))
+              == True{} : Bool} =
+        FH.pruned_skippable_true(gw, S, n, best, en, hnd, hpr)
+      Arr.DPair{
+        FH.schedule_fguess_nil_of_skip(gw, fg, n, best,
+          SolveFast.fgroups_smaller(n, fg), hsk),
+        Arr.DPair{hs2, hb}}
+    case SolveFast.Hist5Ok{seen2, +m, +k, +b}:
       FH.schedule5_hist_ok_dup(g0, g1, g2, g3, g4, S, n, best, seen2, bkts,
-        gen, m, k, hge1, en, hb, hhr, Arr.Arr.dup(Nat, seen2))
+        gen, m, k, b, hge1, en, hb, hhr, Arr.Arr.dup(Nat, seen2))
 
 def FH.guess_body_buf5_len5_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
     +S: +List<+List<Nat>>, +n: Nat, +best: SolveRef.Best,
     -seen: Array<Nat>, bkts: Array<+List<+List<Nat>>>, +gen: Nat,
     +hge1: {Nat.is_le(1n, n) == True{} : Bool},
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hs: FH.SeenTree(10n, 0, seen, gen, Nil{}),
     +hb: FH.BktTree(10n, 0, bkts, Nil{}),
     dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
@@ -7301,26 +8042,28 @@ def FH.guess_body_buf5_len5_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat
     SolveFast.schedule5_hist(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{})))),
       g0, g1, g2, g3, g4, S, n, best, bkts, gen,
       SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-        SolveFast.Hist5Ok{seen, 0n, 0n}))):
+        SolveFast.Hist5Ok{seen, 0n, 0n,
+          Nat.sub(SolveFast.best_cost(best), Nat.add(n, n))}))):
   (s1, dp2) = dp
   (s2, pe) = dp2
   (+es1, +es2) = pe
   +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
   +fg = SolveFast.fgroups_build_fast(gw, S, Nil{})
+  +budget0 = Nat.sub(SolveFast.best_cost(best), Nat.add(n, n))
   +es2_s : {s2 == seen : Array<Nat>} =
     Equal.trans(Array<Nat>, s2, s1, seen, es2, es1)
   +hs2 = FH.seen_tree_transport(10n, 0, seen, s2, gen, Nil{},
            Equal.sym(Array<Nat>, s2, seen, es2_s), hs)
   +hhr2 = FH.hist5_go_spec(g0, g1, g2, g3, g4, S, Nil{}, s2, gen, 0n, 0n,
-            {==}, {==}, {==}, hs2)
-  +hhr1 = FH.hist_spec_transport(gw, S, Nil{}, gen,
+            budget0, budget0, {==}, {==}, {==}, {==}, hs2)
+  +hhr1 = FH.hist_spec_transport(gw, S, Nil{}, gen, budget0,
             SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-              SolveFast.Hist5Ok{s2, 0n, 0n}),
+              SolveFast.Hist5Ok{s2, 0n, 0n, budget0}),
             SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-              SolveFast.Hist5Ok{s1, 0n, 0n}),
+              SolveFast.Hist5Ok{s1, 0n, 0n, budget0}),
             Equal.cong(Array<Nat>, SolveFast.Hist5Res,
               x => SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-                     SolveFast.Hist5Ok{x, 0n, 0n}),
+                     SolveFast.Hist5Ok{x, 0n, 0n, budget0}),
               s2, s1, es2),
             hhr2)
   %es1 : FH.GuessResSpec(
@@ -7329,17 +8072,18 @@ def FH.guess_body_buf5_len5_dup(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat
            SolveFast.schedule5_hist(gw, g0, g1, g2, g3, g4, S, n, best, bkts,
              gen,
              SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-               SolveFast.Hist5Ok{_, 0n, 0n})))
+               SolveFast.Hist5Ok{_, 0n, 0n, budget0})))
   FH.schedule5_hist_spec(g0, g1, g2, g3, g4, S, n, best, bkts, gen,
     SolveFast.hist5_go(g0, g1, g2, g3, g4, S, gen,
-      SolveFast.Hist5Ok{s1, 0n, 0n}),
-    hge1, en, hb, hhr1)
+      SolveFast.Hist5Ok{s1, 0n, 0n, budget0}),
+    hge1, en, hnd, hb, hhr1)
 
 def FH.guess_body_buf5_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
     +best: SolveRef.Best, seen: Array<Nat>, bkts: Array<+List<+List<Nat>>>,
     +gen: Nat,
     +hge1: {Nat.is_le(1n, n) == True{} : Bool},
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hs: FH.SeenTree(10n, 0, seen, gen, Nil{}),
     +hb: FH.BktTree(10n, 0, bkts, Nil{})) ->
   FH.GuessResSpec(
@@ -7370,7 +8114,7 @@ def FH.guess_body_buf5_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
                       match t5:
                         case Nil{}:
                           FH.guess_body_buf5_len5_dup(g0, g1, g2, g3, g4, S, n,
-                            best, seen, bkts, gen, hge1, en, hs, hb,
+                            best, seen, bkts, gen, hge1, en, hnd, hs, hb,
                             Arr.Arr.dup(Nat, seen))
                         case Con{+g5, +t6}:
                           Arr.DPair{{==}, Arr.DPair{hs, hb}}
@@ -7379,6 +8123,7 @@ def FH.guess_body_buf_ge2_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
     +best: SolveRef.Best, buf: SolveFast.Buf5,
     +hge1: {Nat.is_le(1n, n) == True{} : Bool},
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hbuf: FH.BufOk(buf)) ->
   FH.GuessResSpec(
     SolveFast.schedule_fguess(True{}, g, SolveFast.fgroups_build_fast(g, S, Nil{}),
@@ -7395,11 +8140,13 @@ def FH.guess_body_buf_ge2_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
       +hb = Arr.Arr.dpair_r(
               FH.SeenTree(10n, 0, seen, gen, Nil{}),
               FH.BktTree(10n, 0, bkts, Nil{}), hbuf)
-      FH.guess_body_buf5_spec(g, S, n, best, seen, bkts, gen, hge1, en, hs, hb)
+      FH.guess_body_buf5_spec(g, S, n, best, seen, bkts, gen, hge1, en, hnd,
+        hs, hb)
 
 def FH.guess_body_buf_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
     +best: SolveRef.Best, buf: SolveFast.Buf5,
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hbuf: FH.BufOk(buf)) ->
   FH.GuessResSpec(SolveFast.guess_body(True{}, g, S, n, best),
     SolveFast.guess_body_buf(g, S, n, best, buf)):
@@ -7415,44 +8162,47 @@ def FH.guess_body_buf_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
             Equal.cong(Nat, Bool, x => Nat.is_le(1n, x),
               n, Groups.len_words(w <> (w2 <> t2)), en)
           FH.guess_body_buf_ge2_spec(g, w <> (w2 <> t2), n, best, buf,
-            hge1, en, hbuf)
+            hge1, en, hnd, hbuf)
 
 def FH.guess_items_mem_buf_spec(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
     +best: SolveRef.Best, buf: SolveFast.Buf5, in_s: Bool,
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hbuf: FH.BufOk(buf)) ->
   FH.GuessResSpec(SolveFast.guess_items_mem(g, S, n, best, in_s),
     SolveFast.guess_items_mem_buf(g, S, n, best, buf, in_s)):
   match in_s:
     case True{}:
-      FH.guess_body_buf_spec(g, S, n, best, buf, en, hbuf)
+      FH.guess_body_buf_spec(g, S, n, best, buf, en, hnd, hbuf)
     case False{}:
       Arr.DPair{{==}, hbuf}
 
 def FH.guess_items_nodup_buf_spec(+g: +List<Nat>, +S: +List<+List<Nat>>,
     +n: Nat, +best: SolveRef.Best, buf: SolveFast.Buf5, le_2n: Bool,
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.no_dup_ref(S) == True{} : Bool},
     +hbuf: FH.BufOk(buf)) ->
   FH.GuessResSpec(SolveFast.guess_items_nodup(g, S, n, best, le_2n),
     SolveFast.guess_items_nodup_buf(g, S, n, best, buf, le_2n)):
   match le_2n:
     case False{}:
-      FH.guess_body_buf_spec(g, S, n, best, buf, en, hbuf)
+      FH.guess_body_buf_spec(g, S, n, best, buf, en, hnd, hbuf)
     case True{}:
       FH.guess_items_mem_buf_spec(g, S, n, best, buf,
-        SolveFast.member_word_fast(g, S), en, hbuf)
+        SolveFast.member_word_fast(g, S), en, hnd, hbuf)
 
 # Main theorem: `guess_items_buf` always emits the exact same schedule items
 # as `guess_items` and preserves `FH.BufOk`.
 def FH.guess_items_buf_spec(+nodup: Bool, +g: +List<Nat>,
     +S: +List<+List<Nat>>, +n: Nat, +best: SolveRef.Best, buf: SolveFast.Buf5,
     +en: {n == Groups.len_words(S) : Nat},
+    +hnd: {FN.FN.nodup_ok(nodup, S) == True{} : Bool},
     +hbuf: FH.BufOk(buf)) ->
   FH.GuessResSpec(SolveFast.guess_items(nodup, g, S, n, best),
     SolveFast.guess_items_buf(nodup, g, S, n, best, buf)):
   match nodup:
     case True{}:
       FH.guess_items_nodup_buf_spec(g, S, n, best, buf,
-        SolveFast.skippable(best, Nat.add(n, n)), en, hbuf)
+        SolveFast.skippable(best, Nat.add(n, n)), en, hnd, hbuf)
     case False{}:
       Arr.DPair{{==}, hbuf}

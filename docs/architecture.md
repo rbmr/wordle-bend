@@ -78,16 +78,11 @@ count and is intended as the correctness reference, not the final fast path. See
 
 ### `src/solve.bend`
 
-The entry point the laws talk about. It delegates to the reference solver in `src/solve_ref.bend`.
+The entry point the laws talk about. It delegates to the bound-pruned solver in `src/solve_fast.bend`, while `src/solve_ref.bend` stays in the tree as the reference specification.
 
 ### `src/solve_fast.bend`
 
-The bound-pruned search, proved equal to the reference solver. Each usable guess carries the lower
-bound `|S| + sum over classes of |class|`, which any tree rooted at that guess costs at least: the
-node costs one per candidate and every class costs at least its candidate count. When the best cost
-so far is at most that bound, the guess's block is skipped without searching its classes. The
-command line uses this module; `src/solve.bend` and `src/solve_ref.bend` stay in the tree as the
-specification, and `PROOF.bend` states and proves the equality as `Fast.solve_eq`.
+The bound-pruned solver, proved directly valid and optimal (`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend` via `proofs/fast_valid.bend` and `proofs/fast_opt.bend`). It uses depth-two lower bounds (`2 * |ws| - max_mult(ws)`), tight recursive cutoff propagation, O(1) resolution of singleton (`OneItem`) and duplicate-free two-word (`TwoItem`) classes, candidate-first staged search (`GList`: try `S` before `G` and raise the early-exit floor from `2 * |S| - 1` to `2 * |S|` after `S`), lazy reusable 1024-entry flat-array histograms/buckets for 5-letter duplicate-free nodes, and mid-histogram collision-budget early abort. Because correctness is proved directly via validity and optimality rather than tree-for-tree equality with `src/solve_ref.bend`, the solver is free to reorder guesses and return any optimal tree. `src/solve_ref.bend` stays in the tree as the specification (`Ref.solve_valid` and `Ref.solve_optimal` in `PROOF.bend`).
 
 ### `src/solve_par.bend`
 
@@ -165,13 +160,13 @@ script. See [proofs.md](proofs.md) and [testing.md](testing.md).
 guesses file, candidates file
           │
           ▼
-     src/main.bend  ──►  src/solve_fast.bend
-          │                 │  proved equal to src/solve.bend ──► src/solve_ref.bend
-          │                 ▼
-          │           Tree (Maybe)
-          │                 │
-          ▼                 ▼
-   error on stderr   src/json.bend ──► JSON on stdout
+     src/main.bend  ──►  src/solve.bend  ──►  src/solve_fast.bend
+          │                                       │  proved valid & optimal directly
+          │                                       ▼  (src/solve_ref.bend stays as spec)
+          │                                 Tree (Maybe)
+          │                                       │
+          ▼                                       ▼
+   error on stderr                   src/json.bend ──► JSON on stdout
 
 LAWS.bend ── checked by PROOF.bend and proofs/ ──► validity and optimality claims
 ```
