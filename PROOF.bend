@@ -45,6 +45,8 @@ import ./proofs/fast_lb.bend as FSLB
 import ./proofs/fast_opt.bend as FSOpt
 import ./src/solve_par.bend as SolvePar
 import ./proofs/par_fold.bend as ParFold
+import ./proofs/lb_nodup.bend as LBProof4
+import ./proofs/lb_classes.bend as LBProof5
 
 def Bool.disc(b: Bool) -> Type:
   match b:
