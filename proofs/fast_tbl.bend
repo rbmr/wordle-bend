@@ -27,6 +27,7 @@ import ./fast_groups.bend as FG
 import ./fast_one.bend as FO
 import ./fast_nodup.bend as FN
 import ./fast_fb5.bend as FF5
+import ./classbound_nat.bend as CBN
 import ./feedback.bend as FbProof
 
 # ---------------------------------------------------------------------------
@@ -915,42 +916,48 @@ def FT.nth_word(+ws: +List<+List<Nat>>, i: Nat) -> +List<Nat>:
 def FT.fb_code_words(+g: +List<Nat>, +a: +List<Nat>) -> U32:
   FF5.FF5.encode_fb5_list(Feedback.feedback(g, a))
 
-def FT.tbl_at_step(+g: +List<Nat>, +C: +List<+List<Nat>>, +n: Nat, +idx: Nat,
+def FT.tbl_at_step(+w: +List<Nat>, +G: +List<+List<Nat>>, +m: Nat, +idx: Nat,
     lt: Bool, rec: Nat -> U32) -> U32:
   match lt:
     case True{}:
-      FT.fb_code_words(g, FT.nth_word(C, idx))
+      FT.fb_code_words(FT.nth_word(G, idx), w)
     case False{}:
-      rec(Nat.sub(idx, n))
+      rec(Nat.sub(idx, m))
 
+# The table is candidate-major: candidate `ci` owns the block `[ci*m, (ci+1)*m)`
+# of slots, where `m = len(G)` is the number of guesses, and slot `ci*m + gi`
+# holds the code of guess `gi` against candidate `ci`. `n` is `len(C)`, the
+# number of blocks, and is only carried through the recursion.
 def FT.tbl_at(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
               +idx: Nat) -> U32:
-  match G:
+  match C:
     case Nil{}:
       0
-    case Con{+g, +rest}:
-      FT.tbl_at_step(g, C, n, idx, Nat.is_lt(idx, n),
-        idx2 => FT.tbl_at(rest, C, n, idx2))
+    case Con{+w, +rest}:
+      FT.tbl_at_step(w, G, Groups.len_words(G), idx,
+        Nat.is_lt(idx, Groups.len_words(G)),
+        idx2 => FT.tbl_at(G, rest, n, idx2))
 
-def FT.tbl_at_head(+g: +List<Nat>, +rest: +List<+List<Nat>>,
-    +C: +List<+List<Nat>>, +n: Nat, +idx: Nat,
-    +hlt: {Nat.is_lt(idx, n) == True{} : Bool}) ->
-  {FT.tbl_at(g <> rest, C, n, idx)
-   == FT.fb_code_words(g, FT.nth_word(C, idx)) : U32}:
+def FT.tbl_at_head(+w: +List<Nat>, +rest: +List<+List<Nat>>,
+    +G: +List<+List<Nat>>, +n: Nat, +idx: Nat,
+    +hlt: {Nat.is_lt(idx, Groups.len_words(G)) == True{} : Bool}) ->
+  {FT.tbl_at(G, w <> rest, n, idx)
+   == FT.fb_code_words(FT.nth_word(G, idx), w) : U32}:
   Equal.cong(Bool, U32,
-    b => FT.tbl_at_step(g, C, n, idx, b, idx2 => FT.tbl_at(rest, C, n, idx2)),
-    Nat.is_lt(idx, n), True{}, hlt)
+    b => FT.tbl_at_step(w, G, Groups.len_words(G), idx, b,
+           idx2 => FT.tbl_at(G, rest, n, idx2)),
+    Nat.is_lt(idx, Groups.len_words(G)), True{}, hlt)
 
-def FT.tbl_at_tail(+g: +List<Nat>, +rest: +List<+List<Nat>>,
-    +C: +List<+List<Nat>>, +n: Nat, +idx: Nat,
-    +hf: {Nat.is_lt(idx, n) == False{} : Bool}) ->
-  {FT.tbl_at(g <> rest, C, n, idx)
-   == FT.tbl_at(rest, C, n, Nat.sub(idx, n)) : U32}:
+def FT.tbl_at_tail(+w: +List<Nat>, +rest: +List<+List<Nat>>,
+    +G: +List<+List<Nat>>, +n: Nat, +idx: Nat,
+    +hf: {Nat.is_lt(idx, Groups.len_words(G)) == False{} : Bool}) ->
+  {FT.tbl_at(G, w <> rest, n, idx)
+   == FT.tbl_at(G, rest, n, Nat.sub(idx, Groups.len_words(G))) : U32}:
   Equal.cong(Bool, U32,
-    b => FT.tbl_at_step(g, C, n, idx, b, idx2 => FT.tbl_at(rest, C, n, idx2)),
-    Nat.is_lt(idx, n), False{}, hf)
+    b => FT.tbl_at_step(w, G, Groups.len_words(G), idx, b,
+           idx2 => FT.tbl_at(G, rest, n, idx2)),
+    Nat.is_lt(idx, Groups.len_words(G)), False{}, hf)
 
-# Symbolic depth-indexed `Data` invariant over `tbl: Array<U32>`.
 def FT.TblTree(+d: Nat, +base: Nat, a: Array<U32>,
                +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                +n: Nat, +upto: Nat) -> Data:
@@ -985,6 +992,22 @@ def FT.tbl_tree_transport_upto(+d: Nat, +base: Nat, -a: Array<U32>,
     +ht: FT.TblTree(d, base, a, G, C, n, u1)) ->
   FT.TblTree(d, base, a, G, C, n, u2):
   %eu : FT.TblTree(d, base, a, G, C, n, _)
+  ht
+
+def FT.tbl_tree_transport_gc(+d: Nat, -a1: Array<U32>, -a2: Array<U32>,
+    +G1: +List<+List<Nat>>, +G2: +List<+List<Nat>>,
+    +C1: +List<+List<Nat>>, +C2: +List<+List<Nat>>, +n: Nat,
+    +u1: Nat, +u2: Nat,
+    +ea: {a1 == a2 : Array<U32>},
+    +eG: {G1 == G2 : +List<+List<Nat>>},
+    +eC: {C1 == C2 : +List<+List<Nat>>},
+    +eu: {u1 == u2 : Nat},
+    +ht: FT.TblTree(d, 0n, a1, G1, C1, n, u1)) ->
+  FT.TblTree(d, 0n, a2, G2, C2, n, u2):
+  %ea : FT.TblTree(d, 0n, _, G2, C2, n, u2)
+  %eG : FT.TblTree(d, 0n, a1, _, C2, n, u2)
+  %eC : FT.TblTree(d, 0n, a1, G1, _, n, u2)
+  %eu : FT.TblTree(d, 0n, a1, G1, C1, n, _)
   ht
 
 def FT.tbl_tree_depth(+d: Nat, +base: Nat, a: Array<U32>,
@@ -2069,396 +2092,600 @@ def FT.list_append_snoc(-A: Data, +xs: +List<A>, +x: A, +ys: +List<A>) ->
         List.append(&2, A, t, x <> ys),
         FT.list_append_snoc(A, t, x, ys))
 
-def FT.tbl_at_append_g(+gpre: +List<+List<Nat>>, +g: +List<Nat>,
-    +grest: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat, +c: Nat,
-    +hc: {Nat.is_lt(c, n) == True{} : Bool}) ->
-  {FT.tbl_at(List.append(&2, +List<Nat>, gpre, g <> grest), C, n,
-     Nat.add(Nat.mul(Groups.len_words(gpre), n), c))
-   == FT.fb_code_words(g, FT.nth_word(C, c)) : U32}:
-  match gpre:
+def FT.tbl_at_append_c(+cpre: +List<+List<Nat>>, +w: +List<Nat>,
+    +crest: +List<+List<Nat>>, +G: +List<+List<Nat>>, +n: Nat, +j: Nat,
+    +hj: {Nat.is_lt(j, Groups.len_words(G)) == True{} : Bool}) ->
+  {FT.tbl_at(G, List.append(&2, +List<Nat>, cpre, w <> crest), n,
+     Nat.add(Nat.mul(Groups.len_words(cpre), Groups.len_words(G)), j))
+   == FT.fb_code_words(FT.nth_word(G, j), w) : U32}:
+  match cpre:
     case Nil{}:
-      FT.tbl_at_head(g, grest, C, n, c, hc)
-    case Con{+gh, +gt}:
-      +idx : Nat = Nat.add(Nat.mul(Groups.len_words(gt), n), c)
-      +ea : {Nat.add(Nat.add(n, Nat.mul(Groups.len_words(gt), n)), c)
-             == Nat.add(n, idx) : Nat} =
-        NatProof.NatPrf.add_assoc(n, Nat.mul(Groups.len_words(gt), n), c)
-      +hf : {Nat.is_lt(Nat.add(n, idx), n) == False{} : Bool} =
-        FT.nat_lt_add_false(n, idx)
-      +esub : {Nat.sub(Nat.add(n, idx), n) == idx : Nat} =
-        FT.nat_sub_add_l(n, idx)
+      FT.tbl_at_head(w, crest, G, n, j, hj)
+    case Con{+ch, +ct}:
+      +m : Nat = Groups.len_words(G)
+      +idx : Nat = Nat.add(Nat.mul(Groups.len_words(ct), m), j)
+      +ea : {Nat.add(Nat.add(m, Nat.mul(Groups.len_words(ct), m)), j)
+             == Nat.add(m, idx) : Nat} =
+        NatProof.NatPrf.add_assoc(m, Nat.mul(Groups.len_words(ct), m), j)
+      +hf : {Nat.is_lt(Nat.add(m, idx), m) == False{} : Bool} =
+        FT.nat_lt_add_false(m, idx)
+      +esub : {Nat.sub(Nat.add(m, idx), m) == idx : Nat} =
+        FT.nat_sub_add_l(m, idx)
       Equal.trans(U32,
-        FT.tbl_at(gh <> List.append(&2, +List<Nat>, gt, g <> grest), C, n,
-          Nat.add(Nat.add(n, Nat.mul(Groups.len_words(gt), n)), c)),
-        FT.tbl_at(gh <> List.append(&2, +List<Nat>, gt, g <> grest), C, n,
-          Nat.add(n, idx)),
-        FT.fb_code_words(g, FT.nth_word(C, c)),
+        FT.tbl_at(G, List.append(&2, +List<Nat>, ch <> ct, w <> crest), n,
+          Nat.add(Nat.mul(Groups.len_words(ch <> ct), m), j)),
+        FT.tbl_at(G, List.append(&2, +List<Nat>, ch <> ct, w <> crest), n,
+          Nat.add(m, idx)),
+        FT.fb_code_words(FT.nth_word(G, j), w),
         Equal.cong(Nat, U32,
-          x => FT.tbl_at(gh <> List.append(&2, +List<Nat>, gt, g <> grest), C, n, x),
-          Nat.add(Nat.add(n, Nat.mul(Groups.len_words(gt), n)), c),
-          Nat.add(n, idx), ea),
+          x => FT.tbl_at(G, List.append(&2, +List<Nat>, ch <> ct, w <> crest),
+                 n, x),
+          Nat.add(Nat.mul(Groups.len_words(ch <> ct), m), j),
+          Nat.add(m, idx), ea),
         Equal.trans(U32,
-          FT.tbl_at(gh <> List.append(&2, +List<Nat>, gt, g <> grest), C, n,
-            Nat.add(n, idx)),
-          FT.tbl_at(List.append(&2, +List<Nat>, gt, g <> grest), C, n,
-            Nat.sub(Nat.add(n, idx), n)),
-          FT.fb_code_words(g, FT.nth_word(C, c)),
-          FT.tbl_at_tail(gh, List.append(&2, +List<Nat>, gt, g <> grest), C, n,
-            Nat.add(n, idx), hf),
+          FT.tbl_at(G, List.append(&2, +List<Nat>, ch <> ct, w <> crest), n,
+            Nat.add(m, idx)),
+          FT.tbl_at(G, List.append(&2, +List<Nat>, ct, w <> crest), n,
+            Nat.sub(Nat.add(m, idx), m)),
+          FT.fb_code_words(FT.nth_word(G, j), w),
+          FT.tbl_at_tail(ch, List.append(&2, +List<Nat>, ct, w <> crest), G, n,
+            Nat.add(m, idx), hf),
           Equal.trans(U32,
-            FT.tbl_at(List.append(&2, +List<Nat>, gt, g <> grest), C, n,
-              Nat.sub(Nat.add(n, idx), n)),
-            FT.tbl_at(List.append(&2, +List<Nat>, gt, g <> grest), C, n, idx),
-            FT.fb_code_words(g, FT.nth_word(C, c)),
+            FT.tbl_at(G, List.append(&2, +List<Nat>, ct, w <> crest), n,
+              Nat.sub(Nat.add(m, idx), m)),
+            FT.tbl_at(G, List.append(&2, +List<Nat>, ct, w <> crest), n, idx),
+            FT.fb_code_words(FT.nth_word(G, j), w),
             Equal.cong(Nat, U32,
-              x => FT.tbl_at(List.append(&2, +List<Nat>, gt, g <> grest), C, n, x),
-              Nat.sub(Nat.add(n, idx), n), idx, esub),
-            FT.tbl_at_append_g(gt, g, grest, C, n, c, hc))))
+              x => FT.tbl_at(G, List.append(&2, +List<Nat>, ct, w <> crest),
+                     n, x),
+              Nat.sub(Nat.add(m, idx), m), idx, esub),
+            FT.tbl_at_append_c(ct, w, crest, G, n, j, hj))))
 
-def FT.fill_tbl_row_step_dup(+d: Nat, +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
+# One slot of one candidate block. The guess `g0..g4` sits at position
+# `|gpre|` of the guess list `gpre ++ (g0..g4) :: grest`, the candidate
+# `a0..a4` at position `|cpre|` of the candidate list `cpre ++ (a0..a4) :: rest`,
+# and the slot written by this step is `|cpre|*m + |gpre|`, where `m` is the
+# number of guesses.
+def FT.fill_tbl_col_step_dup(+d: Nat,
+    +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
+    +a0: Nat, +a1: Nat, +a2: Nat, +a3: Nat, +a4: Nat,
     +gpre: +List<+List<Nat>>, +grest: +List<+List<Nat>>,
-    +cpre: +List<+List<Nat>>, +aw: +List<Nat>, +rest: +List<+List<Nat>>,
-    +n: Nat, -tbl: Array<U32>, +code: U32,
+    +cpre: +List<+List<Nat>>, +rest: +List<+List<Nat>>,
+    +m: Nat, +n: Nat, -tbl: Array<U32>, +code: U32,
+    +em: {Groups.len_words(List.append(&2, +List<Nat>, gpre,
+            (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest)) == m
+          : Nat},
     +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
-    +hu_lt: {Nat.is_lt(Nat.add(Nat.mul(Groups.len_words(gpre), n), Groups.len_words(cpre)),
-               FT.pow2(d)) == True{} : Bool},
+    +hu_lt: {Nat.is_lt(Nat.add(Nat.mul(Groups.len_words(cpre), m),
+               Groups.len_words(gpre)), FT.pow2(d)) == True{} : Bool},
     +ecode: {code == FT.tbl_at(
                List.append(&2, +List<Nat>, gpre,
                  (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-               List.append(&2, +List<Nat>, cpre, aw <> rest), n,
-               Nat.add(Nat.mul(Groups.len_words(gpre), n), Groups.len_words(cpre)))
-             : U32},
+               List.append(&2, +List<Nat>, cpre,
+                 (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+               Nat.add(Nat.mul(Groups.len_words(cpre), m),
+                 Groups.len_words(gpre))) : U32},
     +ht: FT.TblTree(d, 0n, tbl,
            List.append(&2, +List<Nat>, gpre,
              (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-           List.append(&2, +List<Nat>, cpre, aw <> rest), n,
-           Nat.add(Nat.mul(Groups.len_words(gpre), n), Groups.len_words(cpre))),
+           List.append(&2, +List<Nat>, cpre,
+             (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+           Nat.add(Nat.mul(Groups.len_words(cpre), m),
+             Groups.len_words(gpre))),
     dp: &t1: Array<U32> -> &t2: Array<U32> ->
         {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>},
     rec: @tbl2: Array<U32> ->
          FT.TblTree(d, 0n, tbl2,
            List.append(&2, +List<Nat>, gpre,
              (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-           List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, cpre, aw <> Nil{}), rest), n,
-           Nat.add(Nat.mul(Groups.len_words(gpre), n),
-             Groups.len_words(List.append(&2, +List<Nat>, cpre, aw <> Nil{})))) ->
+           List.append(&2, +List<Nat>, cpre,
+             (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+           Nat.add(Nat.mul(Groups.len_words(cpre), m),
+             Nat.add(Groups.len_words(gpre), 1n))) ->
          FT.TblTree(d, 0n,
-           SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, rest,
-             U32.from_nat(Nat.add(Nat.mul(Groups.len_words(gpre), n),
-               Groups.len_words(List.append(&2, +List<Nat>, cpre, aw <> Nil{})))),
+           SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest,
+             U32.inc(U32.from_nat(
+               Nat.add(Nat.mul(Groups.len_words(cpre), m),
+                 Groups.len_words(gpre)))),
              tbl2),
            List.append(&2, +List<Nat>, gpre,
              (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-           List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, cpre, aw <> Nil{}), rest), n,
-           Nat.add(Nat.mul(Groups.len_words(gpre), n), n))) ->
+           List.append(&2, +List<Nat>, cpre,
+             (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+           Nat.add(Nat.mul(Groups.len_words(cpre), m), m))) ->
   FT.TblTree(d, 0n,
-    SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, rest,
-      U32.inc(U32.from_nat(Nat.add(Nat.mul(Groups.len_words(gpre), n),
-        Groups.len_words(cpre)))),
+    SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest,
+      U32.inc(U32.from_nat(
+        Nat.add(Nat.mul(Groups.len_words(cpre), m),
+          Groups.len_words(gpre)))),
       Array.set(U32, tbl,
-        U32.from_nat(Nat.add(Nat.mul(Groups.len_words(gpre), n),
-          Groups.len_words(cpre))),
-        code)),
+        U32.from_nat(Nat.add(Nat.mul(Groups.len_words(cpre), m),
+          Groups.len_words(gpre))), code)),
     List.append(&2, +List<Nat>, gpre,
       (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-    List.append(&2, +List<Nat>, cpre, aw <> rest), n,
-    Nat.add(Nat.mul(Groups.len_words(gpre), n), n)):
+    List.append(&2, +List<Nat>, cpre,
+      (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+    Nat.add(Nat.mul(Groups.len_words(cpre), m), m)):
   (t1, dp2) = dp
-  (t2, pe) = dp2
-  (+et1, +et2) = pe
+  (t2, pe2) = dp2
+  (+et1, +et2) = pe2
   +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
+  +aw : +List<Nat> = a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))
   +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-  +Cfull2 : +List<+List<Nat>> = List.append(&2, +List<Nat>, cpre, aw <> rest)
-  +cpre2 : +List<+List<Nat>> = List.append(&2, +List<Nat>, cpre, aw <> Nil{})
-  +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-  +ci : Nat = Groups.len_words(cpre)
-  +ecfull : {List.append(&2, +List<Nat>, cpre2, rest) == Cfull2 : +List<+List<Nat>>} =
-    FT.list_append_snoc(+List<Nat>, cpre, aw, rest)
-  +eci2 : {Groups.len_words(cpre2) == 1n+ci : Nat} =
-    Equal.trans(Nat, Groups.len_words(cpre2), Nat.add(ci, 1n), 1n+ci,
-      FT.len_words_append(cpre, aw <> Nil{}), NatProof.NatPrf.add_comm(ci, 1n))
-  +eidx2 : {Nat.add(base_r, Groups.len_words(cpre2)) == 1n+Nat.add(base_r, ci) : Nat} =
-    Equal.trans(Nat,
-      Nat.add(base_r, Groups.len_words(cpre2)),
-      Nat.add(base_r, 1n+ci), 1n+Nat.add(base_r, ci),
-      Equal.cong(Nat, Nat, x => Nat.add(base_r, x),
-        Groups.len_words(cpre2), 1n+ci, eci2),
-      NatProof.NatPrf.add_succ(base_r, ci))
-  +ht_t1 = FT.tbl_tree_transport(d, 0n, tbl, t1, Gfull, Cfull2, n,
-             Nat.add(base_r, ci), Equal.sym(Array<U32>, t1, tbl, et1), ht)
-  +ht1_t1 = FT.tbl_tree_set(d, t1, Gfull, Cfull2, n,
-              Nat.add(base_r, ci), code, hd, hu_lt, ecode, ht_t1)
+  +Cfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, cpre, aw <> rest)
+  +base : Nat = Nat.mul(Groups.len_words(cpre), m)
+  +idx : Nat = Nat.add(base, Groups.len_words(gpre))
+  +ht_t1 = FT.tbl_tree_transport(d, 0n, tbl, t1, Gfull, Cfull, n, idx,
+             Equal.sym(Array<U32>, t1, tbl, et1), ht)
+  +ht1_t1 = FT.tbl_tree_set(d, t1, Gfull, Cfull, n, idx, code,
+              hd, hu_lt, ecode, ht_t1)
   +ht1_t2 = FT.tbl_tree_transport(d, 0n,
-              Array.set(U32, t1, U32.from_nat(Nat.add(base_r, ci)), code),
-              Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code),
-              Gfull, Cfull2, n, 1n+Nat.add(base_r, ci),
+              Array.set(U32, t1, U32.from_nat(idx), code),
+              Array.set(U32, t2, U32.from_nat(idx), code),
+              Gfull, Cfull, n, 1n+idx,
               Equal.cong(Array<U32>, Array<U32>,
-                x => Array.set(U32, x, U32.from_nat(Nat.add(base_r, ci)), code),
+                x => Array.set(U32, x, U32.from_nat(idx), code),
                 t1, t2, Equal.sym(Array<U32>, t2, t1, et2)),
               ht1_t1)
-  +ht1_c2 : FT.TblTree(d, 0n,
-              Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code),
-              Gfull, List.append(&2, +List<Nat>, cpre2, rest),
-              n, Nat.add(base_r, Groups.len_words(cpre2))) =
-    %Equal.sym(+List<+List<Nat>>,
-       List.append(&2, +List<Nat>, cpre2, rest), Cfull2, ecfull) :
-      FT.TblTree(d, 0n,
-        Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code),
-        Gfull, _, n, Nat.add(base_r, Groups.len_words(cpre2)))
-    FT.tbl_tree_transport_upto(d, 0n,
-      Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code),
-      Gfull, Cfull2, n, 1n+Nat.add(base_r, ci),
-      Nat.add(base_r, Groups.len_words(cpre2)),
-      Equal.sym(Nat, Nat.add(base_r, Groups.len_words(cpre2)),
-        1n+Nat.add(base_r, ci), eidx2),
-      ht1_t2)
-  +hrec = rec(Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code), ht1_c2)
-  +eu_inc : {U32.from_nat(Nat.add(base_r, Groups.len_words(cpre2)))
-             == U32.inc(U32.from_nat(Nat.add(base_r, ci))) : U32} =
-    Equal.cong(Nat, U32, x => U32.from_nat(x),
-      Nat.add(base_r, Groups.len_words(cpre2)), 1n+Nat.add(base_r, ci), eidx2)
-  %et1 :
-    FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, rest,
-        U32.inc(U32.from_nat(Nat.add(base_r, ci))),
-        Array.set(U32, _, U32.from_nat(Nat.add(base_r, ci)), code)),
-      Gfull, Cfull2, n, Nat.add(base_r, n))
-  %et2 :
-    FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, rest,
-        U32.inc(U32.from_nat(Nat.add(base_r, ci))),
-        Array.set(U32, _, U32.from_nat(Nat.add(base_r, ci)), code)),
-      Gfull, Cfull2, n, Nat.add(base_r, n))
-  %ecfull :
-    FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, rest,
-        U32.inc(U32.from_nat(Nat.add(base_r, ci))),
-        Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code)),
-      Gfull, _, n, Nat.add(base_r, n))
-  %eu_inc :
-    FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, rest, _,
-        Array.set(U32, t2, U32.from_nat(Nat.add(base_r, ci)), code)),
-      Gfull, List.append(&2, +List<Nat>, cpre2, rest), n, Nat.add(base_r, n))
-  hrec
+  +eupto : {Nat.add(base, Nat.add(Groups.len_words(gpre), 1n))
+            == 1n+idx : Nat} =
+    Equal.trans(Nat,
+      Nat.add(base, Nat.add(Groups.len_words(gpre), 1n)),
+      Nat.add(Nat.add(base, Groups.len_words(gpre)), 1n),
+      1n+idx,
+      Equal.sym(Nat,
+        Nat.add(Nat.add(base, Groups.len_words(gpre)), 1n),
+        Nat.add(base, Nat.add(Groups.len_words(gpre), 1n)),
+        NatProof.NatPrf.add_assoc(base, Groups.len_words(gpre), 1n)),
+      NatProof.NatPrf.add_comm(idx, 1n))
+  +ht1_c2 = FT.tbl_tree_transport_upto(d, 0n,
+              Array.set(U32, t2, U32.from_nat(idx), code),
+              Gfull, Cfull, n, 1n+idx,
+              Nat.add(base, Nat.add(Groups.len_words(gpre), 1n)),
+              Equal.sym(Nat,
+                Nat.add(base, Nat.add(Groups.len_words(gpre), 1n)),
+                1n+idx, eupto),
+              ht1_t2)
+  +hrec = rec(Array.set(U32, t2, U32.from_nat(idx), code), ht1_c2)
+  +et2_tbl : {t2 == tbl : Array<U32>} =
+    Equal.trans(Array<U32>, t2, t1, tbl, et2, et1)
+  +eset : {Array.set(U32, t2, U32.from_nat(idx), code)
+           == Array.set(U32, tbl, U32.from_nat(idx), code) : Array<U32>} =
+    Equal.cong(Array<U32>, Array<U32>,
+      x => Array.set(U32, x, U32.from_nat(idx), code), t2, tbl, et2_tbl)
+  +efill : {SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest,
+              U32.inc(U32.from_nat(idx)),
+              Array.set(U32, t2, U32.from_nat(idx), code))
+            == SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest,
+                 U32.inc(U32.from_nat(idx)),
+                 Array.set(U32, tbl, U32.from_nat(idx), code)) : Array<U32>} =
+    Equal.cong(Array<U32>, Array<U32>,
+      y => SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest,
+             U32.inc(U32.from_nat(idx)), y),
+      Array.set(U32, t2, U32.from_nat(idx), code),
+      Array.set(U32, tbl, U32.from_nat(idx), code), eset)
+  FT.tbl_tree_transport(d, 0n,
+    SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest, U32.inc(U32.from_nat(idx)),
+      Array.set(U32, t2, U32.from_nat(idx), code)),
+    SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grest, U32.inc(U32.from_nat(idx)),
+      Array.set(U32, tbl, U32.from_nat(idx), code)),
+    Gfull, Cfull, n, Nat.add(base, m), efill, hrec)
 
-def FT.fill_tbl_row_ok(+crem: +List<+List<Nat>>, +d: Nat,
-    +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-    +gpre: +List<+List<Nat>>, +grest: +List<+List<Nat>>,
-    +cpre: +List<+List<Nat>>,
-    +n: Nat, tbl: Array<U32>,
+def FT.fill_tbl_col_ok(+grem: +List<+List<Nat>>, +gpre: +List<+List<Nat>>,
+    +a0: Nat, +a1: Nat, +a2: Nat, +a3: Nat, +a4: Nat,
+    +cpre: +List<+List<Nat>>, +rest: +List<+List<Nat>>,
+    +m: Nat, +d: Nat, +n: Nat, tbl: Array<U32>,
+    +em: {Groups.len_words(List.append(&2, +List<Nat>, gpre, grem)) == m : Nat},
     +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
-    +en: {Nat.add(Groups.len_words(cpre), Groups.len_words(crem)) == n : Nat},
-    +hbound: {Nat.is_le(Nat.add(Nat.mul(Groups.len_words(gpre), n), n),
+    +hbound: {Nat.is_le(Nat.add(Nat.mul(Groups.len_words(cpre), m), m),
                 FT.pow2(d)) == True{} : Bool},
-    +hlen5: {SolveFast.all_len5(crem) == True{} : Bool},
+    +hg5: {SolveFast.all_len5(grem) == True{} : Bool},
     +ht: FT.TblTree(d, 0n, tbl,
-           List.append(&2, +List<Nat>, gpre,
-             (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-           List.append(&2, +List<Nat>, cpre, crem), n,
-           Nat.add(Nat.mul(Groups.len_words(gpre), n), Groups.len_words(cpre)))) ->
+           List.append(&2, +List<Nat>, gpre, grem),
+           List.append(&2, +List<Nat>, cpre,
+             (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+           Nat.add(Nat.mul(Groups.len_words(cpre), m),
+             Groups.len_words(gpre)))) ->
   FT.TblTree(d, 0n,
-    SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, crem,
-      U32.from_nat(Nat.add(Nat.mul(Groups.len_words(gpre), n),
-                     Groups.len_words(cpre))),
+    SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, grem,
+      U32.from_nat(Nat.add(Nat.mul(Groups.len_words(cpre), m),
+        Groups.len_words(gpre))),
       tbl),
-    List.append(&2, +List<Nat>, gpre,
-      (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> grest),
-    List.append(&2, +List<Nat>, cpre, crem), n,
-    Nat.add(Nat.mul(Groups.len_words(gpre), n), n)):
-  match crem:
+    List.append(&2, +List<Nat>, gpre, grem),
+    List.append(&2, +List<Nat>, cpre,
+      (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+    Nat.add(Nat.mul(Groups.len_words(cpre), m), m)):
+  match grem:
     case Nil{}:
-      +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-      +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-      +Cfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, cpre, Nil{})
-      +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-      +ci : Nat = Groups.len_words(cpre)
-      +eci_n : {ci == n : Nat} =
-        Equal.trans(Nat, ci, Nat.add(ci, 0n), n,
-          Equal.sym(Nat, Nat.add(ci, 0n), ci, NatProof.NatPrf.add_zero(ci)), en)
+      +aw : +List<Nat> = a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))
+      +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, Nil{})
+      +Cfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, cpre, aw <> rest)
+      +base : Nat = Nat.mul(Groups.len_words(cpre), m)
+      +eleng : {Groups.len_words(gpre) == m : Nat} =
+        Equal.trans(Nat, Groups.len_words(gpre),
+          Nat.add(Groups.len_words(gpre), 0n), m,
+          Equal.sym(Nat, Nat.add(Groups.len_words(gpre), 0n),
+            Groups.len_words(gpre),
+            NatProof.NatPrf.add_zero(Groups.len_words(gpre))),
+          Equal.trans(Nat,
+            Nat.add(Groups.len_words(gpre), 0n),
+            Groups.len_words(List.append(&2, +List<Nat>, gpre, Nil{})),
+            m,
+            Equal.sym(Nat,
+              Groups.len_words(List.append(&2, +List<Nat>, gpre, Nil{})),
+              Nat.add(Groups.len_words(gpre), 0n),
+              FT.len_words_append(gpre, Nil{})),
+            em))
       FT.tbl_tree_transport_upto(d, 0n, tbl, Gfull, Cfull, n,
-        Nat.add(base_r, ci), Nat.add(base_r, n),
-        Equal.cong(Nat, Nat, x => Nat.add(base_r, x), ci, n, eci_n), ht)
-    case Con{+w, +rest}:
-      match w:
+        Nat.add(base, Groups.len_words(gpre)), Nat.add(base, m),
+        Equal.cong(Nat, Nat, x => Nat.add(base, x),
+          Groups.len_words(gpre), m, eleng),
+        ht)
+    case Con{+g, +grest}:
+      match g:
         case Nil{}:
-          +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-          +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-          +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-          +hw5 : {SolveFast.is_len5(Nil{}) == True{} : Bool} =
-            FT.all_len5_head(Nil{}, rest, hlen5)
+          +hgw5 : {SolveFast.is_len5(Nil{}) == True{} : Bool} =
+            FT.all_len5_head(Nil{}, grest, hg5)
           Empty.absurd(
-            FT.TblTree(d, 0n, tbl, Gfull,
-              List.append(&2, +List<Nat>, cpre, Nil{} <> rest), n,
-              Nat.add(base_r, n)),
-            Logic.Proof.false_ne_true(hw5))
-        case Con{+a0, +t1}:
+            FT.TblTree(d, 0n, tbl,
+              List.append(&2, +List<Nat>, gpre, Nil{} <> grest),
+              List.append(&2, +List<Nat>, cpre,
+                (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+              Nat.add(Nat.mul(Groups.len_words(cpre), m), m)),
+            Logic.Proof.false_ne_true(hgw5))
+        case Con{+g0, +t1}:
           match t1:
             case Nil{}:
-              +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-              +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-              +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-              +hw5 : {SolveFast.is_len5(a0 <> Nil{}) == True{} : Bool} =
-                FT.all_len5_head(a0 <> Nil{}, rest, hlen5)
+              +hgw5 : {SolveFast.is_len5(g0 <> Nil{}) == True{} : Bool} =
+                FT.all_len5_head(g0 <> Nil{}, grest, hg5)
               Empty.absurd(
-                FT.TblTree(d, 0n, tbl, Gfull,
-                  List.append(&2, +List<Nat>, cpre, (a0 <> Nil{}) <> rest), n,
-                  Nat.add(base_r, n)),
-                Logic.Proof.false_ne_true(hw5))
-            case Con{+a1, +t2}:
+                FT.TblTree(d, 0n, tbl,
+                  List.append(&2, +List<Nat>, gpre, (g0 <> Nil{}) <> grest),
+                  List.append(&2, +List<Nat>, cpre,
+                    (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest), n,
+                  Nat.add(Nat.mul(Groups.len_words(cpre), m), m)),
+                Logic.Proof.false_ne_true(hgw5))
+            case Con{+g1, +t2}:
               match t2:
                 case Nil{}:
-                  +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                  +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-                  +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-                  +hw5 : {SolveFast.is_len5(a0 <> (a1 <> Nil{})) == True{} : Bool} =
-                    FT.all_len5_head(a0 <> (a1 <> Nil{}), rest, hlen5)
+                  +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> Nil{})) == True{} : Bool} =
+                    FT.all_len5_head(g0 <> (g1 <> Nil{}), grest, hg5)
                   Empty.absurd(
-                    FT.TblTree(d, 0n, tbl, Gfull,
+                    FT.TblTree(d, 0n, tbl,
+                      List.append(&2, +List<Nat>, gpre,
+                        (g0 <> (g1 <> Nil{})) <> grest),
                       List.append(&2, +List<Nat>, cpre,
-                        (a0 <> (a1 <> Nil{})) <> rest), n, Nat.add(base_r, n)),
-                    Logic.Proof.false_ne_true(hw5))
-                case Con{+a2, +t3}:
+                        (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest),
+                      n,
+                      Nat.add(Nat.mul(Groups.len_words(cpre), m), m)),
+                    Logic.Proof.false_ne_true(hgw5))
+                case Con{+g2, +t3}:
                   match t3:
                     case Nil{}:
-                      +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                      +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-                      +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-                      +hw5 : {SolveFast.is_len5(a0 <> (a1 <> (a2 <> Nil{}))) == True{} : Bool} =
-                        FT.all_len5_head(a0 <> (a1 <> (a2 <> Nil{})), rest, hlen5)
+                      +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> (g2 <> Nil{}))) == True{} : Bool} =
+                        FT.all_len5_head(g0 <> (g1 <> (g2 <> Nil{})), grest, hg5)
                       Empty.absurd(
-                        FT.TblTree(d, 0n, tbl, Gfull,
+                        FT.TblTree(d, 0n, tbl,
+                          List.append(&2, +List<Nat>, gpre,
+                            (g0 <> (g1 <> (g2 <> Nil{}))) <> grest),
                           List.append(&2, +List<Nat>, cpre,
-                            (a0 <> (a1 <> (a2 <> Nil{}))) <> rest), n,
-                          Nat.add(base_r, n)),
-                        Logic.Proof.false_ne_true(hw5))
-                    case Con{+a3, +t4}:
+                            (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest),
+                          n,
+                          Nat.add(Nat.mul(Groups.len_words(cpre), m), m)),
+                        Logic.Proof.false_ne_true(hgw5))
+                    case Con{+g3, +t4}:
                       match t4:
                         case Nil{}:
-                          +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                          +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-                          +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-                          +hw5 : {SolveFast.is_len5(a0 <> (a1 <> (a2 <> (a3 <> Nil{})))) == True{} : Bool} =
-                            FT.all_len5_head(a0 <> (a1 <> (a2 <> (a3 <> Nil{}))), rest, hlen5)
+                          +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> (g2 <> (g3 <> Nil{})))) == True{} : Bool} =
+                            FT.all_len5_head(g0 <> (g1 <> (g2 <> (g3 <> Nil{}))),
+                              grest, hg5)
                           Empty.absurd(
-                            FT.TblTree(d, 0n, tbl, Gfull,
+                            FT.TblTree(d, 0n, tbl,
+                              List.append(&2, +List<Nat>, gpre,
+                                (g0 <> (g1 <> (g2 <> (g3 <> Nil{})))) <> grest),
                               List.append(&2, +List<Nat>, cpre,
-                                (a0 <> (a1 <> (a2 <> (a3 <> Nil{})))) <> rest),
-                              n, Nat.add(base_r, n)),
-                            Logic.Proof.false_ne_true(hw5))
-                        case Con{+a4, +t5}:
+                                (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest),
+                              n,
+                              Nat.add(Nat.mul(Groups.len_words(cpre), m), m)),
+                            Logic.Proof.false_ne_true(hgw5))
+                        case Con{+g4, +t5}:
                           match t5:
-                            case Con{+a5, +t6}:
-                              +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                              +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-                              +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-                              +hw5 : {SolveFast.is_len5(a0 <> (a1 <> (a2 <> (a3 <> (a4 <> (a5 <> t6)))))) == True{} : Bool} =
-                                FT.all_len5_head(a0 <> (a1 <> (a2 <> (a3 <> (a4 <> (a5 <> t6))))), rest, hlen5)
+                            case Con{+g5, +t6}:
+                              +gw6 : +List<Nat> =
+                                g0 <> (g1 <> (g2 <> (g3 <> (g4 <> (g5 <> t6)))))
+                              +hgw5 : {SolveFast.is_len5(gw6) == True{} : Bool} =
+                                FT.all_len5_head(gw6, grest, hg5)
                               Empty.absurd(
-                                FT.TblTree(d, 0n, tbl, Gfull,
+                                FT.TblTree(d, 0n, tbl,
+                                  List.append(&2, +List<Nat>, gpre, gw6 <> grest),
                                   List.append(&2, +List<Nat>, cpre,
-                                    (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> (a5 <> t6)))))) <> rest),
-                                  n, Nat.add(base_r, n)),
-                                Logic.Proof.false_ne_true(hw5))
+                                    (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> rest),
+                                  n,
+                                  Nat.add(Nat.mul(Groups.len_words(cpre), m), m)),
+                                Logic.Proof.false_ne_true(hgw5))
                             case Nil{}:
-                              +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                              +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> grest)
-                              +base_r : Nat = Nat.mul(Groups.len_words(gpre), n)
-                              +ci : Nat = Groups.len_words(cpre)
+                              +gw : +List<Nat> =
+                                g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
                               +aw : +List<Nat> =
                                 a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))
-                              +hr5 : {SolveFast.all_len5(rest) == True{} : Bool} =
-                                FT.all_len5_tail(aw, rest, hlen5)
-                              +Cfull2 : +List<+List<Nat>> =
+                              +hgrest5 : {SolveFast.all_len5(grest) == True{} : Bool} =
+                                FT.all_len5_tail(gw, grest, hg5)
+                              +Gfull2 : +List<+List<Nat>> =
+                                List.append(&2, +List<Nat>, gpre, gw <> grest)
+                              +gpre2 : +List<+List<Nat>> =
+                                List.append(&2, +List<Nat>, gpre, gw <> Nil{})
+                              +Cfull : +List<+List<Nat>> =
                                 List.append(&2, +List<Nat>, cpre, aw <> rest)
-                              +cpre2 : +List<+List<Nat>> =
-                                List.append(&2, +List<Nat>, cpre, aw <> Nil{})
-                              +ecfull : {List.append(&2, +List<Nat>, cpre2, rest)
-                                         == Cfull2 : +List<+List<Nat>>} =
-                                FT.list_append_snoc(+List<Nat>, cpre, aw, rest)
-                              +eci2 : {Groups.len_words(cpre2) == 1n+ci : Nat} =
+                              +egfull : {List.append(&2, +List<Nat>, gpre2, grest)
+                                         == Gfull2 : +List<+List<Nat>>} =
+                                FT.list_append_snoc(+List<Nat>, gpre, gw, grest)
+                              +elen2 : {Groups.len_words(gpre2)
+                                        == 1n+Groups.len_words(gpre) : Nat} =
+                                Equal.trans(Nat, Groups.len_words(gpre2),
+                                  Nat.add(Groups.len_words(gpre), 1n),
+                                  1n+Groups.len_words(gpre),
+                                  FT.len_words_append(gpre, gw <> Nil{}),
+                                  NatProof.NatPrf.add_comm(Groups.len_words(gpre),
+                                    1n))
+                              +em2 : {Groups.len_words(
+                                        List.append(&2, +List<Nat>, gpre2, grest))
+                                      == m : Nat} =
                                 Equal.trans(Nat,
-                                  Groups.len_words(cpre2),
-                                  Nat.add(ci, 1n), 1n+ci,
-                                  FT.len_words_append(cpre, aw <> Nil{}),
-                                  NatProof.NatPrf.add_comm(ci, 1n))
-                              +en2 : {Nat.add(Groups.len_words(cpre2),
-                                        Groups.len_words(rest)) == n : Nat} =
-                                Equal.trans(Nat,
-                                  Nat.add(Groups.len_words(cpre2),
-                                    Groups.len_words(rest)),
-                                  1n+Nat.add(ci, Groups.len_words(rest)),
-                                  n,
-                                  Equal.cong(Nat, Nat,
-                                    x => Nat.add(x, Groups.len_words(rest)),
-                                    Groups.len_words(cpre2), 1n+ci, eci2),
-                                  Equal.trans(Nat,
-                                    1n+Nat.add(ci, Groups.len_words(rest)),
-                                    Nat.add(ci, 1n+Groups.len_words(rest)), n,
-                                    Equal.sym(Nat,
-                                      Nat.add(ci, 1n+Groups.len_words(rest)),
-                                      1n+Nat.add(ci, Groups.len_words(rest)),
-                                      NatProof.NatPrf.add_succ(ci,
-                                        Groups.len_words(rest))),
-                                    en))
-                              +hci_lt : {Nat.is_lt(ci, n) == True{} : Bool} =
-                                NatProof.Nat.is_lt_le_trans(ci, 1n+ci, n,
-                                  NatProof.Nat.is_lt_succ_self(ci),
-                                  NatProof.Nat.is_le_eq_r(1n+ci,
-                                    Nat.add(1n+ci, Groups.len_words(rest)), n,
-                                    Equal.trans(Nat,
-                                      Nat.add(1n+ci, Groups.len_words(rest)),
-                                      Nat.add(Groups.len_words(cpre2),
-                                        Groups.len_words(rest)), n,
-                                      Equal.cong(Nat, Nat,
-                                        x => Nat.add(x, Groups.len_words(rest)),
-                                        1n+ci, Groups.len_words(cpre2),
-                                        Equal.sym(Nat, Groups.len_words(cpre2),
-                                          1n+ci, eci2)),
-                                      en2),
-                                    FT.nat_le_add_l(1n+ci,
-                                      Groups.len_words(rest))))
-                              +hu_lt : {Nat.is_lt(Nat.add(base_r, ci), FT.pow2(d))
+                                  Groups.len_words(
+                                    List.append(&2, +List<Nat>, gpre2, grest)),
+                                  Groups.len_words(Gfull2), m,
+                                  Equal.cong(+List<+List<Nat>>, Nat,
+                                    x => Groups.len_words(x),
+                                    List.append(&2, +List<Nat>, gpre2, grest),
+                                    Gfull2, egfull),
+                                  em)
+                              +hle1 : {Nat.is_le(1n+Groups.len_words(gpre),
+                                         Groups.len_words(gpre2))
                                         == True{} : Bool} =
+                                Equal.trans(Bool,
+                                  Nat.is_le(1n+Groups.len_words(gpre),
+                                    Groups.len_words(gpre2)),
+                                  Nat.is_le(1n+Groups.len_words(gpre),
+                                    1n+Groups.len_words(gpre)),
+                                  True{},
+                                  Equal.cong(Nat, Bool,
+                                    x => Nat.is_le(1n+Groups.len_words(gpre), x),
+                                    Groups.len_words(gpre2),
+                                    1n+Groups.len_words(gpre), elen2),
+                                  NatProof.Nat.is_le_refl(1n+Groups.len_words(gpre)))
+                              +hle2 : {Nat.is_le(Groups.len_words(gpre2),
+                                         Groups.len_words(
+                                           List.append(&2, +List<Nat>, gpre2,
+                                             grest))) == True{} : Bool} =
+                                Equal.trans(Bool,
+                                  Nat.is_le(Groups.len_words(gpre2),
+                                    Groups.len_words(
+                                      List.append(&2, +List<Nat>, gpre2, grest))),
+                                  Nat.is_le(Groups.len_words(gpre2),
+                                    Nat.add(Groups.len_words(gpre2),
+                                      Groups.len_words(grest))),
+                                  True{},
+                                  Equal.cong(Nat, Bool,
+                                    x => Nat.is_le(Groups.len_words(gpre2), x),
+                                    Groups.len_words(
+                                      List.append(&2, +List<Nat>, gpre2, grest)),
+                                    Nat.add(Groups.len_words(gpre2),
+                                      Groups.len_words(grest)),
+                                    FT.len_words_append(gpre2, grest)),
+                                  FT.nat_le_add_l(Groups.len_words(gpre2),
+                                    Groups.len_words(grest)))
+                              +hle3 : {Nat.is_le(
+                                         Groups.len_words(
+                                           List.append(&2, +List<Nat>, gpre2,
+                                             grest)), m) == True{} : Bool} =
+                                Equal.trans(Bool,
+                                  Nat.is_le(Groups.len_words(
+                                    List.append(&2, +List<Nat>, gpre2, grest)), m),
+                                  Nat.is_le(m, m),
+                                  True{},
+                                  Equal.cong(Nat, Bool, x => Nat.is_le(x, m),
+                                    Groups.len_words(
+                                      List.append(&2, +List<Nat>, gpre2, grest)),
+                                    m, em2),
+                                  NatProof.Nat.is_le_refl(m))
+                              +hle : {Nat.is_le(1n+Groups.len_words(gpre), m)
+                                      == True{} : Bool} =
+                                NatProof.Nat.is_le_trans(
+                                  1n+Groups.len_words(gpre),
+                                  Groups.len_words(gpre2), m,
+                                  hle1,
+                                  NatProof.Nat.is_le_trans(
+                                    Groups.len_words(gpre2),
+                                    Groups.len_words(
+                                      List.append(&2, +List<Nat>, gpre2, grest)),
+                                    m, hle2, hle3))
+                              +hgpre_lt : {Nat.is_lt(Groups.len_words(gpre), m)
+                                           == True{} : Bool} =
                                 NatProof.Nat.is_lt_le_trans(
-                                  Nat.add(base_r, ci), Nat.add(base_r, n),
-                                  FT.pow2(d),
-                                  FT.nat_lt_add_l(ci, n, base_r, hci_lt),
-                                  hbound)
+                                  Groups.len_words(gpre),
+                                  1n+Groups.len_words(gpre), m,
+                                  NatProof.Nat.is_lt_succ_self(
+                                    Groups.len_words(gpre)),
+                                  hle)
+                              +hj : {Nat.is_lt(Groups.len_words(gpre),
+                                        Groups.len_words(Gfull2))
+                                     == True{} : Bool} =
+                                Equal.trans(Bool,
+                                  Nat.is_lt(Groups.len_words(gpre),
+                                    Groups.len_words(Gfull2)),
+                                  Nat.is_lt(Groups.len_words(gpre), m),
+                                  True{},
+                                  Equal.cong(Nat, Bool,
+                                    x => Nat.is_lt(Groups.len_words(gpre), x),
+                                    Groups.len_words(Gfull2), m, em),
+                                  hgpre_lt)
+                              +base : Nat = Nat.mul(Groups.len_words(cpre), m)
+                              +idx : Nat = Nat.add(base, Groups.len_words(gpre))
+                              +hidx_lt : {Nat.is_lt(idx, Nat.add(base, m))
+                                          == True{} : Bool} =
+                                FT.nat_lt_add_l(Groups.len_words(gpre), m, base,
+                                  hgpre_lt)
+                              +hu_lt : {Nat.is_lt(idx, FT.pow2(d))
+                                        == True{} : Bool} =
+                                NatProof.Nat.is_lt_le_trans(idx,
+                                  Nat.add(base, m), FT.pow2(d), hidx_lt, hbound)
                               +code = SolveFast.feedback_code5(
                                         g0, g1, g2, g3, g4, a0, a1, a2, a3, a4)
-                              +ecode : {code == FT.tbl_at(Gfull, Cfull2, n,
-                                          Nat.add(base_r, ci)) : U32} =
+                              +ecode : {code == FT.tbl_at(Gfull2, Cfull, n, idx)
+                                        : U32} =
                                 Equal.trans(U32,
                                   code,
                                   FT.fb_code_words(gw, aw),
-                                  FT.tbl_at(Gfull, Cfull2, n, Nat.add(base_r, ci)),
+                                  FT.tbl_at(Gfull2, Cfull, n, idx),
                                   FF5.FF5.feedback_code5_eq(
                                     g0, g1, g2, g3, g4, a0, a1, a2, a3, a4),
                                   Equal.trans(U32,
                                     FT.fb_code_words(gw, aw),
-                                    FT.fb_code_words(gw, FT.nth_word(Cfull2, ci)),
-                                    FT.tbl_at(Gfull, Cfull2, n, Nat.add(base_r, ci)),
+                                    FT.fb_code_words(
+                                      FT.nth_word(Gfull2,
+                                        Groups.len_words(gpre)), aw),
+                                    FT.tbl_at(Gfull2, Cfull, n, idx),
                                     Equal.cong(+List<Nat>, U32,
-                                      x => FT.fb_code_words(gw, x), aw,
-                                      FT.nth_word(Cfull2, ci),
+                                      x => FT.fb_code_words(x, aw),
+                                      gw,
+                                      FT.nth_word(Gfull2,
+                                        Groups.len_words(gpre)),
                                       Equal.sym(+List<Nat>,
-                                        FT.nth_word(Cfull2, ci), aw,
-                                        FT.nth_word_append(cpre, aw, rest))),
-                                    Equal.sym(U32,
-                                      FT.tbl_at(Gfull, Cfull2, n, Nat.add(base_r, ci)),
-                                      FT.fb_code_words(gw, FT.nth_word(Cfull2, ci)),
-                                      FT.tbl_at_append_g(gpre, gw, grest, Cfull2,
-                                        n, ci, hci_lt))))
-                              FT.fill_tbl_row_step_dup(d, g0, g1, g2, g3, g4,
-                                gpre, grest, cpre, aw, rest, n, tbl, code,
-                                hd, hu_lt, ecode, ht, Arr.Arr.dup(U32, tbl),
+                                        FT.nth_word(Gfull2,
+                                          Groups.len_words(gpre)), gw,
+                                        FT.nth_word_append(gpre, gw, grest))),
+                                    Equal.trans(U32,
+                                      FT.fb_code_words(
+                                        FT.nth_word(Gfull2,
+                                          Groups.len_words(gpre)), aw),
+                                      FT.tbl_at(Gfull2, Cfull, n,
+                                        Nat.add(Nat.mul(Groups.len_words(cpre),
+                                          Groups.len_words(Gfull2)),
+                                          Groups.len_words(gpre))),
+                                      FT.tbl_at(Gfull2, Cfull, n, idx),
+                                      Equal.sym(U32,
+                                        FT.tbl_at(Gfull2, Cfull, n,
+                                          Nat.add(Nat.mul(
+                                            Groups.len_words(cpre),
+                                            Groups.len_words(Gfull2)),
+                                            Groups.len_words(gpre))),
+                                        FT.fb_code_words(
+                                          FT.nth_word(Gfull2,
+                                            Groups.len_words(gpre)), aw),
+                                        FT.tbl_at_append_c(cpre, aw, rest,
+                                          Gfull2, n, Groups.len_words(gpre),
+                                          hj)),
+                                      Equal.cong(Nat, U32,
+                                        x => FT.tbl_at(Gfull2, Cfull, n,
+                                          Nat.add(Nat.mul(
+                                            Groups.len_words(cpre), x),
+                                            Groups.len_words(gpre))),
+                                        Groups.len_words(Gfull2), m, em))))
+                              +ehb : {Nat.is_le(Nat.add(Nat.mul(
+                                          Groups.len_words(cpre), m), m),
+                                        FT.pow2(d)) == True{} : Bool} =
+                                hbound
+                              +eug : {Nat.add(Groups.len_words(gpre), 1n)
+                                      == Groups.len_words(gpre2) : Nat} =
+                                Equal.trans(Nat,
+                                  Nat.add(Groups.len_words(gpre), 1n),
+                                  1n+Groups.len_words(gpre),
+                                  Groups.len_words(gpre2),
+                                  NatProof.NatPrf.add_comm(
+                                    Groups.len_words(gpre), 1n),
+                                  Equal.sym(Nat, Groups.len_words(gpre2),
+                                    1n+Groups.len_words(gpre), elen2))
+                              +eu2 : {Nat.add(Nat.mul(
+                                           Groups.len_words(cpre), m),
+                                        Nat.add(Groups.len_words(gpre), 1n))
+                                      == Nat.add(Nat.mul(
+                                           Groups.len_words(cpre), m),
+                                           Groups.len_words(gpre2)) : Nat} =
+                                Equal.cong(Nat, Nat,
+                                  x => Nat.add(Nat.mul(
+                                    Groups.len_words(cpre), m), x),
+                                  Nat.add(Groups.len_words(gpre), 1n),
+                                  Groups.len_words(gpre2), eug)
+                              +efinal : {1n+Nat.add(base,
+                                            Groups.len_words(gpre))
+                                         == Nat.add(base,
+                                              Groups.len_words(gpre2)) : Nat} =
+                                Equal.trans(Nat,
+                                  1n+Nat.add(base, Groups.len_words(gpre)),
+                                  Nat.add(Nat.add(base, Groups.len_words(gpre)),
+                                    1n),
+                                  Nat.add(base, Groups.len_words(gpre2)),
+                                  NatProof.NatPrf.add_comm(1n,
+                                    Nat.add(base, Groups.len_words(gpre))),
+                                  Equal.trans(Nat,
+                                    Nat.add(Nat.add(base,
+                                      Groups.len_words(gpre)), 1n),
+                                    Nat.add(base,
+                                      Nat.add(Groups.len_words(gpre), 1n)),
+                                    Nat.add(base, Groups.len_words(gpre2)),
+                                    NatProof.NatPrf.add_assoc(base,
+                                      Groups.len_words(gpre), 1n),
+                                    eu2))
+                              +einc : {U32.from_nat(Nat.add(base,
+                                          Groups.len_words(gpre2)))
+                                       == U32.inc(U32.from_nat(
+                                            Nat.add(base,
+                                              Groups.len_words(gpre)))) : U32} =
+                                Equal.sym(U32,
+                                  U32.from_nat(1n+Nat.add(base,
+                                    Groups.len_words(gpre))),
+                                  U32.from_nat(Nat.add(base,
+                                    Groups.len_words(gpre2))),
+                                  Equal.cong(Nat, U32, x => U32.from_nat(x),
+                                    1n+Nat.add(base, Groups.len_words(gpre)),
+                                    Nat.add(base, Groups.len_words(gpre2)),
+                                    efinal))
+                              FT.fill_tbl_col_step_dup(d, g0, g1, g2, g3, g4,
+                                a0, a1, a2, a3, a4, gpre, grest, cpre, rest,
+                                m, n, tbl, code, em, hd, hu_lt, ecode, ht,
+                                Arr.Arr.dup(U32, tbl),
                                 tbl2 => ht2 =>
-                                  FT.fill_tbl_row_ok(rest, d, g0, g1, g2, g3, g4,
-                                    gpre, grest, cpre2, n, tbl2,
-                                    hd, en2, hbound, hr5, ht2))
+                                  FT.tbl_tree_transport_gc(d,
+                                    SolveFast.fill_tbl_col(a0, a1, a2, a3, a4,
+                                      grest,
+                                      U32.from_nat(Nat.add(base,
+                                        Groups.len_words(gpre2))), tbl2),
+                                    SolveFast.fill_tbl_col(a0, a1, a2, a3, a4,
+                                      grest,
+                                      U32.inc(U32.from_nat(Nat.add(base,
+                                        Groups.len_words(gpre)))), tbl2),
+                                    List.append(&2, +List<Nat>, gpre2, grest),
+                                    Gfull2,
+                                    Cfull, Cfull, n,
+                                    Nat.add(base, m),
+                                    Nat.add(base, m),
+                                    Equal.cong(U32, Array<U32>,
+                                      u => SolveFast.fill_tbl_col(a0, a1, a2,
+                                             a3, a4, grest, u, tbl2),
+                                      U32.from_nat(Nat.add(base,
+                                        Groups.len_words(gpre2))),
+                                      U32.inc(U32.from_nat(Nat.add(base,
+                                        Groups.len_words(gpre)))), einc),
+                                    egfull,
+                                    {==}, {==},
+                                    FT.fill_tbl_col_ok(grest, gpre2,
+                                      a0, a1, a2, a3, a4, cpre, rest, m, d, n,
+                                      tbl2, em2, hd, ehb, hgrest5,
+                                      FT.tbl_tree_transport_gc(d, tbl2, tbl2,
+                                        Gfull2,
+                                        List.append(&2, +List<Nat>, gpre2,
+                                          grest),
+                                        Cfull, Cfull, n,
+                                        Nat.add(base, Nat.add(
+                                          Groups.len_words(gpre), 1n)),
+                                        Nat.add(base,
+                                          Groups.len_words(gpre2)),
+                                        {==},
+                                        Equal.sym(+List<+List<Nat>>,
+                                          List.append(&2, +List<Nat>, gpre2,
+                                            grest),
+                                          Gfull2, egfull),
+                                        {==}, eu2, ht2))))
 
 def FT.mul_add_r(+a: Nat, +b: Nat, +c: Nat) ->
   {Nat.mul(Nat.add(a, b), c) == Nat.add(Nat.mul(a, c), Nat.mul(b, c)) : Nat}:
@@ -2479,391 +2706,514 @@ def FT.mul_add_r(+a: Nat, +b: Nat, +c: Nat) ->
           Nat.add(c, Nat.add(Nat.mul(ap, c), Nat.mul(b, c))),
           NatProof.NatPrf.add_assoc(c, Nat.mul(ap, c), Nat.mul(b, c))))
 
-def FT.fill_tbl_go_step_dup(+d: Nat, +g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-    +gpre: +List<+List<Nat>>, +rest: +List<+List<Nat>>,
-    +C: +List<+List<Nat>>, +n: Nat, -tbl: Array<U32>,
+
+def FT.all_len5_app_r(+xs: +List<+List<Nat>>, +ys: +List<+List<Nat>>,
+    +h: {SolveFast.all_len5(List.append(&2, +List<Nat>, xs, ys))
+         == True{} : Bool}) ->
+  {SolveFast.all_len5(ys) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      h
+    case Con{w, +t}:
+      +h1 : {SolveFast.all_len5(List.append(&2, +List<Nat>, t, ys))
+             == True{} : Bool} =
+        FT.all_len5_tail(w, List.append(&2, +List<Nat>, t, ys), h)
+      FT.all_len5_app_r(t, ys, h1)
+
+# One candidate block of the table: `a0..a4` at position `|cpre|` of the
+# candidate list `Cfull`, with `m` guesses per block.
+def FT.all_len5_of(+C1: +List<+List<Nat>>, +C2: +List<+List<Nat>>,
+    +e: {C1 == C2 : +List<+List<Nat>>},
+    +h: {SolveFast.all_len5(C2) == True{} : Bool}) ->
+  {SolveFast.all_len5(C1) == True{} : Bool}:
+  Equal.trans(Bool, SolveFast.all_len5(C1), SolveFast.all_len5(C2), True{},
+    Equal.cong(+List<+List<Nat>>, Bool, x => SolveFast.all_len5(x), C1, C2, e),
+    h)
+
+def FT.fill_tbl_go_step_dup(+d: Nat,
+    +a0: Nat, +a1: Nat, +a2: Nat, +a3: Nat, +a4: Nat,
+    +cpre: +List<+List<Nat>>, +stop: +List<+List<Nat>>,
+    +Cfull: +List<+List<Nat>>,
+    +G: +List<+List<Nat>>, +n: Nat, +m: Nat, -tbl: Array<U32>,
+    +emG: {Groups.len_words(G) == m : Nat},
+    +eC : {Cfull == List.append(&2, +List<Nat>, cpre,
+             (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> stop)
+           : +List<+List<Nat>>},
     +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
-    +en: {Groups.len_words(C) == n : Nat},
-    +hb_row: {Nat.is_le(Nat.add(Nat.mul(Groups.len_words(gpre), n), n),
+    +hb_row: {Nat.is_le(Nat.add(Nat.mul(Groups.len_words(cpre), m), m),
                 FT.pow2(d)) == True{} : Bool},
-    +hc5: {SolveFast.all_len5(C) == True{} : Bool},
-    +ht: FT.TblTree(d, 0n, tbl,
-           List.append(&2, +List<Nat>, gpre,
-             (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> rest),
-           C, n, Nat.mul(Groups.len_words(gpre), n)),
+    +hg5: {SolveFast.all_len5(G) == True{} : Bool},
+    +hc5: {SolveFast.all_len5(
+            List.append(&2, +List<Nat>, cpre,
+              (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> stop))
+           == True{} : Bool},
+    +ht: FT.TblTree(d, 0n, tbl, G, Cfull, n,
+           Nat.mul(Groups.len_words(cpre), m)),
     dp: &t1: Array<U32> -> &t2: Array<U32> ->
         {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>},
     rec: @tbl2: Array<U32> ->
-         FT.TblTree(d, 0n, tbl2,
-           List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, gpre,
-               (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> Nil{}), rest),
-           C, n,
+         FT.TblTree(d, 0n, tbl2, G, Cfull, n,
            Nat.mul(Groups.len_words(
-             List.append(&2, +List<Nat>, gpre,
-               (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> Nil{})), n)) ->
+             List.append(&2, +List<Nat>, cpre,
+               (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> Nil{})), m)) ->
          FT.TblTree(d, 0n,
-           SolveFast.fill_tbl_go(rest, C,
+           SolveFast.fill_tbl_go(G, stop,
              U32.from_nat(Nat.mul(Groups.len_words(
-               List.append(&2, +List<Nat>, gpre,
-                 (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> Nil{})), n)),
-             U32.from_nat(n), tbl2),
-           List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, gpre,
-               (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> Nil{}), rest),
-           C, n,
-           Nat.mul(Groups.len_words(
-             List.append(&2, +List<Nat>,
-               List.append(&2, +List<Nat>, gpre,
-                 (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> Nil{}), rest)), n))) ->
+               List.append(&2, +List<Nat>, cpre,
+                 (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> Nil{})), m)),
+             U32.from_nat(m), tbl2),
+           G, Cfull, n, Nat.mul(n, m))) ->
   FT.TblTree(d, 0n,
-    SolveFast.fill_tbl_go(rest, C,
-      U32.add(U32.from_nat(Nat.mul(Groups.len_words(gpre), n)), U32.from_nat(n)),
-      U32.from_nat(n),
-      SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-        U32.from_nat(Nat.mul(Groups.len_words(gpre), n)), tbl)),
-    List.append(&2, +List<Nat>, gpre,
-      (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> rest),
-    C, n,
-    Nat.mul(Groups.len_words(
-      List.append(&2, +List<Nat>, gpre,
-        (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))) <> rest)), n)):
+    SolveFast.fill_tbl_go(G,
+      (a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))) <> stop,
+      U32.from_nat(Nat.mul(Groups.len_words(cpre), m)), U32.from_nat(m),
+      tbl),
+    G, Cfull, n, Nat.mul(n, m)):
   (t1, dp2) = dp
-  (t2, pe) = dp2
-  (+et1, +et2) = pe
-  +ri : Nat = Groups.len_words(gpre)
-  +gw : +List<Nat> = g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-  +Gfull2 : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> rest)
-  +gpre2 : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, gw <> Nil{})
-  +egfull : {List.append(&2, +List<Nat>, gpre2, rest) == Gfull2 : +List<+List<Nat>>} =
-    FT.list_append_snoc(+List<Nat>, gpre, gw, rest)
-  +eri2 : {Groups.len_words(gpre2) == 1n+ri : Nat} =
-    Equal.trans(Nat, Groups.len_words(gpre2), Nat.add(ri, 1n), 1n+ri,
-      FT.len_words_append(gpre, gw <> Nil{}), NatProof.NatPrf.add_comm(ri, 1n))
-  +emul2 : {Nat.mul(Groups.len_words(gpre2), n) == Nat.add(Nat.mul(ri, n), n) : Nat} =
+  (t2, pe2) = dp2
+  (+et1, +et2) = pe2
+  +aw : +List<Nat> = a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))
+  +Cn : +List<+List<Nat>> =
+    List.append(&2, +List<Nat>, cpre, aw <> stop)
+  +cpre2 : +List<+List<Nat>> = List.append(&2, +List<Nat>, cpre, aw <> Nil{})
+  +base : Nat = Nat.mul(Groups.len_words(cpre), m)
+  +eC2 : {Cfull == Cn : +List<+List<Nat>>} =
+    Equal.trans(+List<+List<Nat>>, Cfull, List.append(&2, +List<Nat>, cpre, aw <> stop),
+      Cn, eC, {==})
+  +ecfull : {List.append(&2, +List<Nat>, cpre2, stop) == Cn
+             : +List<+List<Nat>>} =
+    FT.list_append_snoc(+List<Nat>, cpre, aw, stop)
+  +eci2 : {Groups.len_words(cpre2)
+           == 1n+Groups.len_words(cpre) : Nat} =
+    Equal.trans(Nat, Groups.len_words(cpre2),
+      Nat.add(Groups.len_words(cpre), 1n), 1n+Groups.len_words(cpre),
+      FT.len_words_append(cpre, aw <> Nil{}),
+      NatProof.NatPrf.add_comm(Groups.len_words(cpre), 1n))
+  +emul2 : {Nat.mul(Groups.len_words(cpre2), m)
+            == Nat.add(Nat.mul(Groups.len_words(cpre), m), m) : Nat} =
     Equal.trans(Nat,
-      Nat.mul(Groups.len_words(gpre2), n),
-      Nat.add(n, Nat.mul(ri, n)), Nat.add(Nat.mul(ri, n), n),
-      Equal.cong(Nat, Nat, x => Nat.mul(x, n),
-        Groups.len_words(gpre2), 1n+ri, eri2),
-      NatProof.NatPrf.add_comm(n, Nat.mul(ri, n)))
-  +ht_t1 = FT.tbl_tree_transport(d, 0n, tbl, t1, Gfull2, C, n, Nat.mul(ri, n),
+      Nat.mul(Groups.len_words(cpre2), m),
+      Nat.add(m, Nat.mul(Groups.len_words(cpre), m)),
+      Nat.add(Nat.mul(Groups.len_words(cpre), m), m),
+      Equal.cong(Nat, Nat, x => Nat.mul(x, m),
+        Groups.len_words(cpre2), 1n+Groups.len_words(cpre), eci2),
+      NatProof.NatPrf.add_comm(m, Nat.mul(Groups.len_words(cpre), m)))
+  +ht_t1 = FT.tbl_tree_transport(d, 0n, tbl, t1, G, Cfull, n, base,
              Equal.sym(Array<U32>, t1, tbl, et1), ht)
-  +ht0 : FT.TblTree(d, 0n, t1, Gfull2, C, n, Nat.add(Nat.mul(ri, n), 0n)) =
-    FT.tbl_tree_transport_upto(d, 0n, t1, Gfull2, C, n,
-      Nat.mul(ri, n), Nat.add(Nat.mul(ri, n), 0n),
-      Equal.sym(Nat, Nat.add(Nat.mul(ri, n), 0n), Nat.mul(ri, n),
-        NatProof.NatPrf.add_zero(Nat.mul(ri, n))), ht_t1)
+  +ht0 : FT.TblTree(d, 0n, t1, G, Cn, n,
+            Nat.add(base, Groups.len_words(Nil{}))) =
+    FT.tbl_tree_transport_gc(d, t1, t1, G, G, Cfull, Cn, n,
+      Nat.add(base, Groups.len_words(Nil{})), Nat.add(base, Groups.len_words(Nil{})),
+      {==}, {==}, eC2, {==},
+      FT.tbl_tree_transport_upto(d, 0n, t1, G, Cfull, n,
+        base, Nat.add(base, Groups.len_words(Nil{})),
+        Equal.sym(Nat, Nat.add(base, Groups.len_words(Nil{})), base,
+          NatProof.NatPrf.add_zero(base)), ht_t1))
   +ht1_t1 : FT.TblTree(d, 0n,
-              SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-                U32.from_nat(Nat.mul(ri, n)), t1),
-              Gfull2, C, n, Nat.add(Nat.mul(ri, n), n)) =
+              SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+                U32.from_nat(base), t1),
+              G, Cn, n, Nat.add(base, m)) =
     %Equal.cong(Nat, U32, x => U32.from_nat(x),
-       Nat.add(Nat.mul(ri, n), 0n), Nat.mul(ri, n),
-       NatProof.NatPrf.add_zero(Nat.mul(ri, n))) :
+       Nat.add(base, Groups.len_words(Nil{})), base,
+       NatProof.NatPrf.add_zero(base)) :
       FT.TblTree(d, 0n,
-        SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C, _, t1),
-        Gfull2, C, n, Nat.add(Nat.mul(ri, n), n))
-    FT.fill_tbl_row_ok(C, d, g0, g1, g2, g3, g4, gpre, rest, Nil{}, n,
-      t1, hd, en, hb_row, hc5, ht0)
-  +ht1_t2 = FT.tbl_tree_transport(d, 0n,
-              SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-                U32.from_nat(Nat.mul(ri, n)), t1),
-              SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-                U32.from_nat(Nat.mul(ri, n)), t2),
-              Gfull2, C, n, Nat.add(Nat.mul(ri, n), n),
+        SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G, _, t1),
+        G, Cn, n, Nat.add(base, m))
+    FT.fill_tbl_col_ok(G, Nil{}, a0, a1, a2, a3, a4, cpre, stop, m, d, n,
+      t1, emG, hd, hb_row, hg5, ht0)
+  +ht1_t2 = FT.tbl_tree_transport_gc(d,
+              SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+                U32.from_nat(base), t1),
+              SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+                U32.from_nat(base), t2),
+              G, G, Cn, Cn, n, Nat.add(base, m), Nat.add(base, m),
               Equal.cong(Array<U32>, Array<U32>,
-                x => SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-                       U32.from_nat(Nat.mul(ri, n)), x),
+                x => SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+                       U32.from_nat(base), x),
                 t1, t2, Equal.sym(Array<U32>, t2, t1, et2)),
+              {==}, {==}, {==},
               ht1_t1)
   +ht1_g2 : FT.TblTree(d, 0n,
-              SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-                U32.from_nat(Nat.mul(ri, n)), t2),
-              List.append(&2, +List<Nat>, gpre2, rest),
-              C, n, Nat.mul(Groups.len_words(gpre2), n)) =
-    %Equal.sym(+List<+List<Nat>>,
-       List.append(&2, +List<Nat>, gpre2, rest), Gfull2, egfull) :
-      FT.TblTree(d, 0n,
-        SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-          U32.from_nat(Nat.mul(ri, n)), t2),
-        _, C, n, Nat.mul(Groups.len_words(gpre2), n))
-    FT.tbl_tree_transport_upto(d, 0n,
-      SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-        U32.from_nat(Nat.mul(ri, n)), t2),
-      Gfull2, C, n, Nat.add(Nat.mul(ri, n), n),
-      Nat.mul(Groups.len_words(gpre2), n),
-      Equal.sym(Nat, Nat.mul(Groups.len_words(gpre2), n),
-        Nat.add(Nat.mul(ri, n), n), emul2),
+              SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+                U32.from_nat(base), t2),
+              G, Cfull, n, Nat.mul(Groups.len_words(cpre2), m)) =
+    FT.tbl_tree_transport_gc(d,
+      SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G, U32.from_nat(base), t2),
+      SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G, U32.from_nat(base), t2),
+      G, G, Cn, Cfull, n, Nat.add(base, m), Nat.mul(Groups.len_words(cpre2), m),
+      {==}, {==}, Equal.sym(+List<+List<Nat>>, Cfull, Cn, eC2),
+      Equal.sym(Nat, Nat.mul(Groups.len_words(cpre2), m),
+        Nat.add(base, m), emul2),
       ht1_t2)
   +hrec = rec(
-            SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-              U32.from_nat(Nat.mul(ri, n)), t2),
+            SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+              U32.from_nat(base), t2),
             ht1_g2)
-  +eu_add : {U32.from_nat(Nat.mul(Groups.len_words(gpre2), n))
-             == U32.add(U32.from_nat(Nat.mul(ri, n)), U32.from_nat(n)) : U32} =
+  +eu_add : {U32.from_nat(Nat.mul(Groups.len_words(cpre2), m))
+             == U32.add(U32.from_nat(base), U32.from_nat(m)) : U32} =
     Equal.trans(U32,
-      U32.from_nat(Nat.mul(Groups.len_words(gpre2), n)),
-      U32.from_nat(Nat.add(Nat.mul(ri, n), n)),
-      U32.add(U32.from_nat(Nat.mul(ri, n)), U32.from_nat(n)),
+      U32.from_nat(Nat.mul(Groups.len_words(cpre2), m)),
+      U32.from_nat(Nat.add(base, m)),
+      U32.add(U32.from_nat(base), U32.from_nat(m)),
       Equal.cong(Nat, U32, x => U32.from_nat(x),
-        Nat.mul(Groups.len_words(gpre2), n), Nat.add(Nat.mul(ri, n), n), emul2),
+        Nat.mul(Groups.len_words(cpre2), m), Nat.add(base, m), emul2),
       Equal.sym(U32,
-        U32.add(U32.from_nat(Nat.mul(ri, n)), U32.from_nat(n)),
-        U32.from_nat(Nat.add(Nat.mul(ri, n), n)),
-        FT.u32_add_from_nat(Nat.mul(ri, n), n)))
+        U32.add(U32.from_nat(base), U32.from_nat(m)),
+        U32.from_nat(Nat.add(base, m)),
+        FT.u32_add_from_nat(base, m)))
   %et1 :
     FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_go(rest, C,
-        U32.add(U32.from_nat(Nat.mul(ri, n)), U32.from_nat(n)),
-        U32.from_nat(n),
-        SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-          U32.from_nat(Nat.mul(ri, n)), _)),
-      Gfull2, C, n, Nat.mul(Groups.len_words(Gfull2), n))
+      SolveFast.fill_tbl_go(G, stop,
+        U32.add(U32.from_nat(base), U32.from_nat(m)),
+        U32.from_nat(m),
+        SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+          U32.from_nat(base), _)),
+      G, Cfull, n, Nat.mul(n, m))
   %et2 :
     FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_go(rest, C,
-        U32.add(U32.from_nat(Nat.mul(ri, n)), U32.from_nat(n)),
-        U32.from_nat(n),
-        SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-          U32.from_nat(Nat.mul(ri, n)), _)),
-      Gfull2, C, n, Nat.mul(Groups.len_words(Gfull2), n))
-  %egfull :
-    FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_go(rest, C,
-        U32.add(U32.from_nat(Nat.mul(ri, n)), U32.from_nat(n)),
-        U32.from_nat(n),
-        SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-          U32.from_nat(Nat.mul(ri, n)), t2)),
-      _, C, n, Nat.mul(Groups.len_words(_), n))
+      SolveFast.fill_tbl_go(G, stop,
+        U32.add(U32.from_nat(base), U32.from_nat(m)),
+        U32.from_nat(m),
+        SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+          U32.from_nat(base), _)),
+      G, Cfull, n, Nat.mul(n, m))
   %eu_add :
     FT.TblTree(d, 0n,
-      SolveFast.fill_tbl_go(rest, C, _, U32.from_nat(n),
-        SolveFast.fill_tbl_row(g0, g1, g2, g3, g4, C,
-          U32.from_nat(Nat.mul(ri, n)), t2)),
-      List.append(&2, +List<Nat>, gpre2, rest), C, n,
-      Nat.mul(Groups.len_words(List.append(&2, +List<Nat>, gpre2, rest)), n))
+      SolveFast.fill_tbl_go(G, stop, _, U32.from_nat(m),
+        SolveFast.fill_tbl_col(a0, a1, a2, a3, a4, G,
+          U32.from_nat(base), t2)),
+      G, Cfull, n, Nat.mul(n, m))
   hrec
 
-def FT.fill_tbl_go_ok(+grem: +List<+List<Nat>>, +d: Nat, +gpre: +List<+List<Nat>>,
-    +C: +List<+List<Nat>>, +n: Nat, tbl: Array<U32>,
+def FT.fill_tbl_go_ok(+crem: +List<+List<Nat>>, +cpre: +List<+List<Nat>>,
+    +Cfull: +List<+List<Nat>>,
+    +G: +List<+List<Nat>>, +d: Nat, +n: Nat, +m: Nat, tbl: Array<U32>,
+    +emG: {Groups.len_words(G) == m : Nat},
+    +eC : {Cfull == List.append(&2, +List<Nat>, cpre, crem)
+           : +List<+List<Nat>>},
+    +en: {Groups.len_words(Cfull) == n : Nat},
     +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
-    +en: {Groups.len_words(C) == n : Nat},
-    +hbound: {Nat.is_le(
-                Nat.mul(Groups.len_words(List.append(&2, +List<Nat>, gpre, grem)), n),
-                FT.pow2(d)) == True{} : Bool},
-    +hg5: {SolveFast.all_len5(grem) == True{} : Bool},
-    +hc5: {SolveFast.all_len5(C) == True{} : Bool},
-    +ht: FT.TblTree(d, 0n, tbl,
-           List.append(&2, +List<Nat>, gpre, grem), C, n,
-           Nat.mul(Groups.len_words(gpre), n))) ->
+    +hbound: {Nat.is_le(Nat.mul(m, n), FT.pow2(d)) == True{} : Bool},
+    +hg5: {SolveFast.all_len5(G) == True{} : Bool},
+    +hc5: {SolveFast.all_len5(Cfull) == True{} : Bool},
+    +ht: FT.TblTree(d, 0n, tbl, G, Cfull, n,
+           Nat.mul(Groups.len_words(cpre), m))) ->
   FT.TblTree(d, 0n,
-    SolveFast.fill_tbl_go(grem, C,
-      U32.from_nat(Nat.mul(Groups.len_words(gpre), n)), U32.from_nat(n), tbl),
-    List.append(&2, +List<Nat>, gpre, grem), C, n,
-    Nat.mul(Groups.len_words(List.append(&2, +List<Nat>, gpre, grem)), n)):
-  match grem:
+    SolveFast.fill_tbl_go(G, crem,
+      U32.from_nat(Nat.mul(Groups.len_words(cpre), m)), U32.from_nat(m), tbl),
+    G, Cfull, n, Nat.mul(n, m)):
+  match crem:
     case Nil{}:
-      +Gfull : +List<+List<Nat>> = List.append(&2, +List<Nat>, gpre, Nil{})
-      +ri : Nat = Groups.len_words(gpre)
-      +elen : {Groups.len_words(List.append(&2, +List<Nat>, gpre, Nil{}))
-               == ri : Nat} =
-        Equal.trans(Nat,
-          Groups.len_words(List.append(&2, +List<Nat>, gpre, Nil{})),
-          Nat.add(ri, 0n), ri,
-          FT.len_words_append(gpre, Nil{}),
-          NatProof.NatPrf.add_zero(ri))
-      FT.tbl_tree_transport_upto(d, 0n, tbl, Gfull, C, n,
-        Nat.mul(ri, n), Nat.mul(Groups.len_words(Gfull), n),
-        Equal.cong(Nat, Nat, x => Nat.mul(x, n), ri, Groups.len_words(Gfull),
-          Equal.sym(Nat, Groups.len_words(Gfull), ri, elen)),
+      +ri : Nat = Groups.len_words(cpre)
+      +elen : {Groups.len_words(Cfull) == ri : Nat} =
+        Equal.trans(Nat, Groups.len_words(Cfull),
+          Groups.len_words(List.append(&2, +List<Nat>, cpre, Nil{})),
+          ri,
+          Equal.cong(+List<+List<Nat>>, Nat, x => Groups.len_words(x),
+            Cfull, List.append(&2, +List<Nat>, cpre, Nil{}), eC),
+          Equal.trans(Nat,
+            Groups.len_words(List.append(&2, +List<Nat>, cpre, Nil{})),
+            Nat.add(ri, Groups.len_words(Nil{})),
+            ri,
+            FT.len_words_append(cpre, Nil{}),
+            NatProof.NatPrf.add_zero(ri)))
+      +eri_n : {ri == n : Nat} =
+        Equal.trans(Nat, ri, Groups.len_words(Cfull), n,
+          Equal.sym(Nat, Groups.len_words(Cfull), ri, elen), en)
+      FT.tbl_tree_transport_upto(d, 0n, tbl, G, Cfull, n,
+        Nat.mul(ri, m), Nat.mul(n, m),
+        Equal.cong(Nat, Nat, x => Nat.mul(x, m), ri, n, eri_n),
         ht)
-    case Con{+g, +rest}:
-      match g:
+    case Con{+w, +rest}:
+      match w:
         case Nil{}:
-          +hgw5 : {SolveFast.is_len5(Nil{}) == True{} : Bool} =
-            FT.all_len5_head(Nil{}, rest, hg5)
+          +hc5w : {SolveFast.is_len5(Nil{}) == True{} : Bool} =
+            FT.all_len5_head(Nil{}, rest,
+              FT.all_len5_app_r(cpre, Nil{} <> rest,
+                FT.all_len5_of(
+                    List.append(&2, +List<Nat>, cpre, Nil{} <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                    List.append(&2, +List<Nat>, cpre, Nil{} <> rest), eC), hc5)))
           Empty.absurd(
-            FT.TblTree(d, 0n, tbl,
-              List.append(&2, +List<Nat>, gpre, Nil{} <> rest), C, n,
-              Nat.mul(Groups.len_words(
-                List.append(&2, +List<Nat>, gpre, Nil{} <> rest)), n)),
-            Logic.Proof.false_ne_true(hgw5))
-        case Con{+g0, +t1}:
+            FT.TblTree(d, 0n, tbl, G, Cfull, n, Nat.mul(n, m)),
+            Logic.Proof.false_ne_true(hc5w))
+        case Con{+a0, +t1}:
           match t1:
             case Nil{}:
-              +hgw5 : {SolveFast.is_len5(g0 <> Nil{}) == True{} : Bool} =
-                FT.all_len5_head(g0 <> Nil{}, rest, hg5)
+              +hc5aw : {SolveFast.all_len5((a0 <> Nil{}) <> rest) == True{} : Bool} =
+                FT.all_len5_app_r(cpre, (a0 <> Nil{}) <> rest,
+                  FT.all_len5_of(
+                      List.append(&2, +List<Nat>, cpre, (a0 <> Nil{}) <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                      List.append(&2, +List<Nat>, cpre, (a0 <> Nil{}) <> rest), eC), hc5))
+              +hc5w : {SolveFast.is_len5(a0 <> Nil{}) == True{} : Bool} =
+                FT.all_len5_head(a0 <> Nil{}, rest, hc5aw)
               Empty.absurd(
-                FT.TblTree(d, 0n, tbl,
-                  List.append(&2, +List<Nat>, gpre, (g0 <> Nil{}) <> rest), C, n,
-                  Nat.mul(Groups.len_words(
-                    List.append(&2, +List<Nat>, gpre, (g0 <> Nil{}) <> rest)), n)),
-                Logic.Proof.false_ne_true(hgw5))
-            case Con{+g1, +t2}:
+                FT.TblTree(d, 0n, tbl, G, Cfull, n, Nat.mul(n, m)),
+                Logic.Proof.false_ne_true(hc5w))
+            case Con{+a1, +t2}:
               match t2:
                 case Nil{}:
-                  +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> Nil{})) == True{} : Bool} =
-                    FT.all_len5_head(g0 <> (g1 <> Nil{}), rest, hg5)
+                  +hc5aw : {SolveFast.all_len5((a0 <> (a1 <> Nil{})) <> rest)
+                            == True{} : Bool} =
+                    FT.all_len5_app_r(cpre, (a0 <> (a1 <> Nil{})) <> rest,
+                      FT.all_len5_of(
+                          List.append(&2, +List<Nat>, cpre,
+                            (a0 <> (a1 <> Nil{})) <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                          List.append(&2, +List<Nat>, cpre,
+                            (a0 <> (a1 <> Nil{})) <> rest), eC), hc5))
+                  +hc5w : {SolveFast.is_len5(a0 <> (a1 <> Nil{})) == True{} : Bool} =
+                    FT.all_len5_head(a0 <> (a1 <> Nil{}), rest, hc5aw)
                   Empty.absurd(
-                    FT.TblTree(d, 0n, tbl,
-                      List.append(&2, +List<Nat>, gpre,
-                        (g0 <> (g1 <> Nil{})) <> rest), C, n,
-                      Nat.mul(Groups.len_words(
-                        List.append(&2, +List<Nat>, gpre,
-                          (g0 <> (g1 <> Nil{})) <> rest)), n)),
-                    Logic.Proof.false_ne_true(hgw5))
-                case Con{+g2, +t3}:
+                    FT.TblTree(d, 0n, tbl, G, Cfull, n, Nat.mul(n, m)),
+                    Logic.Proof.false_ne_true(hc5w))
+                case Con{+a2, +t3}:
                   match t3:
                     case Nil{}:
-                      +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> (g2 <> Nil{}))) == True{} : Bool} =
-                        FT.all_len5_head(g0 <> (g1 <> (g2 <> Nil{})), rest, hg5)
+                      +hc5aw : {SolveFast.all_len5(
+                                  (a0 <> (a1 <> (a2 <> Nil{}))) <> rest)
+                                == True{} : Bool} =
+                        FT.all_len5_app_r(cpre,
+                          (a0 <> (a1 <> (a2 <> Nil{}))) <> rest,
+                          FT.all_len5_of(
+                              List.append(&2, +List<Nat>, cpre,
+                                (a0 <> (a1 <> (a2 <> Nil{}))) <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                              List.append(&2, +List<Nat>, cpre,
+                                (a0 <> (a1 <> (a2 <> Nil{}))) <> rest), eC), hc5))
+                      +hc5w : {SolveFast.is_len5(a0 <> (a1 <> (a2 <> Nil{})))
+                               == True{} : Bool} =
+                        FT.all_len5_head(a0 <> (a1 <> (a2 <> Nil{})), rest,
+                          hc5aw)
                       Empty.absurd(
-                        FT.TblTree(d, 0n, tbl,
-                          List.append(&2, +List<Nat>, gpre,
-                            (g0 <> (g1 <> (g2 <> Nil{}))) <> rest), C, n,
-                          Nat.mul(Groups.len_words(
-                            List.append(&2, +List<Nat>, gpre,
-                              (g0 <> (g1 <> (g2 <> Nil{}))) <> rest)), n)),
-                        Logic.Proof.false_ne_true(hgw5))
-                    case Con{+g3, +t4}:
+                        FT.TblTree(d, 0n, tbl, G, Cfull, n, Nat.mul(n, m)),
+                        Logic.Proof.false_ne_true(hc5w))
+                    case Con{+a3, +t4}:
                       match t4:
                         case Nil{}:
-                          +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> (g2 <> (g3 <> Nil{})))) == True{} : Bool} =
-                            FT.all_len5_head(g0 <> (g1 <> (g2 <> (g3 <> Nil{}))), rest, hg5)
+                          +aw : +List<Nat> =
+                            a0 <> (a1 <> (a2 <> (a3 <> Nil{})))
+                          +hc5aw : {SolveFast.all_len5(aw <> rest)
+                                    == True{} : Bool} =
+                            FT.all_len5_app_r(cpre, aw <> rest,
+                              FT.all_len5_of(
+                                  List.append(&2, +List<Nat>, cpre,
+                                    aw <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                                  List.append(&2, +List<Nat>, cpre,
+                                    aw <> rest), eC), hc5))
+                          +hc5w : {SolveFast.is_len5(aw) == True{} : Bool} =
+                            FT.all_len5_head(aw, rest, hc5aw)
                           Empty.absurd(
-                            FT.TblTree(d, 0n, tbl,
-                              List.append(&2, +List<Nat>, gpre,
-                                (g0 <> (g1 <> (g2 <> (g3 <> Nil{})))) <> rest),
-                              C, n,
-                              Nat.mul(Groups.len_words(
-                                List.append(&2, +List<Nat>, gpre,
-                                  (g0 <> (g1 <> (g2 <> (g3 <> Nil{})))) <> rest)), n)),
-                            Logic.Proof.false_ne_true(hgw5))
-                        case Con{+g4, +t5}:
+                            FT.TblTree(d, 0n, tbl, G, Cfull, n,
+                              Nat.mul(n, m)),
+                            Logic.Proof.false_ne_true(hc5w))
+                        case Con{+a4, +t5}:
                           match t5:
-                            case Con{+g5, +t6}:
-                              +hgw5 : {SolveFast.is_len5(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> (g5 <> t6)))))) == True{} : Bool} =
-                                FT.all_len5_head(g0 <> (g1 <> (g2 <> (g3 <> (g4 <> (g5 <> t6))))), rest, hg5)
+                            case Con{+a5, +t6}:
+                              +aw6 : +List<Nat> =
+                                a0 <> (a1 <> (a2 <> (a3 <> (a4 <> (a5 <> t6)))))
+                              +hc5aw : {SolveFast.all_len5(aw6 <> rest)
+                                        == True{} : Bool} =
+                                FT.all_len5_app_r(cpre, aw6 <> rest,
+                                  FT.all_len5_of(
+                                      List.append(&2, +List<Nat>, cpre,
+                                        aw6 <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                                      List.append(&2, +List<Nat>, cpre,
+                                        aw6 <> rest), eC), hc5))
+                              +hc5w : {SolveFast.is_len5(aw6) == True{} : Bool} =
+                                FT.all_len5_head(aw6, rest, hc5aw)
                               Empty.absurd(
-                                FT.TblTree(d, 0n, tbl,
-                                  List.append(&2, +List<Nat>, gpre,
-                                    (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> (g5 <> t6)))))) <> rest),
-                                  C, n,
-                                  Nat.mul(Groups.len_words(
-                                    List.append(&2, +List<Nat>, gpre,
-                                      (g0 <> (g1 <> (g2 <> (g3 <> (g4 <> (g5 <> t6)))))) <> rest)), n)),
-                                Logic.Proof.false_ne_true(hgw5))
+                                FT.TblTree(d, 0n, tbl, G, Cfull, n,
+                                  Nat.mul(n, m)),
+                                Logic.Proof.false_ne_true(hc5w))
                             case Nil{}:
-                              +ri : Nat = Groups.len_words(gpre)
-                              +gw : +List<Nat> =
-                                g0 <> (g1 <> (g2 <> (g3 <> (g4 <> Nil{}))))
-                              +hgr5 : {SolveFast.all_len5(rest) == True{} : Bool} =
-                                FT.all_len5_tail(gw, rest, hg5)
-                              +Gfull2 : +List<+List<Nat>> =
-                                List.append(&2, +List<Nat>, gpre, gw <> rest)
-                              +gpre2 : +List<+List<Nat>> =
-                                List.append(&2, +List<Nat>, gpre, gw <> Nil{})
-                              +egfull : {List.append(&2, +List<Nat>, gpre2, rest)
-                                         == Gfull2 : +List<+List<Nat>>} =
-                                FT.list_append_snoc(+List<Nat>, gpre, gw, rest)
-                              +eri2 : {Groups.len_words(gpre2) == 1n+ri : Nat} =
+                              +aw : +List<Nat> =
+                                a0 <> (a1 <> (a2 <> (a3 <> (a4 <> Nil{}))))
+                              +hc5aw : {SolveFast.all_len5(aw <> rest)
+                                        == True{} : Bool} =
+                                FT.all_len5_app_r(cpre, aw <> rest,
+                                  FT.all_len5_of(
+                                      List.append(&2, +List<Nat>, cpre,
+                                        aw <> rest), Cfull,
+                Equal.sym(+List<+List<Nat>>, Cfull, 
+                                      List.append(&2, +List<Nat>, cpre,
+                                        aw <> rest), eC), hc5))
+                              +hc5r : {SolveFast.all_len5(rest) == True{} : Bool} =
+                                FT.all_len5_tail(aw, rest, hc5aw)
+                              +cpre2 : +List<+List<Nat>> =
+                                List.append(&2, +List<Nat>, cpre, aw <> Nil{})
+                              +ecfull : {List.append(&2, +List<Nat>, cpre2, rest)
+                                         == List.append(&2, +List<Nat>, cpre,
+                                              aw <> rest)
+                                         : +List<+List<Nat>>} =
+                                FT.list_append_snoc(+List<Nat>, cpre, aw, rest)
+                              +eci2 : {Groups.len_words(cpre2)
+                                       == 1n+Groups.len_words(cpre) : Nat} =
+                                Equal.trans(Nat, Groups.len_words(cpre2),
+                                  Nat.add(Groups.len_words(cpre), 1n),
+                                  1n+Groups.len_words(cpre),
+                                  FT.len_words_append(cpre, aw <> Nil{}),
+                                  NatProof.NatPrf.add_comm(
+                                    Groups.len_words(cpre), 1n))
+                              +hcle : {Nat.is_le(Nat.add(
+                                          Groups.len_words(cpre), 1n), n)
+                                       == True{} : Bool} =
+                                Equal.trans(Bool,
+                                  Nat.is_le(Nat.add(Groups.len_words(cpre), 1n),
+                                    n),
+                                  Nat.is_le(Nat.add(Groups.len_words(cpre), 1n),
+                                    Nat.add(Groups.len_words(cpre),
+                                      Groups.len_words(w <> rest))),
+                                  True{},
+                                  Equal.cong(Nat, Bool,
+                                    x => Nat.is_le(
+                                      Nat.add(Groups.len_words(cpre), 1n), x),
+                                    n,
+                                    Nat.add(Groups.len_words(cpre),
+                                      Groups.len_words(w <> rest)),
+                                    Equal.sym(Nat,
+                                      Nat.add(Groups.len_words(cpre),
+                                        Groups.len_words(w <> rest)),
+                                      n,
+                                      Equal.trans(Nat,
+                                        Nat.add(Groups.len_words(cpre),
+                                          Groups.len_words(w <> rest)),
+                                        Groups.len_words(
+                                          List.append(&2, +List<Nat>, cpre,
+                                            w <> rest)),
+                                        n,
+                                        Equal.sym(Nat,
+                                          Groups.len_words(
+                                            List.append(&2, +List<Nat>, cpre,
+                                              w <> rest)),
+                                          Nat.add(Groups.len_words(cpre),
+                                            Groups.len_words(w <> rest)),
+                                          FT.len_words_append(cpre,
+                                            w <> rest)),
+                                        Equal.trans(Nat,
+                                          Groups.len_words(
+                                            List.append(&2, +List<Nat>, cpre,
+                                              w <> rest)),
+                                          Groups.len_words(Cfull), n,
+                                          Equal.cong(+List<+List<Nat>>, Nat,
+                                            x => Groups.len_words(x),
+                                            List.append(&2, +List<Nat>, cpre,
+                                              w <> rest),
+                                            Cfull,
+                                            Equal.sym(+List<+List<Nat>>, Cfull,
+                                              List.append(&2, +List<Nat>, cpre,
+                                                w <> rest), eC)),
+                                          en)))),
+                                  NatProof.Nat.is_le_add_l(1n,
+                                    Nat.add(1n, Groups.len_words(rest)),
+                                    Groups.len_words(cpre),
+                                    FT.nat_le_add_l(1n, Groups.len_words(rest))))
+                              +hmul : {Nat.is_le(Nat.mul(m,
+                                            Nat.add(Groups.len_words(cpre), 1n)),
+                                          Nat.mul(m, n)) == True{} : Bool} =
+                                CBN.CB.is_le_mul_r(Nat.add(Groups.len_words(cpre), 1n),
+                                  n, m, hcle)
+                              +emul0 : {Nat.add(Nat.mul(
+                                           Groups.len_words(cpre), m), m)
+                                         == Nat.mul(m,
+                                              Nat.add(Groups.len_words(cpre),
+                                                1n)) : Nat} =
                                 Equal.trans(Nat,
-                                  Groups.len_words(gpre2), Nat.add(ri, 1n),
-                                  1n+ri,
-                                  FT.len_words_append(gpre, gw <> Nil{}),
-                                  NatProof.NatPrf.add_comm(ri, 1n))
-                              +emul2 : {Nat.mul(Groups.len_words(gpre2), n)
-                                        == Nat.add(Nat.mul(ri, n), n) : Nat} =
-                                Equal.trans(Nat,
-                                  Nat.mul(Groups.len_words(gpre2), n),
-                                  Nat.add(n, Nat.mul(ri, n)),
-                                  Nat.add(Nat.mul(ri, n), n),
-                                  Equal.cong(Nat, Nat, x => Nat.mul(x, n),
-                                    Groups.len_words(gpre2), 1n+ri, eri2),
-                                  NatProof.NatPrf.add_comm(n, Nat.mul(ri, n)))
-                              +elen_full : {Groups.len_words(Gfull2)
-                                            == Nat.add(Groups.len_words(gpre2),
-                                                 Groups.len_words(rest)) : Nat} =
-                                Equal.trans(Nat,
-                                  Groups.len_words(Gfull2),
-                                  Groups.len_words(
-                                    List.append(&2, +List<Nat>, gpre2, rest)),
-                                  Nat.add(Groups.len_words(gpre2),
-                                    Groups.len_words(rest)),
-                                  Equal.cong(+List<+List<Nat>>, Nat,
-                                    l => Groups.len_words(l), Gfull2,
-                                    List.append(&2, +List<Nat>, gpre2, rest),
-                                    Equal.sym(+List<+List<Nat>>,
-                                      List.append(&2, +List<Nat>, gpre2, rest),
-                                      Gfull2, egfull)),
-                                  FT.len_words_append(gpre2, rest))
-                              +emul_full : {Nat.mul(Groups.len_words(Gfull2), n)
-                                            == Nat.add(
-                                                 Nat.mul(Groups.len_words(gpre2), n),
-                                                 Nat.mul(Groups.len_words(rest), n))
-                                            : Nat} =
-                                Equal.trans(Nat,
-                                  Nat.mul(Groups.len_words(Gfull2), n),
-                                  Nat.mul(
-                                    Nat.add(Groups.len_words(gpre2),
-                                      Groups.len_words(rest)), n),
-                                  Nat.add(Nat.mul(Groups.len_words(gpre2), n),
-                                    Nat.mul(Groups.len_words(rest), n)),
-                                  Equal.cong(Nat, Nat, x => Nat.mul(x, n),
-                                    Groups.len_words(Gfull2),
-                                    Nat.add(Groups.len_words(gpre2),
-                                      Groups.len_words(rest)),
-                                    elen_full),
-                                  FT.mul_add_r(Groups.len_words(gpre2),
-                                    Groups.len_words(rest), n))
-                              +hb_row : {Nat.is_le(Nat.add(Nat.mul(ri, n), n),
+                                  Nat.add(Nat.mul(Groups.len_words(cpre), m), m),
+                                  Nat.add(Nat.mul(m, Groups.len_words(cpre)), m),
+                                  Nat.mul(m,
+                                    Nat.add(Groups.len_words(cpre), 1n)),
+                                  Equal.cong(Nat, Nat, x => Nat.add(x, m),
+                                    Nat.mul(Groups.len_words(cpre), m),
+                                    Nat.mul(m, Groups.len_words(cpre)),
+                                    CBN.CB.mul_comm(Groups.len_words(cpre), m)),
+                                  Equal.trans(Nat,
+                                    Nat.add(Nat.mul(m, Groups.len_words(cpre)), m),
+                                    Nat.add(Nat.mul(m, Groups.len_words(cpre)),
+                                      Nat.mul(m, 1n)),
+                                    Nat.mul(m,
+                                      Nat.add(Groups.len_words(cpre), 1n)),
+                                    Equal.cong(Nat, Nat,
+                                      x => Nat.add(Nat.mul(m,
+                                        Groups.len_words(cpre)), x),
+                                      m, Nat.mul(m, 1n),
+                                      Equal.sym(Nat, Nat.mul(m, 1n), m,
+                                        CBN.CB.mul_one(m))),
+                                    Equal.sym(Nat,
+                                      Nat.mul(m,
+                                        Nat.add(Groups.len_words(cpre), 1n)),
+                                      Nat.add(Nat.mul(m,
+                                        Groups.len_words(cpre)),
+                                        Nat.mul(m, 1n)),
+                                      CBN.CB.mul_add(m,
+                                        Groups.len_words(cpre), 1n))))
+                              +hb_row : {Nat.is_le(
+                                           Nat.add(Nat.mul(
+                                             Groups.len_words(cpre), m), m),
                                            FT.pow2(d)) == True{} : Bool} =
                                 NatProof.Nat.is_le_trans(
-                                  Nat.add(Nat.mul(ri, n), n),
-                                  Nat.mul(Groups.len_words(Gfull2), n),
+                                  Nat.add(Nat.mul(Groups.len_words(cpre), m), m),
+                                  Nat.mul(m, Nat.add(Groups.len_words(cpre), 1n)),
                                   FT.pow2(d),
-                                  NatProof.Nat.is_le_eq_l(
-                                    Nat.mul(Groups.len_words(Gfull2), n),
-                                    Nat.mul(Groups.len_words(gpre2), n),
-                                    Nat.add(Nat.mul(ri, n), n), emul2,
-                                    NatProof.Nat.is_le_eq_r(
-                                      Nat.mul(Groups.len_words(gpre2), n),
-                                      Nat.add(
-                                        Nat.mul(Groups.len_words(gpre2), n),
-                                        Nat.mul(Groups.len_words(rest), n)),
-                                      Nat.mul(Groups.len_words(Gfull2), n),
-                                      Equal.sym(Nat,
-                                        Nat.mul(Groups.len_words(Gfull2), n),
-                                        Nat.add(
-                                          Nat.mul(Groups.len_words(gpre2), n),
-                                          Nat.mul(Groups.len_words(rest), n)),
-                                        emul_full),
-                                      FT.nat_le_add_l(
-                                        Nat.mul(Groups.len_words(gpre2), n),
-                                        Nat.mul(Groups.len_words(rest), n)))),
-                                  hbound)
-                              +hb2 : {Nat.is_le(
-                                        Nat.mul(Groups.len_words(
-                                          List.append(&2, +List<Nat>, gpre2, rest)), n),
-                                        FT.pow2(d)) == True{} : Bool} =
-                                NatProof.Nat.is_le_eq_l(FT.pow2(d),
-                                  Nat.mul(Groups.len_words(Gfull2), n),
-                                  Nat.mul(Groups.len_words(
-                                    List.append(&2, +List<Nat>, gpre2, rest)), n),
-                                  Equal.cong(+List<+List<Nat>>, Nat,
-                                    l => Nat.mul(Groups.len_words(l), n), Gfull2,
-                                    List.append(&2, +List<Nat>, gpre2, rest),
-                                    Equal.sym(+List<+List<Nat>>,
-                                      List.append(&2, +List<Nat>, gpre2, rest),
-                                      Gfull2, egfull)),
-                                  hbound)
-                              FT.fill_tbl_go_step_dup(d, g0, g1, g2, g3, g4,
-                                gpre, rest, C, n, tbl, hd, en, hb_row, hc5, ht,
-                                Arr.Arr.dup(U32, tbl),
+                                  Equal.trans(Bool,
+                                    Nat.is_le(
+                                      Nat.add(Nat.mul(
+                                        Groups.len_words(cpre), m), m),
+                                      Nat.mul(m,
+                                        Nat.add(Groups.len_words(cpre), 1n))),
+                                    Nat.is_le(
+                                      Nat.mul(m,
+                                        Nat.add(Groups.len_words(cpre), 1n)),
+                                      Nat.mul(m,
+                                        Nat.add(Groups.len_words(cpre), 1n))),
+                                    True{},
+                                    Equal.cong(Nat, Bool,
+                                      x => Nat.is_le(x,
+                                        Nat.mul(m,
+                                          Nat.add(Groups.len_words(cpre), 1n))),
+                                      Nat.add(Nat.mul(
+                                        Groups.len_words(cpre), m), m),
+                                      Nat.mul(m,
+                                        Nat.add(Groups.len_words(cpre), 1n)),
+                                      emul0),
+                                    NatProof.Nat.is_le_refl(
+                                      Nat.mul(m,
+                                        Nat.add(Groups.len_words(cpre), 1n)))),
+                                  NatProof.Nat.is_le_trans(
+                                    Nat.mul(m, Nat.add(Groups.len_words(cpre),
+                                      1n)),
+                                    Nat.mul(m, n),
+                                    FT.pow2(d), hmul, hbound))
+                              +eC2 : {Cfull == List.append(&2, +List<Nat>, cpre2,
+                                         rest) : +List<+List<Nat>>} =
+                                Equal.trans(+List<+List<Nat>>, Cfull,
+                                  List.append(&2, +List<Nat>, cpre,
+                                    aw <> rest),
+                                  List.append(&2, +List<Nat>, cpre2, rest),
+                                  eC,
+                                  Equal.sym(+List<+List<Nat>>,
+                                    List.append(&2, +List<Nat>, cpre2, rest),
+                                    List.append(&2, +List<Nat>, cpre,
+                                      aw <> rest),
+                                    ecfull))
+                              FT.fill_tbl_go_step_dup(d, a0, a1, a2, a3, a4,
+                                cpre, rest, Cfull, G, n, m, tbl, emG, eC,
+                                hd, hb_row, hg5,
+                                FT.all_len5_of(
+                                  List.append(&2, +List<Nat>, cpre, aw <> rest),
+                                  Cfull,
+                                  Equal.sym(+List<+List<Nat>>, Cfull,
+                                    List.append(&2, +List<Nat>, cpre,
+                                      aw <> rest), eC),
+                                  hc5),
+                                ht, Arr.Arr.dup(U32, tbl),
                                 tbl2 => ht2 =>
-                                  FT.fill_tbl_go_ok(rest, d, gpre2, C, n,
-                                    tbl2, hd, en, hb2, hgr5, hc5, ht2))
+                                  FT.fill_tbl_go_ok(rest, cpre2, Cfull, G, d, n,
+                                    m, tbl2, emG, eC2, en, hd, hbound, hg5,
+                                    hc5, ht2))
 
 def FT.tbl_depth(+G: +List<+List<Nat>>, +n: Nat) -> Nat:
   Maybe.default(&1, Nat,
@@ -2898,9 +3248,37 @@ def FT.mk_tbl_ok_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
     +hg5: {SolveFast.all_len5(G) == True{} : Bool},
     +hc5: {SolveFast.all_len5(C) == True{} : Bool}) ->
   FT.TblOk(G, C, n,
-    SolveFast.fill_tbl_go(G, C, 0, U32.from_nat(n), Array.new(U32, d, 0))):
-  +ht = FT.fill_tbl_go_ok(G, d, Nil{}, C, n, Array.new(U32, d, 0),
-          hd, en, hb, hg5, hc5, FT.tbl_tree_new(d, 0n, G, C, n))
+    SolveFast.fill_tbl_go(G, C, 0, U32.from_nat(Groups.len_words(G)),
+      Array.new(U32, d, 0))):
+  +m : Nat = Groups.len_words(G)
+  +emG : {Groups.len_words(G) == m : Nat} = {==}
+  +en0 : {Groups.len_words(List.append(&2, +List<Nat>, Nil{}, C)) == n : Nat} =
+    en
+  +ht0 = FT.fill_tbl_go_ok(C, Nil{}, C, G, d, n, m, Array.new(U32, d, 0), emG,
+           {==}, en, hd, hb, hg5, hc5, FT.tbl_tree_new(d, 0n, G, C, n))
+  +eupto : {Nat.mul(n, Groups.len_words(G))
+            == Nat.mul(Groups.len_words(G), n) : Nat} =
+    Equal.trans(Nat,
+      Nat.mul(n, Groups.len_words(G)),
+      Nat.mul(Groups.len_words(C), Groups.len_words(G)),
+      Nat.mul(Groups.len_words(G), n),
+      Equal.cong(Nat, Nat, x => Nat.mul(x, Groups.len_words(G)),
+        n, Groups.len_words(C), Equal.sym(Nat, Groups.len_words(C), n, en)),
+      Equal.trans(Nat,
+        Nat.mul(Groups.len_words(C), Groups.len_words(G)),
+        Nat.mul(Groups.len_words(G), Groups.len_words(C)),
+        Nat.mul(Groups.len_words(G), n),
+        CBN.CB.mul_comm(Groups.len_words(C), Groups.len_words(G)),
+        Equal.cong(Nat, Nat, x => Nat.mul(Groups.len_words(G), x),
+          Groups.len_words(C), n, en)))
+  +ht = FT.tbl_tree_transport_upto(d, 0n,
+          SolveFast.fill_tbl_go(G, C, 0, U32.from_nat(Groups.len_words(G)),
+            Array.new(U32, d, 0)),
+          G, C, n,
+          Nat.mul(n, Groups.len_words(G)),
+          Nat.mul(Groups.len_words(G), n),
+          eupto,
+          ht0)
   +edef : {FT.tbl_depth(G, n) == d : Nat} =
     Equal.cong(Maybe<Nat>, Nat, m => Maybe.default(&1, Nat, m, 0n),
       SolveFast.depth_for(Nat.mul(Groups.len_words(G), n)), Some{d}, ed)
@@ -2912,7 +3290,7 @@ def FT.mk_tbl_ok_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
           Arr.Arr.DPair<{SolveFast.all_len5(G) == True{} : Bool},
             Arr.Arr.DPair<{SolveFast.all_len5(C) == True{} : Bool},
               FT.TblTree(_, 0n,
-                SolveFast.fill_tbl_go(G, C, 0, U32.from_nat(n),
+                SolveFast.fill_tbl_go(G, C, 0, U32.from_nat(Groups.len_words(G)),
                   Array.new(U32, d, 0)),
                 G, C, n, Nat.mul(Groups.len_words(G), n))>>>>>
   Arr.DPair{hd, Arr.DPair{hb, Arr.DPair{en, Arr.DPair{hg5, Arr.DPair{hc5, ht}}}}}
@@ -2921,7 +3299,7 @@ def FT.mk_tbl_ok_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
 # Section 6: Pure `Bool` validity for `CWord`, guess rows, and `FT.tbl_lookup_eq`
 # ---------------------------------------------------------------------------
 
-def FT.has_col_go(+C: +List<+List<Nat>>, +ci: U32, +w: +List<Nat>,
+def FT.has_col_go(+m: Nat, +C: +List<+List<Nat>>, +ci: U32, +w: +List<Nat>,
                   +cur: Nat) -> Bool:
   match C:
     case Nil{}:
@@ -2929,7 +3307,7 @@ def FT.has_col_go(+C: +List<+List<Nat>>, +ci: U32, +w: +List<Nat>,
     case Con{h, rest}:
       Bool.or(
         Bool.and(U32.is_eq(ci, U32.from_nat(cur)), Feedback.word_eq(w, h)),
-        FT.has_col_go(rest, ci, w, 1n+cur))
+        FT.has_col_go(m, rest, ci, w, Nat.add(cur, m)))
 
 def FT.has_grow_go(+G: +List<+List<Nat>>, +n: Nat, +row: U32,
                    +g: +List<Nat>, +cur: Nat) -> Bool:
@@ -2939,7 +3317,7 @@ def FT.has_grow_go(+G: +List<+List<Nat>>, +n: Nat, +row: U32,
     case Con{h, rest}:
       Bool.or(
         Bool.and(U32.is_eq(row, U32.from_nat(cur)), Feedback.word_eq(g, h)),
-        FT.has_grow_go(rest, n, row, g, Nat.add(cur, n)))
+        FT.has_grow_go(rest, n, row, g, 1n+cur))
 
 def FT.gentry_ok_b(+G: +List<+List<Nat>>, +n: Nat, +row: U32,
                    +g: +List<Nat>) -> Bool:
@@ -2949,7 +3327,8 @@ def FT.cword_ok_b(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
                   cw: SolveFast.CWord) -> Bool:
   match cw:
     case SolveFast.CWord{ci, grow, +w}:
-      Bool.and(FT.has_col_go(C, ci, w, 0n), FT.gentry_ok_b(G, n, grow, w))
+      Bool.and(FT.has_col_go(Groups.len_words(G), C, ci, w, 0n),
+        FT.gentry_ok_b(G, n, grow, w))
 
 def FT.cwords_ok_b(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
                    cws: +List<SolveFast.CWord>) -> Bool:
