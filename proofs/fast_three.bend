@@ -696,8 +696,8 @@ def FT3.three_s2_cmp_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
     same: Bool, tbl: Array<U32>,
     +esame: {same == U32.is_eq(c21, c23) : Bool},
     +htbl: FT.FT.TblOk(G, C, n, tbl),
-    +hcol1: {FT.FT.has_col_go(C, ci1, w1, 0n) == True{} : Bool},
-    +hcol2: {FT.FT.has_col_go(C, ci2, w2, 0n) == True{} : Bool},
+    +hcol1: {FT.FT.has_col_go(Groups.len_words(G), C, ci1, w1, 0n) == True{} : Bool},
+    +hcol2: {FT.FT.has_col_go(Groups.len_words(G), C, ci2, w2, 0n) == True{} : Bool},
     +hrow3: {FT.FT.gentry_ok_b(G, n, gr3, w3) == True{} : Bool},
     +h1: {Tree.member_word(w1, G) == True{} : Bool},
     +h2: {Tree.member_word(w2, G) == True{} : Bool},
@@ -766,9 +766,9 @@ def FT3.three_s1_cmp_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat,
     same: Bool, tbl: Array<U32>,
     +esame: {same == U32.is_eq(c12, c13) : Bool},
     +htbl: FT.FT.TblOk(G, C, n, tbl),
-    +hcol1: {FT.FT.has_col_go(C, ci1, w1, 0n) == True{} : Bool},
-    +hcol2: {FT.FT.has_col_go(C, ci2, w2, 0n) == True{} : Bool},
-    +hcol3: {FT.FT.has_col_go(C, ci3, w3, 0n) == True{} : Bool},
+    +hcol1: {FT.FT.has_col_go(Groups.len_words(G), C, ci1, w1, 0n) == True{} : Bool},
+    +hcol2: {FT.FT.has_col_go(Groups.len_words(G), C, ci2, w2, 0n) == True{} : Bool},
+    +hcol3: {FT.FT.has_col_go(Groups.len_words(G), C, ci3, w3, 0n) == True{} : Bool},
     +hrow2: {FT.FT.gentry_ok_b(G, n, gr2, w2) == True{} : Bool},
     +hrow3: {FT.FT.gentry_ok_b(G, n, gr3, w3) == True{} : Bool},
     +h1: {Tree.member_word(w1, G) == True{} : Bool},
@@ -846,17 +846,17 @@ def FT3.solve_three_tbl_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n: Nat
     SolveFast.solve_three_tbl(cw1, cw2, cw3, tbl)):
   match cw1 cw2 cw3:
     case SolveFast.CWord{+ci1, +gr1, +w1} SolveFast.CWord{+ci2, +gr2, +w2} SolveFast.CWord{+ci3, +gr3, +w3}:
-      +hcol1 = Logic.Proof.and_true_l(FT.FT.has_col_go(C, ci1, w1, 0n),
+      +hcol1 = Logic.Proof.and_true_l(FT.FT.has_col_go(Groups.len_words(G), C, ci1, w1, 0n),
                  FT.FT.gentry_ok_b(G, n, gr1, w1), hcw1)
-      +hrow1 = Logic.Proof.and_true_r(FT.FT.has_col_go(C, ci1, w1, 0n),
+      +hrow1 = Logic.Proof.and_true_r(FT.FT.has_col_go(Groups.len_words(G), C, ci1, w1, 0n),
                  FT.FT.gentry_ok_b(G, n, gr1, w1), hcw1)
-      +hcol2 = Logic.Proof.and_true_l(FT.FT.has_col_go(C, ci2, w2, 0n),
+      +hcol2 = Logic.Proof.and_true_l(FT.FT.has_col_go(Groups.len_words(G), C, ci2, w2, 0n),
                  FT.FT.gentry_ok_b(G, n, gr2, w2), hcw2)
-      +hrow2 = Logic.Proof.and_true_r(FT.FT.has_col_go(C, ci2, w2, 0n),
+      +hrow2 = Logic.Proof.and_true_r(FT.FT.has_col_go(Groups.len_words(G), C, ci2, w2, 0n),
                  FT.FT.gentry_ok_b(G, n, gr2, w2), hcw2)
-      +hcol3 = Logic.Proof.and_true_l(FT.FT.has_col_go(C, ci3, w3, 0n),
+      +hcol3 = Logic.Proof.and_true_l(FT.FT.has_col_go(Groups.len_words(G), C, ci3, w3, 0n),
                  FT.FT.gentry_ok_b(G, n, gr3, w3), hcw3)
-      +hrow3 = Logic.Proof.and_true_r(FT.FT.has_col_go(C, ci3, w3, 0n),
+      +hrow3 = Logic.Proof.and_true_r(FT.FT.has_col_go(Groups.len_words(G), C, ci3, w3, 0n),
                  FT.FT.gentry_ok_b(G, n, gr3, w3), hcw3)
       +h1 = FT.FT.member_of_gentry_ok(G, n, gr1, w1, hrow1)
       +h2 = FT.FT.member_of_gentry_ok(G, n, gr2, w2, hrow2)

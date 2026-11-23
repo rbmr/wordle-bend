@@ -4340,7 +4340,7 @@ def FH.hist5_one_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat
     SolveFast.hist5_one(row, cw, seen, tbl, gen, m, k, budget, skip_self)):
   match cw:
     case SolveFast.CWord{+ci, +grow, +w}:
-      +hcol = Logic.Proof.and_true_l(FT.FT.has_col_go(C, ci, w, 0n),
+      +hcol = Logic.Proof.and_true_l(FT.FT.has_col_go(Groups.len_words(G), C, ci, w, 0n),
                 FT.FT.gentry_ok_b(G, n_root, grow, w), hcw)
       FT.FT.tbl_get_use(
         r => FH.HistOneSpec(g, w, fg0, gen, budget0, skip_self, tbl,
@@ -6946,7 +6946,7 @@ def FH.fill5_one_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   match cw:
     case SolveFast.CWord{+ci, +grow, +w}:
       +cw1 : SolveFast.CWord = SolveFast.CWord{ci, grow, w}
-      +hcol = Logic.Proof.and_true_l(FT.FT.has_col_go(C, ci, w, 0n),
+      +hcol = Logic.Proof.and_true_l(FT.FT.has_col_go(Groups.len_words(G), C, ci, w, 0n),
                 FT.FT.gentry_ok_b(G, n_root, grow, w), hcw)
       FT.FT.tbl_get_use(
         r => FH.FillSpec(G, C, n_root,
@@ -9037,7 +9037,7 @@ def FH.mk_buf_tbl_depth_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +hg5: {SolveFast.all_len5(G) == True{} : Bool},
     +hc5: {SolveFast.all_len5(C) == True{} : Bool}) ->
   FH.BufOk(G, C, n, FH.mk_buf_has_depth(md), True{},
-    SolveFast.mk_buf_tbl_depth(G, C, U32.from_nat(n), md)):
+    SolveFast.mk_buf_tbl_depth(G, C, U32.from_nat(Groups.len_words(G)), md)):
   match md:
     case None{}:
       Unit{}
