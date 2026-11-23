@@ -186,7 +186,7 @@ def FOpt.cwords_to_rws_ok_if(has_buf: Bool, +G: +List<+List<Nat>>,
 def FOpt.guesses_to_rws_ok_if(has_buf: Bool, +G: +List<+List<Nat>>,
     +n_root: Nat) ->
   {FH.FH.rws_ok_if(has_buf, G, n_root,
-     FT.FT.guesses_to_rws(G, 0, U32.from_nat(n_root))) == True{} : Bool}:
+     FT.FT.guesses_to_rws(G, 0, 1)) == True{} : Bool}:
   match has_buf:
     case False{}:
       {==}
@@ -197,7 +197,8 @@ def FOpt.build_cwords_ok_if(has_buf: Bool, +G: +List<+List<Nat>>,
     +C: +List<+List<Nat>>, +n_root: Nat,
     +ai: {FO.FO.all_in_ref(C, G) == True{} : Bool}) ->
   {FH.FH.cwords_ok_if(has_buf, G, C, n_root,
-     SolveFast.build_cwords(C, G, 0, U32.from_nat(n_root))) == True{} : Bool}:
+     SolveFast.build_cwords(C, G, 0,
+       U32.from_nat(Groups.len_words(G)))) == True{} : Bool}:
   match has_buf:
     case False{}:
       {==}
@@ -5649,13 +5650,11 @@ def FOpt.root_ge3_ok(+G: +List<+List<Nat>>, +w: +List<Nat>, +w2: +List<Nat>,
      SolveFast.step_res_best(
        SolveFast.step(
          Groups.len_words(w <> (w2 <> (w3 <> t3))),
-         SolveFast.glist_of_guesses(G, 0,
-           U32.from_nat(Groups.len_words(w <> (w2 <> (w3 <> t3))))),
+         SolveFast.glist_of_guesses(G, 0, 1),
          0n, Nil{},
-         SolveFast.glist_of_guesses(G, 0,
-           U32.from_nat(Groups.len_words(w <> (w2 <> (w3 <> t3))))),
+         SolveFast.glist_of_guesses(G, 0, 1),
          SolveFast.build_cwords(w <> (w2 <> (w3 <> t3)), G, 0,
-           U32.from_nat(Groups.len_words(w <> (w2 <> (w3 <> t3))))),
+           U32.from_nat(Groups.len_words(G))),
          Groups.len_words(w <> (w2 <> (w3 <> t3))),
          SolveFast.no_dup_fast(w <> (w2 <> (w3 <> t3))),
          SolveFast.init_floor(Groups.len_words(w <> (w2 <> (w3 <> t3)))),
@@ -5678,7 +5677,7 @@ def FOpt.root_ge3_ok(+G: +List<+List<Nat>>, +w: +List<Nat>, +w2: +List<Nat>,
   +cs : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
   +p : Nat = Groups.len_words(w2 <> (w3 <> t3))
   +n : Nat = Groups.len_words(cs)
-  +stride : U32 = U32.from_nat(n)
+  +gcount : U32 = U32.from_nat(Groups.len_words(G))
   +inf : Nat = SolveRef.inf_of(n)
   +nd : Bool = SolveFast.no_dup_fast(cs)
   +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
@@ -5701,12 +5700,12 @@ def FOpt.root_ge3_ok(+G: +List<+List<Nat>>, +w: +List<Nat>, +w2: +List<Nat>,
     NatProof.Nat.is_le_lt_trans(1n, 6n, inf, {==}, h6)
   +hz : {Nat.is_lt(0n, inf) == True{} : Bool} =
     NatProof.Nat.is_le_lt_trans(0n, 6n, inf, {==}, h6)
-  +rwsG : +List<FT.FT.RowWord> = FT.FT.guesses_to_rws(G, 0, stride)
-  +cwS : +List<SolveFast.CWord> = SolveFast.build_cwords(cs, G, 0, stride)
-  +egG = FT.FT.glist_of_guesses_eq(G, 0, stride)
-  +erwsG = FT.FT.guesses_to_rws_words(G, 0, stride)
+  +rwsG : +List<FT.FT.RowWord> = FT.FT.guesses_to_rws(G, 0, 1)
+  +cwS : +List<SolveFast.CWord> = SolveFast.build_cwords(cs, G, 0, gcount)
+  +egG = FT.FT.glist_of_guesses_eq(G, 0, 1)
+  +erwsG = FT.FT.guesses_to_rws_words(G, 0, 1)
   +hrwsG = FOpt.guesses_to_rws_ok_if(has_buf, G, n)
-  +ecwS = FT.FT.build_cwords_words(cs, G, 0, stride)
+  +ecwS = FT.FT.build_cwords_words(cs, G, 0, gcount)
   +hcwS = FOpt.build_cwords_ok_if(has_buf, G, cs, n, ai)
   bounds : MV.MV.Bounds(1n+p, cs <> Nil{}) =
     Tuple{NatProof.Nat.is_le_refl(n), Unit{}}
@@ -5716,7 +5715,7 @@ def FOpt.root_ge3_ok(+G: +List<+List<Nat>>, +w: +List<Nat>, +w2: +List<Nat>,
       FOpt.all_in_next_jobs(G, cs <> Nil{}, aj),
       FOpt.nodup_ok_next_jobs(nd, G, cs <> Nil{}, nj))
   %Equal.sym(SolveFast.GList,
-     SolveFast.glist_of_guesses(G, 0, stride),
+     SolveFast.glist_of_guesses(G, 0, 1),
      FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), egG) :
     {FOpt.job_res_b(n, inf, G, cs, inf,
        SolveFast.step_res_best(
@@ -5907,14 +5906,14 @@ def FOpt.solve_valid_all_in(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             case Con{+w3, +t3}:
               +cs : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
               +n : Nat = Groups.len_words(cs)
-              +stride : U32 = U32.from_nat(n)
+              +gcount : U32 = U32.from_nat(Groups.len_words(G))
               +inf : Nat = SolveRef.inf_of(n)
               +nd : Bool = SolveFast.no_dup_fast(cs)
-              +gG : SolveFast.GList = SolveFast.glist_of_guesses(G, 0, stride)
+              +gG : SolveFast.GList = SolveFast.glist_of_guesses(G, 0, 1)
               +res : SolveRef.Best =
                 SolveFast.step_res_best(
                   SolveFast.step(n, gG, 0n, Nil{}, gG,
-                    SolveFast.build_cwords(cs, G, 0, stride), n, nd,
+                    SolveFast.build_cwords(cs, G, 0, gcount), n, nd,
                     SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n,
                     SolveFast.dummy_inf(inf), SolveFast.dummy_step_zero(),
                     False{},
@@ -6039,14 +6038,14 @@ def FOpt.solve_opt_all_in(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             case Con{+w3, +t3}:
               +cs : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
               +n : Nat = Groups.len_words(cs)
-              +stride : U32 = U32.from_nat(n)
+              +gcount : U32 = U32.from_nat(Groups.len_words(G))
               +inf : Nat = SolveRef.inf_of(n)
               +nd : Bool = SolveFast.no_dup_fast(cs)
-              +gG : SolveFast.GList = SolveFast.glist_of_guesses(G, 0, stride)
+              +gG : SolveFast.GList = SolveFast.glist_of_guesses(G, 0, 1)
               +res : SolveRef.Best =
                 SolveFast.step_res_best(
                   SolveFast.step(n, gG, 0n, Nil{}, gG,
-                    SolveFast.build_cwords(cs, G, 0, stride), n, nd,
+                    SolveFast.build_cwords(cs, G, 0, gcount), n, nd,
                     SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n,
                     SolveFast.dummy_inf(inf), SolveFast.dummy_step_zero(),
                     False{},

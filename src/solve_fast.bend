@@ -1156,53 +1156,19 @@ def find_grow(+w: +List<Nat>, +G: +List<+List<Nat>>, +stride: U32) -> U32:
   find_grow_go(w, G, 0, stride, next_word_hit(w, G))
 
 def build_cwords(+C: +List<+List<Nat>>, +G: +List<+List<Nat>>,
-                 +ci: U32, +stride: U32) -> +List<CWord>:
+                 +ci: U32, +gcount: U32) -> +List<CWord>:
   match C:
     case Nil{}:
       Nil{}
     case Con{+w, +rest}:
-      CWord{ci, find_grow(w, G, stride), w}
-      <> build_cwords(rest, G, U32.inc(ci), stride)
+      CWord{ci, find_grow(w, G, 1), w}
+      <> build_cwords(rest, G, U32.add(ci, gcount), gcount)
 
-def fill_tbl_row(+g0: Nat, +g1: Nat, +g2: Nat, +g3: Nat, +g4: Nat,
-                 +C: +List<+List<Nat>>, +idx: U32,
+# Fill one candidate's block of the table: consecutive slots from `idx`, one
+# per guess, stopping at the first guess that is not five letters.
+def fill_tbl_col(+w0: Nat, +w1: Nat, +w2: Nat, +w3: Nat, +w4: Nat,
+                 +G: +List<+List<Nat>>, +idx: U32,
                  tbl: Array<U32>) -> Array<U32>:
-  match C:
-    case Nil{}:
-      tbl
-    case Con{w, rest}:
-      match w:
-        case Nil{}:
-          tbl
-        case Con{a0, t1}:
-          match t1:
-            case Nil{}:
-              tbl
-            case Con{a1, t2}:
-              match t2:
-                case Nil{}:
-                  tbl
-                case Con{a2, t3}:
-                  match t3:
-                    case Nil{}:
-                      tbl
-                    case Con{a3, t4}:
-                      match t4:
-                        case Nil{}:
-                          tbl
-                        case Con{a4, t5}:
-                          match t5:
-                            case Nil{}:
-                              +code = feedback_code5(g0, g1, g2, g3, g4,
-                                                     a0, a1, a2, a3, a4)
-                              fill_tbl_row(g0, g1, g2, g3, g4, rest,
-                                U32.inc(idx),
-                                Array.set(U32, tbl, idx, code))
-                            case Con{_, _}:
-                              tbl
-
-def fill_tbl_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +row: U32,
-                +stride: U32, tbl: Array<U32>) -> Array<U32>:
   match G:
     case Nil{}:
       tbl
@@ -1229,19 +1195,56 @@ def fill_tbl_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +row: U32,
                         case Con{g4, t5}:
                           match t5:
                             case Nil{}:
-                              fill_tbl_go(rest, C, U32.add(row, stride), stride,
-                                fill_tbl_row(g0, g1, g2, g3, g4, C, row, tbl))
+                              +code = feedback_code5(g0, g1, g2, g3, g4,
+                                                     w0, w1, w2, w3, w4)
+                              fill_tbl_col(w0, w1, w2, w3, w4, rest,
+                                U32.inc(idx), Array.set(U32, tbl, idx, code))
+                            case Con{_, _}:
+                              tbl
+
+# Candidate-major table: candidate `ci` owns the block of `step` slots that
+# starts at `row`, so the slots of a block are consecutive.
+def fill_tbl_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +row: U32,
+                +step: U32, tbl: Array<U32>) -> Array<U32>:
+  match C:
+    case Nil{}:
+      tbl
+    case Con{w, rest}:
+      match w:
+        case Nil{}:
+          tbl
+        case Con{w0, t1}:
+          match t1:
+            case Nil{}:
+              tbl
+            case Con{w1, t2}:
+              match t2:
+                case Nil{}:
+                  tbl
+                case Con{w2, t3}:
+                  match t3:
+                    case Nil{}:
+                      tbl
+                    case Con{w3, t4}:
+                      match t4:
+                        case Nil{}:
+                          tbl
+                        case Con{w4, t5}:
+                          match t5:
+                            case Nil{}:
+                              fill_tbl_go(G, rest, U32.add(row, step), step,
+                                fill_tbl_col(w0, w1, w2, w3, w4, G, row, tbl))
                             case Con{_, _}:
                               tbl
 
 def mk_buf_tbl_depth(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-                     +stride: U32, md: Maybe<Nat>) -> Buf5:
+                     +gcount: U32, md: Maybe<Nat>) -> Buf5:
   match md:
     case None{}:
       NoBuf{}
     case Some{+d}:
       Buf5{Array.new(Nat, 10n, 0n), Array.new(+List<CWord>, 10n, Nil{}),
-           fill_tbl_go(G, C, 0, stride, Array.new(U32, d, 0)), 1n}
+           fill_tbl_go(G, C, 0, gcount, Array.new(U32, d, 0)), 1n}
 
 def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   +n: Nat) -> Buf5:
@@ -1250,7 +1253,7 @@ def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       NoBuf{}
     case True{}:
       +gl = Groups.len_words(G)
-      mk_buf_tbl_depth(G, C, U32.from_nat(n), depth_for(Nat.mul(gl, n)))
+      mk_buf_tbl_depth(G, C, U32.from_nat(gl), depth_for(Nat.mul(gl, n)))
 
 def mk_buf_tbl(+nodup: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                +n: Nat) -> Buf5:
@@ -2200,13 +2203,13 @@ def solve_fast_valid(+guesses: +List<+List<Nat>>,
             case Con{+w3, +t3}:
               +ws : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
               +n = Groups.len_words(ws)
-              +stride = U32.from_nat(n)
+              +gcount = U32.from_nat(Groups.len_words(guesses))
               +inf = SolveRef.inf_of(n)
               +nd = no_dup_fast(ws)
               +b0 = dummy_inf(inf)
               +fl = init_floor(n)
-              +gG = glist_of_guesses(guesses, 0, stride)
-              +cs = build_cwords(ws, guesses, 0, stride)
+              +gG = glist_of_guesses(guesses, 0, 1)
+              +cs = build_cwords(ws, guesses, 0, gcount)
               SolveRef.best_to_maybe(inf,
                 step_res_best(
                   step(n, gG, 0n, Nil{}, gG, cs, n, nd, fl, inf,
