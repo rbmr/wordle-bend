@@ -691,3 +691,144 @@ def CS.subc_count(+xs: +List<+List<Feedback.Color>>,
             CS.subc_count(xs, r, q, seen),
             CS.le_fold(y, r, seen, CS.newc(r, seen),
               CS.prepend(r, seen, y, CS.mem(y, seen), {==})))
+
+# ---------------------------------------------------------------------------
+# Codes of a word list
+# ---------------------------------------------------------------------------
+
+# The codes of the words of `ws` that differ from `g`, in order. The word test
+# is a boolean case (not a match) so the recursion stays structural.
+def CS.codes(+g: +List<Nat>, +ws: +List<+List<Nat>>) ->
+  +List<+List<Feedback.Color>>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case Con{w, t}:
+      Feedback.Bool.case(+List<+List<Feedback.Color>>, Feedback.word_eq(g, w),
+        CS.codes(g, t),
+        Feedback.feedback(g, w) <> CS.codes(g, t))
+
+# One step of `codes` with the word test as a parameter.
+def CS.codes_step(+g: +List<Nat>, +w: +List<Nat>,
+    +t: +List<+List<Nat>>, same: Bool) -> +List<+List<Feedback.Color>>:
+  match same:
+    case True{}:
+      CS.codes(g, t)
+    case False{}:
+      Feedback.feedback(g, w) <> CS.codes(g, t)
+
+# A code list with one code in front keeps a code subsequence.
+def CS.subc_prepend(+xs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +ys: +List<+List<Feedback.Color>>,
+    p: CS.SubC(xs, ys)) -> CS.SubC(xs, c <> ys):
+  match xs ys:
+    case Nil{} _:
+      Unit{}
+    case Con{h, t} Nil{}:
+      match p:
+    case Con{h, t} Con{y, r}:
+      Inr{p}
+
+# The same head word on both sides keeps a code subsequence.
+def CS.codes_cons_sub(+g: +List<Nat>, +w: +List<Nat>,
+    +t: +List<+List<Nat>>, +r: +List<+List<Nat>>, b: Bool,
+    p: CS.SubC(CS.codes(g, t), CS.codes(g, r))) ->
+  CS.SubC(
+    Feedback.Bool.case(+List<+List<Feedback.Color>>, b, CS.codes(g, t),
+      Feedback.feedback(g, w) <> CS.codes(g, t)),
+    Feedback.Bool.case(+List<+List<Feedback.Color>>, b, CS.codes(g, r),
+      Feedback.feedback(g, w) <> CS.codes(g, r))):
+  match b:
+    case True{}:
+      p
+    case False{}:
+      Inl{({==}, p)}
+
+# A skipped head word keeps a code subsequence.
+def CS.codes_tail_sub(+xs: +List<+List<Feedback.Color>>, +g: +List<Nat>,
+    +w: +List<Nat>, +r: +List<+List<Nat>>, b: Bool,
+    p: CS.SubC(xs, CS.codes(g, r))) ->
+  CS.SubC(xs,
+    Feedback.Bool.case(+List<+List<Feedback.Color>>, b, CS.codes(g, r),
+      Feedback.feedback(g, w) <> CS.codes(g, r))):
+  match b:
+    case True{}:
+      p
+    case False{}:
+      CS.subc_prepend(xs, Feedback.feedback(g, w), CS.codes(g, r), p)
+
+# A subclass never has more codes for the same guess.
+def CS.sub_codes(+g: +List<Nat>, +ws: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, p: Cover.Cover.Subseq(ws, S)) ->
+  CS.SubC(CS.codes(g, ws), CS.codes(g, S)):
+  match ws S:
+    case Nil{} _:
+      Unit{}
+    case Con{h, t} Nil{}:
+      match p:
+    case Con{h, t} Con{y, r}:
+      match p:
+        case Inl{q}:
+          (e, pt) = q
+          +eh : {CS.codes(g, h <> t) == CS.codes(g, y <> t)
+                 : +List<+List<Feedback.Color>>} =
+            Equal.cong(+List<Nat>, +List<+List<Feedback.Color>>,
+              x => CS.codes(g, x <> t), h, y, e)
+          %Equal.sym(+List<+List<Feedback.Color>>, CS.codes(g, y <> t),
+              CS.codes(g, h <> t), eh) :
+            CS.SubC(_, CS.codes(g, y <> r))
+          CS.codes_cons_sub(g, y, t, r, Feedback.word_eq(g, y),
+            CS.sub_codes(g, t, r, pt))
+        case Inr{q}:
+          CS.codes_tail_sub(CS.codes(g, ws), g, y, r,
+            Feedback.word_eq(g, y),
+            CS.sub_codes(g, ws, r, q))
+
+# ---------------------------------------------------------------------------
+# The count as the length of the reference group list
+# ---------------------------------------------------------------------------
+
+def CS.len_fgroups_to_groups(+fg: +List<SolveFast.FGroup>) ->
+  {List.length(&2, Groups.Group, FN.fgroups_to_groups(fg))
+   == FH.fgroups_count(fg) : Nat}:
+  match fg:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case SolveFast.FGroup{f, len, rws}:
+          +ih : {List.length(&2, Groups.Group, FN.fgroups_to_groups(rest))
+                 == FH.fgroups_count(rest) : Nat} =
+            CS.len_fgroups_to_groups(rest)
+          NatProof.NatPrf.add_succ(
+            List.length(&2, Groups.Group, FN.fgroups_to_groups(rest)),
+            FH.fgroups_count(rest))
+
+# The count is the length of the reference group list of the class.
+def CS.count_eq_build(+g: +List<Nat>, +ws: +List<+List<Nat>>) ->
+  {CK.count(g, ws)
+   == List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{})) : Nat}:
+  +e : {FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))
+        == Groups.groups_build(g, ws, Nil{}) : +List<Groups.Group>} =
+    FN.fgroups_build_eq(g, ws, Nil{})
+  +e2 : {List.length(&2, Groups.Group,
+           FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
+         == List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{}))
+         : Nat} =
+    Equal.cong(+List<Groups.Group>, Nat,
+      x => List.length(&2, Groups.Group, x),
+      FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})),
+      Groups.groups_build(g, ws, Nil{}), e)
+  +e1 : {CK.count(g, ws)
+         == List.length(&2, Groups.Group,
+              FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
+         : Nat} =
+    Equal.sym(Nat,
+      List.length(&2, Groups.Group,
+        FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))),
+      FH.fgroups_count(SolveFast.fgroups_build_fast(g, ws, Nil{})),
+      CS.len_fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
+  Equal.trans(Nat, CK.count(g, ws),
+    List.length(&2, Groups.Group,
+      FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))),
+    List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{})), e1, e2)
