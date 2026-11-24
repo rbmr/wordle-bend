@@ -1095,3 +1095,346 @@ def CS.newc_gcodes_add(+cs: +List<+List<Feedback.Color>>, +w: +List<Nat>,
    == CS.newc(cs, fb <> CS.gcodes(acc)) : Nat}:
   CS.newc_same(cs, CS.gcodes(Groups.group_add(w, fb, acc)),
     fb <> CS.gcodes(acc), CS.gcodes_add(cs, w, fb, acc))
+
+# ---------------------------------------------------------------------------
+# Adding one code to the seen list
+# ---------------------------------------------------------------------------
+
+# Implication of a disjunction on the left.
+def CS.imp_or_l(a: Bool, b: Bool, c: Bool,
+    +k1: {CS.imp(a, c) == True{} : Bool},
+    +k2: {CS.imp(b, c) == True{} : Bool}) ->
+  {CS.imp(Bool.or(a, b), c) == True{} : Bool}:
+  match a:
+    case True{}:
+      k1
+    case False{}:
+      k2
+
+def CS.mem_fe_go(+x: +List<Feedback.Color>, +d: +List<Feedback.Color>,
+    +h: +List<Feedback.Color>, +t: +List<+List<Feedback.Color>>, q: Bool,
+    +h1: {Feedback.feedback_eq(x, d) == True{} : Bool},
+    +hq: {q == Feedback.feedback_eq(d, h) : Bool},
+    +h2: {Bool.or(q, CS.mem(d, t)) == True{} : Bool},
+    k: {CS.mem(d, t) == True{} : Bool} ->
+       {CS.mem(x, t) == True{} : Bool}) ->
+  {Bool.or(Feedback.feedback_eq(x, h), CS.mem(x, t)) == True{} : Bool}:
+  match q:
+    case True{}:
+      CS.or_l_mono(Feedback.feedback_eq(x, h), CS.mem(x, t),
+        CS.fe_trans(x, d, h, h1,
+          Equal.sym(Bool, True{}, Feedback.feedback_eq(d, h), hq)))
+    case False{}:
+      CS.or_r_mono(Feedback.feedback_eq(x, h), CS.mem(x, t), k(h2))
+
+# Membership is congruent in the code.
+def CS.mem_fe(+x: +List<Feedback.Color>, +d: +List<Feedback.Color>,
+    +cs: +List<+List<Feedback.Color>>,
+    +h1: {Feedback.feedback_eq(x, d) == True{} : Bool},
+    +h2: {CS.mem(d, cs) == True{} : Bool}) ->
+  {CS.mem(x, cs) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      Empty.absurd({CS.mem(x, Nil{}) == True{} : Bool},
+        Logic.Proof.false_ne_true(h2))
+    case Con{h, t}:
+      CS.mem_fe_go(x, d, h, t, Feedback.feedback_eq(d, h), h1, {==}, h2,
+        h => CS.mem_fe(x, d, t, h1, h))
+
+def CS.mem_fe_imp(+x: +List<Feedback.Color>, +d: +List<Feedback.Color>,
+    +cs: +List<+List<Feedback.Color>>, z: Bool,
+    +eq: {z == Feedback.feedback_eq(x, d) : Bool},
+    +h2: {CS.mem(d, cs) == True{} : Bool}) ->
+  {CS.imp(z, CS.mem(x, cs)) == True{} : Bool}:
+  match z:
+    case True{}:
+      CS.mem_fe(x, d, cs,
+        Equal.sym(Bool, True{}, Feedback.feedback_eq(x, d), eq), h2)
+    case False{}:
+      {==}
+
+# A code already in the seen list adds nothing to the count.
+def CS.sub_present_l(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +seen: +List<+List<Feedback.Color>>,
+    +hm: {CS.mem(c, seen) == True{} : Bool}) ->
+  {CS.sub(cs, c <> seen, seen) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{hc, t}:
+      Logic.Proof.and_intro(CS.imp(CS.mem(hc, c <> seen), CS.mem(hc, seen)),
+        CS.sub(t, c <> seen, seen),
+        CS.imp_or_l(Feedback.feedback_eq(hc, c), CS.mem(hc, seen),
+          CS.mem(hc, seen),
+          CS.mem_fe_imp(hc, c, seen, Feedback.feedback_eq(hc, c), {==}, hm),
+          CS.or_not_self(CS.mem(hc, seen))),
+        CS.sub_present_l(t, c, seen, hm))
+
+def CS.sub_present_r(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +seen: +List<+List<Feedback.Color>>) ->
+  {CS.sub(cs, seen, c <> seen) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{hc, t}:
+      Logic.Proof.and_intro(CS.imp(CS.mem(hc, seen), CS.mem(hc, c <> seen)),
+        CS.sub(t, seen, c <> seen),
+        CS.or_absorb(Feedback.feedback_eq(hc, c), CS.mem(hc, seen)),
+        CS.sub_present_r(t, c, seen))
+
+def CS.newc_seen_mem(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +seen: +List<+List<Feedback.Color>>,
+    +hm: {CS.mem(c, seen) == True{} : Bool}) ->
+  {CS.newc(cs, c <> seen) == CS.newc(cs, seen) : Nat}:
+  CS.newc_same(cs, c <> seen, seen,
+    Logic.Proof.and_intro(CS.sub(cs, c <> seen, seen),
+      CS.sub(cs, seen, c <> seen),
+      CS.sub_present_l(cs, c, seen, hm), CS.sub_present_r(cs, c, seen)))
+
+# ---------------------------------------------------------------------------
+# The accumulator length
+# ---------------------------------------------------------------------------
+
+# One step of the accumulator length with the feedback test as a parameter.
+def CS.len_group_add_go(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+    +f: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
+    +rest: +List<Groups.Group>, q: Bool,
+    +ih: {List.length(&2, Groups.Group,
+             Groups.group_add(w, fb, rest))
+          == Nat.add(List.length(&2, Groups.Group, rest),
+               CS.one_if_not(CS.mem(fb, CS.gcodes(rest)))) : Nat}) ->
+  {List.length(&2, Groups.Group,
+     Feedback.Bool.case(+List<Groups.Group>, q,
+       Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])} <> rest,
+       Groups.Group{f, ws} <> Groups.group_add(w, fb, rest)))
+   == Nat.add(List.length(&2, Groups.Group, Groups.Group{f, ws} <> rest),
+        CS.one_if_not(Bool.or(q, CS.mem(fb, CS.gcodes(rest))))) : Nat}:
+  match q:
+    case True{}:
+      Equal.sym(Nat,
+        Nat.add(Nat.add(1n, List.length(&2, Groups.Group, rest)), 0n),
+        Nat.add(1n, List.length(&2, Groups.Group, rest)),
+        NatProof.NatPrf.add_zero(
+          Nat.add(1n, List.length(&2, Groups.Group, rest))))
+    case False{}:
+      +eih : {Nat.add(1n, List.length(&2, Groups.Group,
+                 Groups.group_add(w, fb, rest)))
+              == Nat.add(1n, Nat.add(List.length(&2, Groups.Group, rest),
+                   CS.one_if_not(CS.mem(fb, CS.gcodes(rest))))) : Nat} =
+        Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+          List.length(&2, Groups.Group, Groups.group_add(w, fb, rest)),
+          Nat.add(List.length(&2, Groups.Group, rest),
+            CS.one_if_not(CS.mem(fb, CS.gcodes(rest)))), ih)
+      Equal.trans(Nat, Nat.add(1n, List.length(&2, Groups.Group,
+          Groups.group_add(w, fb, rest))),
+        Nat.add(1n, Nat.add(List.length(&2, Groups.Group, rest),
+          CS.one_if_not(CS.mem(fb, CS.gcodes(rest))))),
+        Nat.add(Nat.add(1n, List.length(&2, Groups.Group, rest)),
+          CS.one_if_not(CS.mem(fb, CS.gcodes(rest)))),
+        eih,
+        NatProof.NatPrf.add_assoc(1n, List.length(&2, Groups.Group, rest),
+          CS.one_if_not(CS.mem(fb, CS.gcodes(rest)))))
+
+# Adding a word raises the group count by at most one, and only with a new code.
+def CS.len_group_add(+w: +List<Nat>, +fb: +List<Feedback.Color>,
+    +acc: +List<Groups.Group>) ->
+  {List.length(&2, Groups.Group, Groups.group_add(w, fb, acc))
+   == Nat.add(List.length(&2, Groups.Group, acc),
+        CS.one_if_not(CS.mem(fb, CS.gcodes(acc)))) : Nat}:
+  match acc:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          CS.len_group_add_go(w, fb, f, ws, rest,
+            Feedback.feedback_eq(fb, f), CS.len_group_add(w, fb, rest))
+
+# ---------------------------------------------------------------------------
+# The count of a class through its accumulator
+# ---------------------------------------------------------------------------
+
+# The arithmetic of one added word, with the membership test as a parameter.
+def CS.build_arith(+len: Nat, +cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +seen: +List<+List<Feedback.Color>>,
+    hit: Bool, +eh: {hit == CS.mem(c, seen) : Bool}) ->
+  {Nat.add(Nat.add(len, CS.one_if_not(hit)), CS.newc(cs, c <> seen))
+   == Nat.add(len, CS.newc_step(c, cs, seen, hit)) : Nat}:
+  match hit:
+    case True{}:
+      +en : {CS.newc(cs, c <> seen) == CS.newc(cs, seen) : Nat} =
+        CS.newc_seen_mem(cs, c, seen,
+          Equal.sym(Bool, True{}, CS.mem(c, seen), eh))
+      Equal.trans(Nat, Nat.add(Nat.add(len, 0n), CS.newc(cs, c <> seen)),
+        Nat.add(len, CS.newc(cs, c <> seen)),
+        Nat.add(len, CS.newc(cs, seen)),
+        Equal.cong(Nat, Nat, x => Nat.add(x, CS.newc(cs, c <> seen)),
+          Nat.add(len, 0n), len, NatProof.NatPrf.add_zero(len)),
+        Equal.cong(Nat, Nat, x => Nat.add(len, x),
+          CS.newc(cs, c <> seen), CS.newc(cs, seen), en))
+    case False{}:
+      NatProof.NatPrf.add_assoc(len, 1n, CS.newc(cs, c <> seen))
+
+# One word of the class, with the word test and the membership test as
+# parameters.
+def CS.build_count_go(+g: +List<Nat>, +w: +List<Nat>,
+    +t: +List<+List<Nat>>, +acc: +List<Groups.Group>, b: Bool, hit: Bool,
+    +eh: {hit == CS.mem(Feedback.feedback(g, w), CS.gcodes(acc)) : Bool},
+    +ih1: {List.length(&2, Groups.Group, Groups.groups_build(g, t, acc))
+           == Nat.add(List.length(&2, Groups.Group, acc),
+                CS.newc(CS.codes(g, t), CS.gcodes(acc))) : Nat},
+    +ih2: {List.length(&2, Groups.Group,
+             Groups.groups_build(g, t,
+               Groups.group_add(w, Feedback.feedback(g, w), acc)))
+           == Nat.add(List.length(&2, Groups.Group,
+                Groups.group_add(w, Feedback.feedback(g, w), acc)),
+                CS.newc(CS.codes(g, t),
+                  CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w),
+                    acc)))) : Nat}) ->
+  {List.length(&2, Groups.Group,
+     Feedback.Bool.case(+List<Groups.Group>, b,
+       Groups.groups_build(g, t, acc),
+       Groups.groups_build(g, t,
+         Groups.group_add(w, Feedback.feedback(g, w), acc))))
+   == Nat.add(List.length(&2, Groups.Group, acc),
+        CS.newc(Feedback.Bool.case(+List<+List<Feedback.Color>>, b,
+          CS.codes(g, t),
+          Feedback.feedback(g, w) <> CS.codes(g, t)), CS.gcodes(acc))) : Nat}:
+  match b:
+    case True{}:
+      ih1
+    case False{}:
+      +hla : {List.length(&2, Groups.Group,
+                Groups.group_add(w, Feedback.feedback(g, w), acc))
+              == Nat.add(List.length(&2, Groups.Group, acc),
+                   CS.one_if_not(hit)) : Nat} =
+        Equal.trans(Nat, List.length(&2, Groups.Group,
+            Groups.group_add(w, Feedback.feedback(g, w), acc)),
+          Nat.add(List.length(&2, Groups.Group, acc),
+            CS.one_if_not(CS.mem(Feedback.feedback(g, w), CS.gcodes(acc)))),
+          Nat.add(List.length(&2, Groups.Group, acc), CS.one_if_not(hit)),
+          CS.len_group_add(w, Feedback.feedback(g, w), acc),
+          Equal.cong(Nat, Nat,
+            x => Nat.add(List.length(&2, Groups.Group, acc), x),
+            CS.one_if_not(CS.mem(Feedback.feedback(g, w), CS.gcodes(acc))),
+            CS.one_if_not(hit),
+            Equal.cong(Bool, Nat, CS.one_if_not,
+              CS.mem(Feedback.feedback(g, w), CS.gcodes(acc)), hit,
+              Equal.sym(Bool, hit,
+                CS.mem(Feedback.feedback(g, w), CS.gcodes(acc)), eh))))
+      +hnc : {CS.newc(CS.codes(g, t),
+                CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w), acc)))
+              == CS.newc(CS.codes(g, t),
+                   Feedback.feedback(g, w) <> CS.gcodes(acc)) : Nat} =
+        CS.newc_gcodes_add(CS.codes(g, t), w, Feedback.feedback(g, w), acc)
+      +e1 : {List.length(&2, Groups.Group,
+               Groups.groups_build(g, t,
+                 Groups.group_add(w, Feedback.feedback(g, w), acc)))
+             == Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+                  CS.one_if_not(hit)),
+                  CS.newc(CS.codes(g, t),
+                    Feedback.feedback(g, w) <> CS.gcodes(acc))) : Nat} =
+        Equal.trans(Nat, List.length(&2, Groups.Group,
+            Groups.groups_build(g, t,
+              Groups.group_add(w, Feedback.feedback(g, w), acc))),
+          Nat.add(List.length(&2, Groups.Group,
+              Groups.group_add(w, Feedback.feedback(g, w), acc)),
+            CS.newc(CS.codes(g, t),
+              CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w), acc)))),
+          Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+              CS.one_if_not(hit)),
+            CS.newc(CS.codes(g, t),
+              Feedback.feedback(g, w) <> CS.gcodes(acc))),
+          ih2,
+          Equal.trans(Nat,
+            Nat.add(List.length(&2, Groups.Group,
+                Groups.group_add(w, Feedback.feedback(g, w), acc)),
+              CS.newc(CS.codes(g, t),
+                CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w), acc)))),
+            Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+                CS.one_if_not(hit)),
+              CS.newc(CS.codes(g, t),
+                CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w), acc)))),
+            Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+                CS.one_if_not(hit)),
+              CS.newc(CS.codes(g, t),
+                Feedback.feedback(g, w) <> CS.gcodes(acc))),
+            Equal.cong(Nat, Nat,
+              x => Nat.add(x, CS.newc(CS.codes(g, t),
+                     CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w),
+                       acc)))),
+              List.length(&2, Groups.Group,
+                Groups.group_add(w, Feedback.feedback(g, w), acc)),
+              Nat.add(List.length(&2, Groups.Group, acc), CS.one_if_not(hit)),
+              hla),
+            Equal.cong(Nat, Nat,
+              x => Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+                     CS.one_if_not(hit)), x),
+              CS.newc(CS.codes(g, t),
+                CS.gcodes(Groups.group_add(w, Feedback.feedback(g, w), acc))),
+              CS.newc(CS.codes(g, t),
+                Feedback.feedback(g, w) <> CS.gcodes(acc)),
+              hnc)))
+      Equal.trans(Nat, List.length(&2, Groups.Group,
+          Groups.groups_build(g, t,
+            Groups.group_add(w, Feedback.feedback(g, w), acc))),
+        Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+            CS.one_if_not(hit)),
+          CS.newc(CS.codes(g, t),
+            Feedback.feedback(g, w) <> CS.gcodes(acc))),
+        Nat.add(List.length(&2, Groups.Group, acc),
+          CS.newc(Feedback.feedback(g, w) <> CS.codes(g, t), CS.gcodes(acc))),
+        e1,
+        Equal.trans(Nat,
+          Nat.add(Nat.add(List.length(&2, Groups.Group, acc),
+              CS.one_if_not(hit)),
+            CS.newc(CS.codes(g, t),
+              Feedback.feedback(g, w) <> CS.gcodes(acc))),
+          Nat.add(List.length(&2, Groups.Group, acc),
+            CS.newc_step(Feedback.feedback(g, w), CS.codes(g, t),
+              CS.gcodes(acc), hit)),
+          Nat.add(List.length(&2, Groups.Group, acc),
+            CS.newc(Feedback.feedback(g, w) <> CS.codes(g, t), CS.gcodes(acc))),
+          CS.build_arith(List.length(&2, Groups.Group, acc), CS.codes(g, t),
+            Feedback.feedback(g, w), CS.gcodes(acc), hit, eh),
+          Equal.cong(Nat, Nat,
+            x => Nat.add(List.length(&2, Groups.Group, acc), x),
+            CS.newc_step(Feedback.feedback(g, w), CS.codes(g, t),
+              CS.gcodes(acc), hit),
+            CS.newc(Feedback.feedback(g, w) <> CS.codes(g, t), CS.gcodes(acc)),
+            Equal.trans(Nat,
+              CS.newc_step(Feedback.feedback(g, w), CS.codes(g, t),
+                CS.gcodes(acc), hit),
+              CS.newc_step(Feedback.feedback(g, w), CS.codes(g, t),
+                CS.gcodes(acc), CS.mem(Feedback.feedback(g, w), CS.gcodes(acc))),
+              CS.newc(Feedback.feedback(g, w) <> CS.codes(g, t), CS.gcodes(acc)),
+              Equal.cong(Bool, Nat,
+                x => CS.newc_step(Feedback.feedback(g, w), CS.codes(g, t),
+                  CS.gcodes(acc), x),
+                hit, CS.mem(Feedback.feedback(g, w), CS.gcodes(acc)), eh),
+              Equal.sym(Nat,
+                CS.newc(Feedback.feedback(g, w) <> CS.codes(g, t),
+                  CS.gcodes(acc)),
+                CS.newc_step(Feedback.feedback(g, w), CS.codes(g, t),
+                  CS.gcodes(acc),
+                  CS.mem(Feedback.feedback(g, w), CS.gcodes(acc))),
+                CS.newc_unfold(Feedback.feedback(g, w), CS.codes(g, t),
+                  CS.gcodes(acc)))))))
+
+# The group count of a class is the accumulated count plus the new codes.
+def CS.build_count(+g: +List<Nat>, +ws: +List<+List<Nat>>,
+    +acc: +List<Groups.Group>) ->
+  {List.length(&2, Groups.Group, Groups.groups_build(g, ws, acc))
+   == Nat.add(List.length(&2, Groups.Group, acc),
+        CS.newc(CS.codes(g, ws), CS.gcodes(acc))) : Nat}:
+  match ws:
+    case Nil{}:
+      Equal.sym(Nat, Nat.add(List.length(&2, Groups.Group, acc), 0n),
+        List.length(&2, Groups.Group, acc),
+        NatProof.NatPrf.add_zero(List.length(&2, Groups.Group, acc)))
+    case Con{w, t}:
+      CS.build_count_go(g, w, t, acc, Feedback.word_eq(g, w),
+        CS.mem(Feedback.feedback(g, w), CS.gcodes(acc)), {==},
+        CS.build_count(g, t, acc),
+        CS.build_count(g, t,
+          Groups.group_add(w, Feedback.feedback(g, w), acc)))
