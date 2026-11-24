@@ -2538,6 +2538,84 @@ def LBS.capbound_le_one(+n: Nat, +k: Nat,
         Equal.sym(Nat, Cap.LB.capbound(1n+np, k), 1n, eb),
         CB.CB.is_le_add_self_r(1n, np))
 
+# A child-cost sum with both branches of the guess test equal is zero.
+def LBS.case_zero(b: Bool) ->
+  {Feedback.Bool.case(Nat, b, 0n, 0n) == 0n : Nat}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+# One candidate's contribution at a node without children is zero: a leaf
+# either ends the candidate or looks nothing up.
+def LBS.kid_cost_nil(+g: +List<Nat>, +w: +List<Nat>) ->
+  {NodeCost.NodeCost.kid_cost(g, Nil{}, w) == 0n : Nat}:
+  LBS.case_zero(Feedback.word_eq(g, w))
+
+# A node without children adds nothing to the candidate costs.
+def LBS.kid_sum_nil(+g: +List<Nat>, +S: +List<+List<Nat>>) ->
+  {NodeCost.NodeCost.kid_sum(g, Nil{}, S) == 0n : Nat}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{+w, +t}:
+      +ekc : {NodeCost.NodeCost.kid_cost(g, Nil{}, w) == 0n : Nat} =
+        LBS.kid_cost_nil(g, w)
+      +ih : {NodeCost.NodeCost.kid_sum(g, Nil{}, t) == 0n : Nat} =
+        LBS.kid_sum_nil(g, t)
+      +e1 : {Nat.add(NodeCost.NodeCost.kid_cost(g, Nil{}, w),
+                    NodeCost.NodeCost.kid_sum(g, Nil{}, t))
+             == Nat.add(0n, NodeCost.NodeCost.kid_sum(g, Nil{}, t)) : Nat} =
+        Equal.cong(Nat, Nat,
+          y => Nat.add(y, NodeCost.NodeCost.kid_sum(g, Nil{}, t)),
+          NodeCost.NodeCost.kid_cost(g, Nil{}, w), 0n, ekc)
+      +e2 : {Nat.add(0n, NodeCost.NodeCost.kid_sum(g, Nil{}, t))
+             == Nat.add(0n, 0n) : Nat} =
+        Equal.cong(Nat, Nat, y => Nat.add(0n, y),
+          NodeCost.NodeCost.kid_sum(g, Nil{}, t), 0n, ih)
+      Equal.trans(Nat,
+        Nat.add(NodeCost.NodeCost.kid_cost(g, Nil{}, w),
+          NodeCost.NodeCost.kid_sum(g, Nil{}, t)),
+        Nat.add(0n, NodeCost.NodeCost.kid_sum(g, Nil{}, t)), 0n,
+        e1, Equal.trans(Nat,
+          Nat.add(0n, NodeCost.NodeCost.kid_sum(g, Nil{}, t)),
+          Nat.add(0n, 0n), 0n, e2, {==}))
+
+# The depth facts in boolean form. The result is `Bool`, so a proof that it is
+# true is reusable, while `Tree.AllHaveDepth` is affine and can be consumed only
+# once per traversal.
+def LBS.adb(+t: Tree.Tree, +S: +List<+List<Nat>>) -> Bool:
+  match S:
+    case Nil{}:
+      True{}
+    case Con{+w, +tl}:
+      Bool.and(Maybe.is_some(&1, Nat, Tree.depth(t, w)), LBS.adb(t, tl))
+
+# The affine depth facts give the reusable boolean form.
+def LBS.adb_of_ad(+t: Tree.Tree, +S: +List<+List<Nat>>,
+    ad: Tree.AllHaveDepth(t, S)) -> {LBS.adb(t, S) == True{} : Bool}:
+  match S:
+    case Nil{}:
+      {==}
+    case Con{+w, +tl}:
+      (sh, st) = ad
+      Logic.Proof.and_intro(Maybe.is_some(&1, Nat, Tree.depth(t, w)),
+        LBS.adb(t, tl), sh, LBS.adb_of_ad(t, tl, st))
+
+# One more copy of the affine depth facts from the reusable boolean form.
+def LBS.ad_of_adb(+t: Tree.Tree, +S: +List<+List<Nat>>,
+    +h: {LBS.adb(t, S) == True{} : Bool}) -> Tree.AllHaveDepth(t, S):
+  match S:
+    case Nil{}:
+      Unit{}
+    case Con{+w, +tl}:
+      (Logic.Proof.and_true_l(Maybe.is_some(&1, Nat, Tree.depth(t, w)),
+         LBS.adb(t, tl), h),
+       LBS.ad_of_adb(t, tl,
+         Logic.Proof.and_true_r(Maybe.is_some(&1, Nat, Tree.depth(t, w)),
+           LBS.adb(t, tl), h)))
+
 # The bound of a node, as a value.
 def LBS.NodeVal(+g: +List<Nat>, +kids: +List<Tree.Child>, +k: Nat) -> Type:
   @S: +List<+List<Nat>> -> @nd: {Nat.is_le(Twice.LB.maxMult(S), 1n) == True{} : Bool}
@@ -2545,71 +2623,53 @@ def LBS.NodeVal(+g: +List<Nat>, +kids: +List<Tree.Child>, +k: Nat) -> Type:
   -> {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, S), k),
                 Tree.cost(Tree.Node{g, kids}, S)) == True{} : Bool}
 
-# The node's bound, from its children's class bounds.
-def LBS.node_bound(+g: +List<Nat>, +kids: +List<Tree.Child>,
-    +k: Nat, kv: LBS.KidVal(k, kids), w: LBS.Wid(Tree.Node{g, kids}, k)) ->
-  LBS.NodeVal(g, kids, k):
-  match kids:
-    case Nil{}:
-      S => nd => ad =>
-        +n : Nat = List.length(&2, +List<Nat>, S)
-        +hrem2 : {Nat.is_le(n, 1n) == True{} : Bool} =
-          LBS.len_rem_le_one(g, Nil{}, S, nd, ad)
-        +hcap : {Nat.is_le(Cap.LB.capbound(n, k), n) == True{} : Bool} =
-          LBS.capbound_le_one(n, k, hrem2)
-        +ec : {Tree.cost(Tree.Node{g, Nil{}}, S) == n : Nat} =
-          Equal.trans(Nat, Tree.cost(Tree.Node{g, Nil{}}, S),
-            Nat.add(n, NodeCost.NodeCost.kid_sum(g, Nil{}, S)), n,
-            NodeCost.NodeCost.cost_node(g, Nil{}, S, ad),
-            NatProof.NatPrf.add_zero(n))
-        NatProof.Nat.is_le_eq_r(Cap.LB.capbound(n, k), n,
-          Tree.cost(Tree.Node{g, Nil{}}, S), Equal.sym(Nat,
-            Tree.cost(Tree.Node{g, Nil{}}, S), n, ec), hcap)
-    case Con{c, rest}:
-      match c:
-        case Tree.Child{f, t}:
-          LBS.node_bound_cons(g, f, t, rest, k, kv, w)
-
 def LBS.node_bound_cons(+g: +List<Nat>, +f: +List<Feedback.Color>, +t: Tree.Tree,
     +rest: +List<Tree.Child>, +k: Nat,
     kv: LBS.KidVal(k, Tree.Child{f, t} <> rest),
-    w: LBS.Wid(Tree.Node{g, Tree.Child{f, t} <> rest}, k)) ->
+    +wlen: {Nat.is_le(List.length(&2, Tree.Child, Tree.Child{f, t} <> rest), k)
+            == True{} : Bool}) ->
   LBS.NodeVal(g, Tree.Child{f, t} <> rest, k):
   (kh, kt) = kv
-  (wlen, wkids) = w
   S => nd => ad =>
+            +S2 : +List<+List<Nat>> = S
+            +nd2 : {Nat.is_le(Twice.LB.maxMult(S2), 1n) == True{} : Bool} = nd
+            +adb : {LBS.adb(Tree.Node{g, Tree.Child{f, t} <> rest}, S2)
+                    == True{} : Bool} =
+              LBS.adb_of_ad(Tree.Node{g, Tree.Child{f, t} <> rest}, S2, ad)
             +hk : {Nat.is_le(1n, k) == True{} : Bool} =
               NatProof.Nat.is_le_trans(1n,
                 List.length(&2, Tree.Child, Tree.Child{f, t} <> rest), k,
-                NatProof.Nat.is_le_of_lt(0n, List.length(&2, Tree.Child, rest),
-                  NatProof.Nat.is_lt_succ_self(List.length(&2, Tree.Child, rest))),
+                NatProof.Nat.is_le_succ(0n, List.length(&2, Tree.Child, rest),
+                  NatProof.Nat.is_le_zero_l(List.length(&2, Tree.Child, rest))),
                 wlen)
-            +n : Nat = List.length(&2, +List<Nat>, S)
-            +ns : +List<Nat> = LBS.sizes(g, Tree.Child{f, t} <> rest, S)
+            +n : Nat = List.length(&2, +List<Nat>, S2)
+            +ns : +List<Nat> = LBS.sizes(g, Tree.Child{f, t} <> rest, S2)
             +hcls : {Nat.is_le(LBS.capKidSum(ns, k),
-                               NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S))
+                               NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S2))
                      == True{} : Bool} =
               LBS.cls_sum(g, Tree.Child{f, t} <> rest, Tree.Child{f, t} <> rest,
-                Nil{}, S, S, k, hk, {==}, {==}, kv, ad, nd)
+                Nil{}, S2, S2, k, hk, {==}, {==}, (kh, kt),
+                LBS.ad_of_adb(Tree.Node{g, Tree.Child{f, t} <> rest}, S2, adb), nd2)
             +lrem : Nat =
-              List.length(&2, +List<Nat>, Part.LB.rem(g, Tree.Child{f, t} <> rest, S))
+              List.length(&2, +List<Nat>, Part.LB.rem(g, Tree.Child{f, t} <> rest, S2))
             +hrem : {Nat.is_le(lrem, 1n) == True{} : Bool} =
-              LBS.len_rem_le_one(g, Tree.Child{f, t} <> rest, S, nd, ad)
+              LBS.len_rem_le_one(g, Tree.Child{f, t} <> rest, S2, nd2,
+                LBS.ad_of_adb(Tree.Node{g, Tree.Child{f, t} <> rest}, S2, adb))
             +etot : {n == Nat.add(Part.LB.totSize(
-                         Part.LB.classes(g, Tree.Child{f, t} <> rest, S)), lrem) : Nat} =
-              Part.LB.totSize_split(g, Tree.Child{f, t} <> rest, S)
-            +esum : {Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S))
+                         Part.LB.classes(g, Tree.Child{f, t} <> rest, S2)), lrem) : Nat} =
+              Part.LB.totSize_split(g, Tree.Child{f, t} <> rest, S2)
+            +esum : {Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S2))
                      == CB.CB.sum(ns) : Nat} =
               Equal.sym(Nat, CB.CB.sum(ns),
-                Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S)),
-                LBS.sizes_tot(g, Tree.Child{f, t} <> rest, S))
+                Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S2)),
+                LBS.sizes_tot(g, Tree.Child{f, t} <> rest, S2))
             +e : {n == Nat.add(CB.CB.sum(ns), lrem) : Nat} =
               Equal.trans(Nat, n,
                 Nat.add(Part.LB.totSize(
-                  Part.LB.classes(g, Tree.Child{f, t} <> rest, S)), lrem),
+                  Part.LB.classes(g, Tree.Child{f, t} <> rest, S2)), lrem),
                 Nat.add(CB.CB.sum(ns), lrem), etot,
                 Equal.cong(Nat, Nat, y => Nat.add(y, lrem),
-                  Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S)),
+                  Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S2)),
                   CB.CB.sum(ns), esum))
             +hle : {Nat.is_le(n, Nat.add(CB.CB.sum(ns), 1n)) == True{} : Bool} =
               NatProof.Nat.is_le_eq_l(Nat.add(CB.CB.sum(ns), 1n),
@@ -2618,34 +2678,73 @@ def LBS.node_bound_cons(+g: +List<Nat>, +f: +List<Feedback.Color>, +t: Tree.Tree
                 CB.CB.is_le_add(CB.CB.sum(ns), CB.CB.sum(ns), lrem, 1n,
                   NatProof.Nat.is_le_refl(CB.CB.sum(ns)), hrem))
             +hlen : {Nat.is_le(List.length(&2, Nat, ns), k) == True{} : Bool} =
-              NatProof.Nat.is_le_eq_l(
+              NatProof.Nat.is_le_eq_l(k,
                 List.length(&2, Tree.Child, Tree.Child{f, t} <> rest),
-                List.length(&2, Nat, ns), k,
+                List.length(&2, Nat, ns),
                 Equal.sym(Nat, List.length(&2, Nat, ns),
                   List.length(&2, Tree.Child, Tree.Child{f, t} <> rest),
-                  LBS.sizes_len(g, Tree.Child{f, t} <> rest, S)),
+                  LBS.sizes_len(g, Tree.Child{f, t} <> rest, S2)),
                 wlen)
             +hnum : {Nat.is_le(Cap.LB.capSum(n, k, n, 1n), LBS.capKidSum(ns, k))
                      == True{} : Bool} =
               LBS.cap_num(n, ns, k, hk, hle, hlen)
-            +hnode : {Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S)
+            +hnode : {Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S2)
                       == Nat.add(n, NodeCost.NodeCost.kid_sum(
-                           g, Tree.Child{f, t} <> rest, S)) : Nat} =
-              NodeCost.NodeCost.cost_node(g, Tree.Child{f, t} <> rest, S, ad)
+                           g, Tree.Child{f, t} <> rest, S2)) : Nat} =
+              NodeCost.NodeCost.cost_node(g, Tree.Child{f, t} <> rest, S2,
+                LBS.ad_of_adb(Tree.Node{g, Tree.Child{f, t} <> rest}, S2, adb))
             +hsum : {Nat.is_le(Nat.add(n, Cap.LB.capSum(n, k, n, 1n)),
                        Nat.add(n, NodeCost.NodeCost.kid_sum(
-                         g, Tree.Child{f, t} <> rest, S))) == True{} : Bool} =
+                         g, Tree.Child{f, t} <> rest, S2))) == True{} : Bool} =
               CB.CB.is_le_add(n, n, Cap.LB.capSum(n, k, n, 1n),
-                NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S),
+                NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S2),
                 NatProof.Nat.is_le_refl(n),
                 NatProof.Nat.is_le_trans(Cap.LB.capSum(n, k, n, 1n),
                   LBS.capKidSum(ns, k),
-                  NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S),
+                  NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S2),
                   hnum, hcls))
             NatProof.Nat.is_le_eq_r(Nat.add(n, Cap.LB.capSum(n, k, n, 1n)),
-              Nat.add(n, NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S)),
-              Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S),
-              Equal.sym(Nat, Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S),
+              Nat.add(n, NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S2)),
+              Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S2),
+              Equal.sym(Nat, Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S2),
                 Nat.add(n, NodeCost.NodeCost.kid_sum(
-                  g, Tree.Child{f, t} <> rest, S)), hnode),
+                  g, Tree.Child{f, t} <> rest, S2)), hnode),
               hsum)
+
+# The node's bound, from its children's class bounds.
+def LBS.node_bound(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +k: Nat, kv: LBS.KidVal(k, kids),
+    +wlen: {Nat.is_le(List.length(&2, Tree.Child, kids), k) == True{} : Bool}) ->
+  LBS.NodeVal(g, kids, k):
+  match kids:
+    case Nil{}:
+      S => nd => ad =>
+        +S2 : +List<+List<Nat>> = S
+        +nd2 : {Nat.is_le(Twice.LB.maxMult(S2), 1n) == True{} : Bool} = nd
+        +adb : {LBS.adb(Tree.Node{g, Nil{}}, S2) == True{} : Bool} =
+          LBS.adb_of_ad(Tree.Node{g, Nil{}}, S2, ad)
+        +n : Nat = List.length(&2, +List<Nat>, S2)
+        +hrem2 : {Nat.is_le(n, 1n) == True{} : Bool} =
+          LBS.len_rem_le_one(g, Nil{}, S2, nd2,
+            LBS.ad_of_adb(Tree.Node{g, Nil{}}, S2, adb))
+        +hcap : {Nat.is_le(Cap.LB.capbound(n, k), n) == True{} : Bool} =
+          LBS.capbound_le_one(n, k, hrem2)
+        +ec : {Tree.cost(Tree.Node{g, Nil{}}, S2) == n : Nat} =
+          Equal.trans(Nat, Tree.cost(Tree.Node{g, Nil{}}, S2),
+            Nat.add(n, NodeCost.NodeCost.kid_sum(g, Nil{}, S2)), n,
+            NodeCost.NodeCost.cost_node(g, Nil{}, S2,
+              LBS.ad_of_adb(Tree.Node{g, Nil{}}, S2, adb)),
+            Equal.trans(Nat,
+              Nat.add(n, NodeCost.NodeCost.kid_sum(g, Nil{}, S2)),
+              Nat.add(n, 0n), n,
+              Equal.cong(Nat, Nat, y => Nat.add(n, y),
+                NodeCost.NodeCost.kid_sum(g, Nil{}, S2), 0n,
+                LBS.kid_sum_nil(g, S2)),
+              NatProof.NatPrf.add_zero(n)))
+        NatProof.Nat.is_le_eq_r(Cap.LB.capbound(n, k), n,
+          Tree.cost(Tree.Node{g, Nil{}}, S2), Equal.sym(Nat,
+            Tree.cost(Tree.Node{g, Nil{}}, S2), n, ec), hcap)
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          LBS.node_bound_cons(g, f, t, rest, k, kv, wlen)
