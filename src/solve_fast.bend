@@ -295,71 +295,6 @@ def cap_go(+rem: Nat, +n: Nat, +k: Nat, +cap: Nat, +acc: Nat) -> Nat:
 def capbound(+n: Nat, +k: Nat) -> Nat:
   Nat.add(n, cap_go(n, n, k, 1n, 0n))
 
-type CKState is Type:
-  CKState{seen: Array<Nat>, tbl: Array<U32>, c: Nat}
-
-type CKRes is Type:
-  CKRes{seen: Array<Nat>, tbl: Array<U32>, k: Nat}
-
-# One member counted: `same` says the code was already stamped for this guess.
-def ck_hit(+c: Nat, +gen: Nat, tbl: Array<U32>, seen2: Array<Nat>,
-           same: Bool) -> CKState:
-  match same:
-    case True{}:
-      CKState{seen2, tbl, c}
-    case False{}:
-      CKState{seen2, tbl, Nat.add(1n, c)}
-
-def ck_swap(+c: Nat, +gen: Nat, tbl: Array<U32>,
-            r: Array<Nat> & Nat) -> CKState:
-  (seen2, +old) = r
-  ck_hit(c, gen, tbl, seen2, Nat.is_eq(old, gen))
-
-def ck_get(+c: Nat, +gen: Nat, seen: Array<Nat>,
-           r: Array<U32> & U32) -> CKState:
-  (tbl2, +code) = r
-  ck_swap(c, gen, tbl2, Array.swap(Nat, seen, code, gen))
-
-def ck_one(+g: U32, +gen: Nat, +c: Nat, tbl: Array<U32>, seen: Array<Nat>,
-           +cw: CWord) -> CKState:
-  match cw:
-    case CWord{+ci, grow, w}:
-      ck_get(c, gen, seen, Array.get(U32, tbl, U32.add(ci, g)))
-
-# Fold the class members once per guess, restarting on `ws` for the next
-# guess until `fuel` runs out or `stop` says `kmax` reached `m`.
-def ck_go(+fuel: Nat, stop: Bool, +ws_cur: +List<CWord>, +ws: +List<CWord>,
-          +m: Nat, +kmax: Nat, +g: U32, +gen: Nat, st: CKState) -> CKRes:
-  match fuel:
-    case 0n:
-      match st:
-        case CKState{seen, tbl, c}:
-          CKRes{seen, tbl, kmax}
-    case 1n+p:
-      match stop:
-        case True{}:
-          match st:
-            case CKState{seen, tbl, c}:
-              CKRes{seen, tbl, kmax}
-        case False{}:
-          match ws_cur:
-            case Nil{}:
-              match st:
-                case CKState{seen, tbl, c}:
-                  +k2 = Nat.max(kmax, c)
-                  ck_go(p, Nat.is_le(m, k2), ws, ws, m, k2, U32.inc(g),
-                        Nat.add(1n, gen), CKState{seen, tbl, 0n})
-            case Con{cw, rest}:
-              match st:
-                case CKState{seen, tbl, +c}:
-                  ck_go(p, stop, rest, ws, m, kmax, g, gen,
-                        ck_one(g, gen, c, tbl, seen, cw))
-
-def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
-                  tbl: Array<U32>) -> CKRes:
-  ck_go(Nat.mul(gn, Nat.add(1n, m)), False{}, ws, ws, m, 0n, 0, 1n,
-        CKState{Array.new(Nat, 10n, 0n), tbl, 0n})
-
 # The sum of class lower bounds over a class list.
 def class_words(+groups: +List<Groups.Group>) -> Nat:
   match groups:
@@ -1695,6 +1630,46 @@ def drain5_go(+gn: Nat, +touched: +List<U32>, st: Drain5State) -> Drain5State:
           drain5_go(gn, rest,
             drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<CWord>, buckets, code, Nil{})))
+
+type CKRes is Type:
+  CKRes{seen: Array<Nat>, tbl: Array<U32>, k: Nat}
+
+# One pass over the class per guess, reusing the proven histogram fold: the
+# `k` of a `Hist5Ok` is the number of distinct feedback codes of that guess on
+# the class. `stop` ends the scan early once `kmax` reaches the class length.
+def ck_loop(+fuel: Nat, stop: Bool, +i: Nat, +C: +List<CWord>, +gen: Nat,
+            +m: Nat, +kmax: Nat, hist: Hist5Res) -> CKRes:
+  match fuel:
+    case 0n:
+      match hist:
+        case Hist5Pruned{seen2, tbl2}:
+          CKRes{seen2, tbl2, kmax}
+        case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
+          CKRes{seen2, tbl2, Nat.max(kmax, k2)}
+    case 1n+p:
+      match stop:
+        case True{}:
+          match hist:
+            case Hist5Pruned{seen2, tbl2}:
+              CKRes{seen2, tbl2, kmax}
+            case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
+              CKRes{seen2, tbl2, Nat.max(kmax, k2)}
+        case False{}:
+          match hist:
+            case Hist5Pruned{seen2, tbl2}:
+              CKRes{seen2, tbl2, kmax}
+            case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
+              +k3 = Nat.max(kmax, k2)
+              ck_loop(p, Bool.or(Nat.is_le(m, k3), Nat.is_le(m, k2)),
+                Nat.add(1n, i), C, Nat.add(1n, gen), m, k3,
+                hist5_go(U32.from_nat(Nat.add(1n, i)), C, Nat.add(1n, gen),
+                  False{}, Hist5Ok{seen2, tbl2, 0n, 0n, m}))
+
+def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
+                  tbl: Array<U32>) -> CKRes:
+  seen = Array.new(Nat, 10n, 0n)
+  ck_loop(gn, Bool.or(Nat.is_le(gn, 0n), Nat.is_le(m, 0n)), 0n, ws, 1n, m,
+    0n, hist5_go(0, ws, 1n, False{}, Hist5Ok{seen, tbl, 0n, 0n, m}))
 
 def bigs_total(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
   match bigs:
