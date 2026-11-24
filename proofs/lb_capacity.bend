@@ -18,7 +18,8 @@
 # The soundness statement, `cost(T, S) >= capbound(|S|, k)` for a valid tree
 # with no duplicate candidates whose nodes have at most `k` children, needs the
 # feedback classes of every node and the candidate count each level of the tree
-# can hold. It is recorded as an open goal in `docs/proofs.md`.
+# can hold. It is proved in `lb_capacity_sound.bend` as
+# `LB.capbound_sound`.
 import Base
 import ../src/tree.bend as Tree
 import ../src/feedback.bend as Feedback
