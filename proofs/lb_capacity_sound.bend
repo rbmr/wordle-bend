@@ -2748,3 +2748,45 @@ def LBS.node_bound(+g: +List<Nat>, +kids: +List<Tree.Child>,
       match c:
         case Tree.Child{f, t}:
           LBS.node_bound_cons(g, f, t, rest, k, kv, wlen)
+
+# Every child in a list has the bound, by structural recursion. The child's
+# own children are handled by the same recursion, so the tree induction is
+# carried by this one definition, in the style of the cover lemma.
+def LBS.kid_all(+k: Nat, +kids: +List<Tree.Child>, w: LBS.WidKids(kids, k)) ->
+  LBS.KidVal(k, kids):
+  match kids:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          match t:
+            case Tree.Node{g, ckids}:
+              (wh, wt) = w
+              (wlen, wkids) = wh
+              ((S => nd => ad =>
+                  LBS.node_bound(g, ckids, k,
+                    LBS.kid_all(k, ckids, wkids), wlen)(S, nd, ad)),
+               LBS.kid_all(k, rest, wt))
+
+# The capacity bound holds for every tree whose nodes have at most `k`
+# children: a valid tree costs at least `capbound(|S|, k)` on a candidate list
+# `S` without duplicates.
+def LBS.cap_t(+k: Nat, t: Tree.Tree, w: LBS.Wid(t, k)) -> LBS.CapT(k, t):
+  match t:
+    case Tree.Node{+g, +kids}:
+      (wlen, wkids) = w
+      S => nd => ad =>
+        LBS.node_bound(g, kids, k, LBS.kid_all(k, kids, wkids), wlen)(S, nd, ad)
+
+# The capacity bound is a lower bound on the cost of a valid tree: when no
+# candidate occurs twice and every node of the tree has at most `k` children,
+# the tree costs at least `capbound(|S|, k)`.
+def LB.capbound_sound(t: Tree.Tree, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +k: Nat, w: LBS.Wid(t, k),
+    v: Tree.Valid(t, G, S),
+    +nd: {Nat.is_le(Twice.LB.maxMult(S), 1n) == True{} : Bool}) ->
+  {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, S), k),
+             Tree.cost(t, S)) == True{} : Bool}:
+  (ti, ad) = v
+  LBS.cap_t(k, t, w)(S, nd, ad)
