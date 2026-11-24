@@ -1511,7 +1511,8 @@ def emit_bigs(+bs: +List<BigClass>, +rem_lb: Nat, +acc: +List<Item>) -> +List<It
     case Con{bc, rest}:
       match bc:
         case BigClass{+fb, +ws, +len, +clb}:
-          emit_bigs(rest, Nat.add(clb, rem_lb),
+          +clb2 = Nat.sub(Nat.add(len, len), 1n)
+          emit_bigs(rest, Nat.add(clb2, rem_lb),
             ClassItem{fb, ws, len, rem_lb} <> (Add{fb, rem_lb} <> acc))
 
 def two_tree(+w1: +List<Nat>, +w2: +List<Nat>) -> Tree.Tree:
@@ -1618,34 +1619,32 @@ def solve_three_tbl(+cw1: CWord, +cw2: CWord, +cw3: CWord,
 
 type Drain5State is Type:
   Drain5State{buckets: Array<+List<CWord>>, tbl: Array<U32>, rem_lb: Nat,
-              items: +List<Item>, bigs: +List<BigClass>, gn: Nat}
+              items: +List<Item>, bigs: +List<BigClass>}
 
 def drain5_ge2_emit(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                     +items: +List<Item>, +bigs: +List<BigClass>,
                     buckets: Array<+List<CWord>>, tbl: Array<U32>,
-                    +len: Nat, +ws: +List<CWord>, +clb: Nat,
-                    +gn: Nat) -> Drain5State:
+                    +len: Nat, +ws: +List<CWord>, +clb: Nat) -> Drain5State:
   Drain5State{buckets, tbl, rem_lb, items,
-    insert_big(BigClass{fb, ws, len, clb}, len, bigs, next_big_le(len, bigs)),
-    gn}
+    insert_big(BigClass{fb, ws, len, clb}, len, bigs, next_big_le(len, bigs))}
 
 def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                    +items: +List<Item>, +bigs: +List<BigClass>,
                    buckets: Array<+List<CWord>>, tbl: Array<U32>,
-                   +gn: Nat, rl: RevCWordsLen) -> Drain5State:
+                   rl: RevCWordsLen) -> Drain5State:
   match rl:
     case RevCWordsLen{+len, +ws}:
       drain5_ge2_emit(fb, rem_lb, items, bigs, buckets, tbl, len, ws,
-        Nat.sub(Nat.add(len, len), 1n), gn)
+        Nat.sub(Nat.add(len, len), 1n))
 
 def drain5_add_three(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                      +items: +List<Item>, +bigs: +List<BigClass>,
-                     buckets: Array<+List<CWord>>, +gn: Nat,
+                     buckets: Array<+List<CWord>>,
                      tr: ThreeRes) -> Drain5State:
   match tr:
     case ThreeRes{tree, +cost, tbl2}:
       Drain5State{buckets, tbl2, Nat.add(cost, rem_lb),
-        DoneItem{fb, tree, cost} <> items, bigs, gn}
+        DoneItem{fb, tree, cost} <> items, bigs}
 
 def cword_w(+cw: CWord) -> +List<Nat>:
   match cw:
@@ -1654,48 +1653,47 @@ def cword_w(+cw: CWord) -> +List<Nat>:
 
 def drain5_add(+code: U32, +rem_lb: Nat, +items: +List<Item>,
                +bigs: +List<BigClass>, buckets: Array<+List<CWord>>,
-               tbl: Array<U32>, +gn: Nat, +rws: +List<CWord>) -> Drain5State:
+               tbl: Array<U32>, +rws: +List<CWord>) -> Drain5State:
   match rws:
     case Nil{}:
       +fb = decode_fb5(code)
       Drain5State{buckets, tbl, rem_lb,
-        ClassItem{fb, Nil{}, 0n, rem_lb} <> (Add{fb, rem_lb} <> items), bigs,
-        gn}
+        ClassItem{fb, Nil{}, 0n, rem_lb} <> (Add{fb, rem_lb} <> items), bigs}
     case Con{+cw, +wt}:
       match wt:
         case Nil{}:
           Drain5State{buckets, tbl, Nat.add(1n, rem_lb),
-            OneItem{decode_fb5(code), cword_w(cw)} <> items, bigs, gn}
+            OneItem{decode_fb5(code), cword_w(cw)} <> items, bigs}
         case Con{+cw2, +wt2}:
           match wt2:
             case Nil{}:
               Drain5State{buckets, tbl, Nat.add(3n, rem_lb),
                 TwoItem{decode_fb5(code), cword_w(cw2), cword_w(cw)} <> items,
-                bigs, gn}
+                bigs}
             case Con{+cw3, +wt3}:
               match wt3:
                 case Nil{}:
                   drain5_add_three(decode_fb5(code), rem_lb, items, bigs, buckets,
-                    gn, solve_three_tbl(cw3, cw2, cw, tbl))
+                    solve_three_tbl(cw3, cw2, cw, tbl))
                 case Con{+cw4, +wt4}:
                   drain5_add_ge2(decode_fb5(code), rem_lb, items, bigs, buckets, tbl,
-                    gn, rev_cwords_len(wt4, cw4 <> (cw3 <> (cw2 <> (cw <> Nil{}))), 4n))
+                    rev_cwords_len(wt4, cw4 <> (cw3 <> (cw2 <> (cw <> Nil{}))), 4n))
 
 def drain5_swap(+code: U32, +rem_lb: Nat, +items: +List<Item>,
-                +bigs: +List<BigClass>, tbl: Array<U32>, +gn: Nat,
+                +bigs: +List<BigClass>, tbl: Array<U32>,
                 r: Array<+List<CWord>> & +List<CWord>) -> Drain5State:
   (b2, +rws) = r
-  drain5_add(code, rem_lb, items, bigs, b2, tbl, gn, rws)
+  drain5_add(code, rem_lb, items, bigs, b2, tbl, rws)
 
-def drain5_go(+touched: +List<U32>, st: Drain5State) -> Drain5State:
+def drain5_go(+gn: Nat, +touched: +List<U32>, st: Drain5State) -> Drain5State:
   match touched:
     case Nil{}:
       st
     case Con{+code, +rest}:
       match st:
-        case Drain5State{buckets, tbl, +rem_lb, +items, +bigs, +gn}:
-          drain5_go(rest,
-            drain5_swap(code, rem_lb, items, bigs, tbl, gn,
+        case Drain5State{buckets, tbl, +rem_lb, +items, +bigs}:
+          drain5_go(gn, rest,
+            drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<CWord>, buckets, code, Nil{})))
 
 def bigs_total(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
@@ -1821,23 +1819,23 @@ def finish_drain5_b(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
     case True{}:
       GuessRes{Nil{}, Buf5{seen, buckets3, tbl3, gen2, gn}}
     case False{}:
-      finish_node(Nat.is_le(512n, n),
+      finish_node(False{},
         g, seen, gen2, gn, rem_lb, items, bigs, buckets3, tbl3, best)
 
 def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
                   +best: SolveRef.Best, +n: Nat, dr: Drain5State) -> GuessRes:
   match dr:
-    case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs, +gn2}:
+    case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
       finish_drain5_b(g, seen, gen2, gn, rem_lb, items, bigs, buckets3, tbl3,
-        best, n, skippable(best, bigs_total(bigs, rem_lb)))
+        best, n, False{})
 
 def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
                +gn: Nat, +best: SolveRef.Best, fs: Fill5State) -> GuessRes:
   match fs:
     case Fill5State{buckets2, tbl2, +touched}:
       finish_drain5(g, seen, gen2, gn, best, n,
-        drain5_go(touched,
-          Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}, gn}))
+        drain5_go(gn, touched,
+          Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
 
 def schedule5_lb(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
                  seen: Array<Nat>, buckets: Array<+List<CWord>>,
