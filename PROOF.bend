@@ -49,6 +49,8 @@ import ./proofs/lb_nodup.bend as LBProof4
 import ./proofs/lb_classes.bend as LBProof5
 import ./proofs/lb_decomp.bend as LBProof6
 import ./proofs/lb_adsplit.bend as LBProof7
+import ./src/solve_k.bend as SolveK
+import ./proofs/par_chunk.bend as ParChunk
 
 def Bool.disc(b: Bool) -> Type:
   match b:
@@ -1528,13 +1530,15 @@ def TreeWF.proof(+t: Tree.Tree) ->
 def Laws.tree_json_wellformed(t):
   TreeWF.proof(t)
 
-# The law: a tree returned by the solver is valid.
+# The law: a tree returned by the solver is valid. The production entry point
+# is the chunked solver at one chunk, and the proof is the general one, so the
+# same argument covers every chunk count.
 def Laws.solve_valid(G, C, T, e):
-  FSOpt.FOpt.solve_valid(G, C, T, e)
+  ParChunk.P.solve_k_valid(G, C, 1n, T, e)
 
 # The law: the tree returned by the solver is optimal.
 def Laws.solve_optimal(G, C, T2, v):
-  FSOpt.FOpt.solve_optimal(G, C, T2, v)
+  ParChunk.P.solve_k_optimal(G, C, 1n, T2, v)
 
 # The reference solver remains verified as the exact specification.
 def Ref.solve_valid(G: +List<+List<Nat>>, C: +List<+List<Nat>>, T: Tree.Tree,
