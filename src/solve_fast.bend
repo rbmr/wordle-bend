@@ -1637,8 +1637,8 @@ type CKRes is Type:
 # One pass over the class per guess, reusing the proven histogram fold: the
 # `k` of a `Hist5Ok` is the number of distinct feedback codes of that guess on
 # the class. `stop` ends the scan early once `kmax` reaches the class length.
-def ck_loop(+fuel: Nat, stop: Bool, +i: Nat, +C: +List<CWord>, +gen: Nat,
-            +m: Nat, +kmax: Nat, hist: Hist5Res) -> CKRes:
+def ck_loop(+fuel: Nat, +i: Nat, +C: +List<CWord>, +gen: Nat, +m: Nat,
+            +kmax: Nat, hist: Hist5Res) -> CKRes:
   match fuel:
     case 0n:
       match hist:
@@ -1647,29 +1647,28 @@ def ck_loop(+fuel: Nat, stop: Bool, +i: Nat, +C: +List<CWord>, +gen: Nat,
         case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
           CKRes{seen2, tbl2, Nat.max(kmax, k2)}
     case 1n+p:
-      match stop:
-        case True{}:
-          match hist:
-            case Hist5Pruned{seen2, tbl2}:
-              CKRes{seen2, tbl2, kmax}
-            case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
-              CKRes{seen2, tbl2, Nat.max(kmax, k2)}
-        case False{}:
-          match hist:
-            case Hist5Pruned{seen2, tbl2}:
-              CKRes{seen2, tbl2, kmax}
-            case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
-              +k3 = Nat.max(kmax, k2)
-              ck_loop(p, Bool.or(Nat.is_le(m, k3), Nat.is_le(m, k2)),
-                Nat.add(1n, i), C, Nat.add(1n, gen), m, k3,
-                hist5_go(U32.from_nat(Nat.add(1n, i)), C, Nat.add(1n, gen),
-                  False{}, Hist5Ok{seen2, tbl2, 0n, 0n, m}))
+      match hist:
+        case Hist5Pruned{seen2, tbl2}:
+          CKRes{seen2, tbl2, kmax}
+        case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
+          ck_loop(p, Nat.add(1n, i), C, Nat.add(1n, gen), m,
+            Nat.max(kmax, k2),
+            hist5_go(U32.from_nat(Nat.add(1n, i)), C, Nat.add(1n, gen),
+              False{}, Hist5Ok{seen2, tbl2, 0n, 0n, m}))
+
+def class_k_start_b(empty: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
+                    tbl: Array<U32>) -> CKRes:
+  match empty:
+    case True{}:
+      CKRes{Array.new(Nat, 10n, 0n), tbl, 0n}
+    case False{}:
+      seen = Array.new(Nat, 10n, 0n)
+      ck_loop(gn, 0n, ws, 1n, m, 0n,
+        hist5_go(0, ws, 1n, False{}, Hist5Ok{seen, tbl, 0n, 0n, m}))
 
 def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
                   tbl: Array<U32>) -> CKRes:
-  seen = Array.new(Nat, 10n, 0n)
-  ck_loop(gn, Bool.or(Nat.is_le(gn, 0n), Nat.is_le(m, 0n)), 0n, ws, 1n, m,
-    0n, hist5_go(0, ws, 1n, False{}, Hist5Ok{seen, tbl, 0n, 0n, m}))
+  class_k_start_b(Nat.is_le(gn, 0n), ws, m, gn, tbl)
 
 def bigs_total(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
   match bigs:
