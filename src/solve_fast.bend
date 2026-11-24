@@ -1721,59 +1721,68 @@ def class_k_opt(big: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
     case True{}:
       class_k_start(ws, m, gn, tbl)
 
-# One class per two steps: phase 0 starts the k pass for the list head, phase
-# 1 consumes it. `stop` is checked on entry, so the walk ends as soon as the
-# running capacity gain reaches the best cost. The table rides in `st` and is
-# handed back through CapOk/CapSkip. The rebuilt list keeps the input order
-# and the input `clb` fields, because `emit_bigs` recomputes the class bound.
-def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
+# One class per two steps. A positive phase starts the k pass for the list head
+# and zero consumes it; the walk is structural on the class list, so it needs no
+# fuel. `stop` is checked on entry, so the walk ends as soon as the running
+# capacity gain reaches the best cost. The table rides in `st` and is handed
+# back through CapOk/CapSkip. The rebuilt list keeps the input order and the
+# input `clb` fields, because `emit_bigs` recomputes the class bound.
+def cap_walk(+bs: +List<BigClass>, +phase: Nat, stop: Bool,
              +acc: +List<BigClass>, +gain: Nat, +total0: Nat,
              +best: SolveRef.Best, +gn: Nat, st: CKRes) -> CapRes:
-  match fuel:
-    case 0n:
-      match st:
-        case CKRes{tbl, k}:
-          CapSkip{tbl}
-    case 1n+p:
-      match stop:
-        case True{}:
-          match st:
-            case CKRes{tbl, k}:
-              CapSkip{tbl}
-        case False{}:
+  match bs:
+    case Nil{}:
+      match phase:
+        case 0n:
+          match stop:
+            case True{}:
+              match st:
+                case CKRes{tbl, k}:
+                  CapSkip{tbl}
+            case False{}:
+              match st:
+                case CKRes{tbl, k}:
+                  CapOk{rev_bigs(acc, Nil{}), tbl}
+        case 1n+hp:
+          match stop:
+            case True{}:
+              match st:
+                case CKRes{tbl, k}:
+                  CapSkip{tbl}
+            case False{}:
+              match st:
+                case CKRes{tbl, k}:
+                  CapOk{rev_bigs(acc, Nil{}), tbl}
+    case Con{bc, rest}:
+      match bc:
+        case BigClass{+fb, +ws, +len, +clb}:
           match phase:
+            case 1n+hp:
+              match stop:
+                case True{}:
+                  match st:
+                    case CKRes{tbl, k}:
+                      CapSkip{tbl}
+                case False{}:
+                  match st:
+                    case CKRes{tbl, k}:
+                      cap_walk(bs, hp, False{}, acc, gain, total0, best, gn,
+                        class_k_opt(Nat.is_le(16n, len), ws, len, gn, tbl))
             case 0n:
-              match bs:
-                case Nil{}:
+              match stop:
+                case True{}:
                   match st:
                     case CKRes{tbl, k}:
-                      CapOk{rev_bigs(acc, Nil{}), tbl}
-                case Con{bc, rest}:
-                  match bc:
-                    case BigClass{+fb, +ws, +len, +clb}:
-                      match st:
-                        case CKRes{tbl, k}:
-                          cap_walk(p, False{}, 1n, bs, acc, gain, total0,
-                            best, gn,
-                            class_k_opt(Nat.is_le(16n, len), ws, len, gn,
-                              tbl))
-            case 1n+q:
-              match bs:
-                case Nil{}:
+                      CapSkip{tbl}
+                case False{}:
                   match st:
-                    case CKRes{tbl, k}:
-                      CapOk{rev_bigs(acc, Nil{}), tbl}
-                case Con{bc, rest}:
-                  match bc:
-                    case BigClass{+fb, +ws, +len, +clb}:
-                      match st:
-                        case CKRes{tbl, +k}:
-                          +clb2 = Nat.max(clb, capbound(len, k))
-                          +gain2 = Nat.add(gain, Nat.sub(clb2, clb))
-                          cap_walk(p,
-                            Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
-                            0n, rest, BigClass{fb, ws, len, clb} <> acc,
-                            gain2, total0, best, gn, CKRes{tbl, k})
+                    case CKRes{tbl, +k}:
+                      +clb2 = Nat.max(clb, capbound(len, k))
+                      +gain2 = Nat.add(gain, Nat.sub(clb2, clb))
+                      cap_walk(rest, 1n,
+                        Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
+                        BigClass{fb, ws, len, clb} <> acc, gain2, total0,
+                        best, gn, CKRes{tbl, k})
 
 def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                +gn: Nat, +rem_lb: Nat, +items: +List<Item>,
@@ -1797,9 +1806,8 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
-      finish_cap(cap_walk(Nat.add(1n, Nat.mul(2n, bigs_len(bigs))), False{},
-                   0n, bigs, Nil{}, 0n, bigs_total(bigs, rem_lb), best, gn,
-                   ck_cheap(0n, tbl3)),
+      finish_cap(cap_walk(bigs, 1n, False{}, Nil{}, 0n, bigs_total(bigs, rem_lb),
+                   best, gn, ck_cheap(0n, tbl3)),
         g, seen, gen2, gn, rem_lb, items, buckets3)
 
 def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
