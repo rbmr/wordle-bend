@@ -76,9 +76,23 @@ is why the initial fuel, the candidate count, is enough. The result is exponenti
 count and is intended as the correctness reference, not the final fast path. See
 [performance.md](performance.md).
 
+### `src/solve_k.bend`
+
+The solver with a pure chunk count. `solve_k(guesses, candidates, k)` deals the root guess list
+into `2^d <= k` contiguous segments and evaluates each segment in parallel with the fast search
+machine (`SolveFast.step`) from the neutral accumulator, over only its own guesses, while every
+child node still sees the whole guess list. The chunk results are folded in guess order with the
+reference `better`, which keeps the first strictly cheapest result, so the folded tree is the
+sequential root's tree. A chunk owns a copy of the scratch buffer because a `Buf5` holds arrays and
+cannot be shared. `k <= 1` runs the sequential root unchanged. The chunk count follows the number
+of threads the runtime was started with (`IO.thread_count`), so the split follows the machine; see
+[cli.md](cli.md).
+
 ### `src/solve.bend`
 
-The entry point the laws talk about. It delegates to the bound-pruned solver in `src/solve_fast.bend`, while `src/solve_ref.bend` stays in the tree as the reference specification.
+The entry point the laws talk about. It is the `k = 1` instance of `src/solve_k.bend`, which is the
+bound-pruned solver in `src/solve_fast.bend` with the root loop left whole; `src/solve_ref.bend`
+stays in the tree as the reference specification.
 
 ### `src/solve_fast.bend`
 

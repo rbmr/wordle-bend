@@ -12,8 +12,24 @@ post-`S` floor and stage-2 self-guess skipping), and mid-histogram collision-bud
 exhaustive reference solver in `src/solve_ref.bend` (`Ref.solve_valid`, `Ref.solve_optimal`) and the
 parallel root solver in `src/solve_par.bend` (`Par.solve_eq`) stay in the tree as specifications.
 The full bundled lists in `words/` still need stronger move ordering, greedy upper-bound seeding,
-deeper capacity bounds, and multi-core root parallelism; speed is the remaining work, correctness is
-not.
+deeper capacity bounds, and a proved multi-core root split; speed is the remaining work, correctness
+is not.
+
+## Chunked root
+
+`src/solve_k.bend` can split the root guess list into `2^d <= k` contiguous segments and evaluate
+the segments in parallel, where `k` is the number of threads the runtime was started with. Each
+segment runs the fast search machine from the neutral accumulator over only its own guesses, with
+the full guess list still available at every child node, and the results are folded in guess order
+with the reference `better`. The fold keeps the first strictly cheapest result, which is the
+sequential root's tie-break, so the chunked run returns the same tree as the sequential one; only
+the amount of work done without a shared bound changes. `k <= 1` is the sequential root unchanged.
+
+The split costs some pruning: the segments cannot share the running best cost, so each segment pays
+for its first guesses at the neutral bound. On the bundled benchmark inputs the four-thread split
+is about twice as fast as the sequential root. The chunked path is not covered by the eight laws
+yet: the proof needs a job specification whose reference is the best tree over a segment of the
+guess list rather than over the whole list, plus a composition lemma over the segments.
 
 ## Smoke baseline
 
