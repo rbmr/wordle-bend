@@ -1,9 +1,9 @@
 # Obligation B, second part: the branching count is monotone under a subclass.
 #
-# `CK.count(g, ws)` is the number of feedback groups `g` cuts out of the class
+# `CK.CK.count(g, ws)` is the number of feedback groups `g` cuts out of the class
 # `ws`. This module proves that a subclass never has more of them:
 #
-#   Cover.Subseq(ws, S)  ->  CK.count(g, ws) <= CK.count(g, S)
+#   Cover.Subseq(ws, S)  ->  CK.CK.count(g, ws) <= CK.CK.count(g, S)
 #
 # That is the step the capacity bound needs: at any node of the reference tree
 # the children are the non-empty groups of the node's guess on the node's
@@ -774,8 +774,8 @@ def CS.sub_codes(+g: +List<Nat>, +ws: +List<+List<Nat>>,
                  : +List<+List<Feedback.Color>>} =
             Equal.cong(+List<Nat>, +List<+List<Feedback.Color>>,
               x => CS.codes(g, x <> t), h, y, e)
-          %Equal.sym(+List<+List<Feedback.Color>>, CS.codes(g, y <> t),
-              CS.codes(g, h <> t), eh) :
+          %Equal.sym(+List<+List<Feedback.Color>>,
+              CS.codes(g, h <> t), CS.codes(g, y <> t), eh) :
             CS.SubC(_, CS.codes(g, y <> r))
           CS.codes_cons_sub(g, y, t, r, Feedback.word_eq(g, y),
             CS.sub_codes(g, t, r, pt))
@@ -789,46 +789,309 @@ def CS.sub_codes(+g: +List<Nat>, +ws: +List<+List<Nat>>,
 # ---------------------------------------------------------------------------
 
 def CS.len_fgroups_to_groups(+fg: +List<SolveFast.FGroup>) ->
-  {List.length(&2, Groups.Group, FN.fgroups_to_groups(fg))
-   == FH.fgroups_count(fg) : Nat}:
+  {List.length(&2, Groups.Group, FN.FN.fgroups_to_groups(fg))
+   == FH.FH.fgroups_count(fg) : Nat}:
   match fg:
     case Nil{}:
       {==}
     case Con{gp, rest}:
       match gp:
         case SolveFast.FGroup{f, len, rws}:
-          +ih : {List.length(&2, Groups.Group, FN.fgroups_to_groups(rest))
-                 == FH.fgroups_count(rest) : Nat} =
+          +ih : {List.length(&2, Groups.Group, FN.FN.fgroups_to_groups(rest))
+                 == FH.FH.fgroups_count(rest) : Nat} =
             CS.len_fgroups_to_groups(rest)
-          NatProof.NatPrf.add_succ(
-            List.length(&2, Groups.Group, FN.fgroups_to_groups(rest)),
-            FH.fgroups_count(rest))
+          Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+            List.length(&2, Groups.Group, FN.FN.fgroups_to_groups(rest)),
+            FH.FH.fgroups_count(rest), ih)
 
 # The count is the length of the reference group list of the class.
 def CS.count_eq_build(+g: +List<Nat>, +ws: +List<+List<Nat>>) ->
-  {CK.count(g, ws)
+  {CK.CK.count(g, ws)
    == List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{})) : Nat}:
-  +e : {FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))
+  +e : {FN.FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))
         == Groups.groups_build(g, ws, Nil{}) : +List<Groups.Group>} =
-    FN.fgroups_build_eq(g, ws, Nil{})
+    FN.FN.fgroups_build_eq(g, ws, Nil{})
   +e2 : {List.length(&2, Groups.Group,
-           FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
+           FN.FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
          == List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{}))
          : Nat} =
     Equal.cong(+List<Groups.Group>, Nat,
       x => List.length(&2, Groups.Group, x),
-      FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})),
+      FN.FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})),
       Groups.groups_build(g, ws, Nil{}), e)
-  +e1 : {CK.count(g, ws)
+  +e1 : {CK.CK.count(g, ws)
          == List.length(&2, Groups.Group,
-              FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
+              FN.FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
          : Nat} =
     Equal.sym(Nat,
       List.length(&2, Groups.Group,
-        FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))),
-      FH.fgroups_count(SolveFast.fgroups_build_fast(g, ws, Nil{})),
+        FN.FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))),
+      FH.FH.fgroups_count(SolveFast.fgroups_build_fast(g, ws, Nil{})),
       CS.len_fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{})))
-  Equal.trans(Nat, CK.count(g, ws),
+  Equal.trans(Nat, CK.CK.count(g, ws),
     List.length(&2, Groups.Group,
-      FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))),
+      FN.FN.fgroups_to_groups(SolveFast.fgroups_build_fast(g, ws, Nil{}))),
     List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{})), e1, e2)
+
+
+# ---------------------------------------------------------------------------
+# Feedback equality as an equivalence on codes
+# ---------------------------------------------------------------------------
+
+def CS.fe_of_eq(+a: +List<Feedback.Color>, +b: +List<Feedback.Color>,
+    e: {a == b : +List<Feedback.Color>}) ->
+  {Feedback.feedback_eq(a, b) == True{} : Bool}:
+  Equal.trans(Bool, Feedback.feedback_eq(a, b), Feedback.feedback_eq(b, b),
+    True{},
+    Equal.cong(+List<Feedback.Color>, Bool,
+      x => Feedback.feedback_eq(x, b), a, b, e),
+    FbProof.FbPrf.feedback_eq_refl(b))
+
+def CS.fe_trans(+c: +List<Feedback.Color>, +a: +List<Feedback.Color>,
+    +b: +List<Feedback.Color>,
+    +h1: {Feedback.feedback_eq(c, a) == True{} : Bool},
+    +h2: {Feedback.feedback_eq(a, b) == True{} : Bool}) ->
+  {Feedback.feedback_eq(c, b) == True{} : Bool}:
+  CS.fe_of_eq(c, b,
+    Equal.trans(+List<Feedback.Color>, c, a, b,
+      FbProof.FbPrf.feedback_eq_true(c, a, h1),
+      FbProof.FbPrf.feedback_eq_true(a, b, h2)))
+
+# `or` with a true left side is true, from the equality.
+def CS.or_l_mono(+a: Bool, +b: Bool, +h: {a == True{} : Bool}) ->
+  {Bool.or(a, b) == True{} : Bool}:
+  Equal.trans(Bool, Bool.or(a, b), Bool.or(True{}, b), True{},
+    Equal.cong(Bool, Bool, x => Bool.or(x, b), a, True{}, h),
+    CS.or_true_l(b))
+
+# A code that is already at the head of the seen list adds nothing.
+def CS.or_dup_l(a: Bool, b: Bool, m: Bool,
+    +k: {CS.imp(a, b) == True{} : Bool}) ->
+  {Bool.or(a, Bool.or(b, m)) == Bool.or(b, m) : Bool}:
+  match a:
+    case True{}:
+      match b:
+        case True{}:
+          {==}
+        case False{}:
+          Empty.absurd({True{} == m : Bool}, Logic.Proof.false_ne_true(k))
+    case False{}:
+      {==}
+
+# The union with a redundant member absorbs into the smaller set.
+def CS.or_absorb(a: Bool, z: Bool) ->
+  {Bool.or(Bool.not(z), Bool.or(a, z)) == True{} : Bool}:
+  match a:
+    case True{}:
+      match z:
+        case True{}:
+          {==}
+        case False{}:
+          {==}
+    case False{}:
+      CS.or_not_self(z)
+
+# An implication from an equality of the two sides.
+def CS.imp_of_eq(+l: Bool, +r: Bool, e: {l == r : Bool}) ->
+  {CS.imp(l, r) == True{} : Bool}:
+  Equal.trans(Bool, CS.imp(l, r), CS.imp(r, r), True{},
+    Equal.cong(Bool, Bool, y => CS.imp(y, r), l, r, e),
+    CS.or_not_self(r))
+
+# One code equality implies another, as a boolean implication.
+def CS.fe_imp_of(+x: +List<Feedback.Color>, +c: +List<Feedback.Color>,
+    +f: +List<Feedback.Color>, q: Bool,
+    +eq: {q == Feedback.feedback_eq(x, c) : Bool},
+    +hcf: {Feedback.feedback_eq(c, f) == True{} : Bool}) ->
+  {CS.imp(q, Feedback.feedback_eq(x, f)) == True{} : Bool}:
+  match q:
+    case True{}:
+      CS.fe_trans(x, c, f, Equal.sym(Bool, True{}, Feedback.feedback_eq(x, c), eq),
+        hcf)
+    case False{}:
+      {==}
+
+# ---------------------------------------------------------------------------
+# The codes of the group list
+# ---------------------------------------------------------------------------
+
+# The codes a group list holds, in order.
+def CS.gcodes(+acc: +List<Groups.Group>) -> +List<+List<Feedback.Color>>:
+  match acc:
+    case Nil{}:
+      Nil{}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          fb <> CS.gcodes(rest)
+
+# At most one new code per added word.
+def CS.one_if_not(hit: Bool) -> Nat:
+  Feedback.Bool.case(Nat, hit, 0n, 1n)
+
+# A code already at the head of the seen list does not change the count.
+def CS.sub_head_dup_widen(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +seen: +List<+List<Feedback.Color>>) ->
+  {CS.sub(cs, f <> seen, c <> (f <> seen)) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{hc, t}:
+      Logic.Proof.and_intro(
+        CS.imp(CS.mem(hc, f <> seen), CS.mem(hc, c <> (f <> seen))),
+        CS.sub(t, f <> seen, c <> (f <> seen)),
+        CS.or_absorb(Feedback.feedback_eq(hc, c),
+          Bool.or(Feedback.feedback_eq(hc, f), CS.mem(hc, seen))),
+        CS.sub_head_dup_widen(t, c, f, seen))
+
+def CS.sub_head_dup_narrow(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +seen: +List<+List<Feedback.Color>>,
+    +hcf: {Feedback.feedback_eq(c, f) == True{} : Bool}) ->
+  {CS.sub(cs, c <> (f <> seen), f <> seen) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{hc, t}:
+      Logic.Proof.and_intro(
+        CS.imp(CS.mem(hc, c <> (f <> seen)), CS.mem(hc, f <> seen)),
+        CS.sub(t, c <> (f <> seen), f <> seen),
+        CS.imp_of_eq(Bool.or(Feedback.feedback_eq(hc, c),
+            Bool.or(Feedback.feedback_eq(hc, f), CS.mem(hc, seen))),
+          Bool.or(Feedback.feedback_eq(hc, f), CS.mem(hc, seen)),
+          CS.or_dup_l(Feedback.feedback_eq(hc, c), Feedback.feedback_eq(hc, f),
+            CS.mem(hc, seen), CS.fe_imp_of(hc, c, f, Feedback.feedback_eq(hc, c), {==}, hcf))),
+        CS.sub_head_dup_narrow(t, c, f, seen, hcf))
+
+def CS.newc_head_dup(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +seen: +List<+List<Feedback.Color>>,
+    +hcf: {Feedback.feedback_eq(c, f) == True{} : Bool}) ->
+  {CS.newc(cs, f <> seen) == CS.newc(cs, c <> (f <> seen)) : Nat}:
+  Equal.sym(Nat, CS.newc(cs, c <> (f <> seen)), CS.newc(cs, f <> seen),
+    CS.newc_same(cs, c <> (f <> seen), f <> seen,
+      Logic.Proof.and_intro(CS.sub(cs, c <> (f <> seen), f <> seen),
+        CS.sub(cs, f <> seen, c <> (f <> seen)),
+        CS.sub_head_dup_narrow(cs, c, f, seen, hcf),
+        CS.sub_head_dup_widen(cs, c, f, seen))))
+
+# A code-list inclusion is reflexive.
+def CS.sub_self(+cs: +List<+List<Feedback.Color>>,
+    +a: +List<+List<Feedback.Color>>) ->
+  {CS.sub(cs, a, a) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{hc, t}:
+      Logic.Proof.and_intro(CS.imp(CS.mem(hc, a), CS.mem(hc, a)),
+        CS.sub(t, a, a), CS.or_not_self(CS.mem(hc, a)), CS.sub_self(t, a))
+
+def CS.same_self(+cs: +List<+List<Feedback.Color>>,
+    +a: +List<+List<Feedback.Color>>) ->
+  {CS.same(cs, a, a) == True{} : Bool}:
+  Logic.Proof.and_intro(CS.sub(cs, a, a), CS.sub(cs, a, a),
+    CS.sub_self(cs, a), CS.sub_self(cs, a))
+
+# Implication is transitive.
+def CS.imp_trans(a: Bool, b: Bool, c: Bool,
+    +k1: {CS.imp(a, b) == True{} : Bool},
+    +k2: {CS.imp(b, c) == True{} : Bool}) ->
+  {CS.imp(a, c) == True{} : Bool}:
+  match a b c:
+    case False{} _ _:
+      {==}
+    case True{} True{} _:
+      k2
+    case True{} False{} True{}:
+      {==}
+    case True{} False{} False{}:
+      k1
+
+# A code-list inclusion is transitive.
+def CS.sub_trans(+cs: +List<+List<Feedback.Color>>,
+    +a: +List<+List<Feedback.Color>>, +b: +List<+List<Feedback.Color>>,
+    +c: +List<+List<Feedback.Color>>,
+    +k1: {CS.sub(cs, a, b) == True{} : Bool},
+    +k2: {CS.sub(cs, b, c) == True{} : Bool}) ->
+  {CS.sub(cs, a, c) == True{} : Bool}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{hc, t}:
+      Logic.Proof.and_intro(CS.imp(CS.mem(hc, a), CS.mem(hc, c)),
+        CS.sub(t, a, c),
+        CS.imp_trans(CS.mem(hc, a), CS.mem(hc, b), CS.mem(hc, c),
+          CS.sub_head(hc, t, a, b, k1), CS.sub_head(hc, t, b, c, k2)),
+        CS.sub_trans(t, a, b, c,
+          CS.sub_tail(hc, t, a, b, k1), CS.sub_tail(hc, t, b, c, k2)))
+
+# Agreement is transitive.
+def CS.same_trans(+cs: +List<+List<Feedback.Color>>,
+    +a: +List<+List<Feedback.Color>>, +b: +List<+List<Feedback.Color>>,
+    +c: +List<+List<Feedback.Color>>,
+    +k1: {CS.same(cs, a, b) == True{} : Bool},
+    +k2: {CS.same(cs, b, c) == True{} : Bool}) ->
+  {CS.same(cs, a, c) == True{} : Bool}:
+  Logic.Proof.and_intro(CS.sub(cs, a, c), CS.sub(cs, c, a),
+    CS.sub_trans(cs, a, b, c,
+      CS.same_sub1(cs, a, b, k1), CS.same_sub1(cs, b, c, k2)),
+    CS.sub_trans(cs, c, b, a,
+      CS.same_sub2(cs, b, c, k2), CS.same_sub2(cs, a, b, k1)))
+
+# A code already at the head of the seen list agrees before and after.
+def CS.same_head_dup(+cs: +List<+List<Feedback.Color>>,
+    +c: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +seen: +List<+List<Feedback.Color>>,
+    +hcf: {Feedback.feedback_eq(c, f) == True{} : Bool}) ->
+  {CS.same(cs, f <> seen, c <> (f <> seen)) == True{} : Bool}:
+  Logic.Proof.and_intro(CS.sub(cs, f <> seen, c <> (f <> seen)),
+    CS.sub(cs, c <> (f <> seen), f <> seen),
+    CS.sub_head_dup_widen(cs, c, f, seen),
+    CS.sub_head_dup_narrow(cs, c, f, seen, hcf))
+
+# The seen codes of `group_add` agree with the new code consed on.
+def CS.gcodes_add_go(+cs: +List<+List<Feedback.Color>>, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>, q: Bool,
+    +eq: {q == Feedback.feedback_eq(fb, f) : Bool},
+    +k: {CS.same(cs, CS.gcodes(Groups.group_add(w, fb, rest)),
+                 fb <> CS.gcodes(rest)) == True{} : Bool}) ->
+  {CS.same(cs,
+     CS.gcodes(Feedback.Bool.case(+List<Groups.Group>, q,
+       Groups.Group{f, List.append(&2, +List<Nat>, ws, [w])} <> rest,
+       Groups.Group{f, ws} <> Groups.group_add(w, fb, rest))),
+     fb <> CS.gcodes(Groups.Group{f, ws} <> rest)) == True{} : Bool}:
+  match q:
+    case True{}:
+      CS.same_head_dup(cs, fb, f, CS.gcodes(rest),
+        Equal.sym(Bool, True{}, Feedback.feedback_eq(fb, f), eq))
+    case False{}:
+      CS.same_trans(cs,
+        CS.gcodes(Groups.Group{f, ws} <> Groups.group_add(w, fb, rest)),
+        f <> (fb <> CS.gcodes(rest)),
+        fb <> CS.gcodes(Groups.Group{f, ws} <> rest),
+        CS.same_cons(cs, CS.gcodes(Groups.group_add(w, fb, rest)),
+          fb <> CS.gcodes(rest), f, k),
+        CS.same_swap(cs, CS.gcodes(rest), f, fb))
+
+def CS.gcodes_add(+cs: +List<+List<Feedback.Color>>, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, +acc: +List<Groups.Group>) ->
+  {CS.same(cs, CS.gcodes(Groups.group_add(w, fb, acc)),
+           fb <> CS.gcodes(acc)) == True{} : Bool}:
+  match acc:
+    case Nil{}:
+      CS.same_self(cs, fb <> CS.gcodes(Nil{}))
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{f, ws}:
+          CS.gcodes_add_go(cs, w, fb, f, ws, rest,
+            Feedback.feedback_eq(fb, f), {==},
+            CS.gcodes_add(cs, w, fb, rest))
+
+def CS.newc_gcodes_add(+cs: +List<+List<Feedback.Color>>, +w: +List<Nat>,
+    +fb: +List<Feedback.Color>, +acc: +List<Groups.Group>) ->
+  {CS.newc(cs, CS.gcodes(Groups.group_add(w, fb, acc)))
+   == CS.newc(cs, fb <> CS.gcodes(acc)) : Nat}:
+  CS.newc_same(cs, CS.gcodes(Groups.group_add(w, fb, acc)),
+    fb <> CS.gcodes(acc), CS.gcodes_add(cs, w, fb, acc))
