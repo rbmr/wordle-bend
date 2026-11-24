@@ -1636,9 +1636,12 @@ type CKRes is Type:
 
 # One pass over the class per guess, reusing the proven histogram fold: the
 # `k` of a `Hist5Ok` is the number of distinct feedback codes of that guess on
-# the class. `stop` ends the scan early once `kmax` reaches the class length.
+# the class. `fuel` counts the guesses still to process, `more` says whether a
+# further guess follows the current one, and the row of each pass is its guess
+# index, so the scan never reads a table row past the guess list. The scratch
+# state rides through `CKRes`.
 def ck_loop(+fuel: Nat, +i: Nat, +C: +List<CWord>, +gen: Nat, +m: Nat,
-            +kmax: Nat, hist: Hist5Res) -> CKRes:
+            +kmax: Nat, hist: Hist5Res, more: Bool) -> CKRes:
   match fuel:
     case 0n:
       match hist:
@@ -1651,10 +1654,15 @@ def ck_loop(+fuel: Nat, +i: Nat, +C: +List<CWord>, +gen: Nat, +m: Nat,
         case Hist5Pruned{seen2, tbl2}:
           CKRes{seen2, tbl2, kmax}
         case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
-          ck_loop(p, Nat.add(1n, i), C, Nat.add(1n, gen), m,
-            Nat.max(kmax, k2),
-            hist5_go(U32.from_nat(Nat.add(1n, i)), C, Nat.add(1n, gen),
-              False{}, Hist5Ok{seen2, tbl2, 0n, 0n, m}))
+          match more:
+            case False{}:
+              CKRes{seen2, tbl2, Nat.max(kmax, k2)}
+            case True{}:
+              ck_loop(p, Nat.add(1n, i), C, Nat.add(1n, gen), m,
+                Nat.max(kmax, k2),
+                hist5_go(U32.from_nat(Nat.add(1n, i)), C, Nat.add(1n, gen),
+                  False{}, Hist5Ok{seen2, tbl2, 0n, 0n, m}),
+                Nat.is_le(2n, p))
 
 def class_k_start_b(empty: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
                     tbl: Array<U32>) -> CKRes:
@@ -1662,9 +1670,10 @@ def class_k_start_b(empty: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
     case True{}:
       CKRes{Array.new(Nat, 10n, 0n), tbl, 0n}
     case False{}:
-      seen = Array.new(Nat, 10n, 0n)
       ck_loop(gn, 0n, ws, 1n, m, 0n,
-        hist5_go(0, ws, 1n, False{}, Hist5Ok{seen, tbl, 0n, 0n, m}))
+        hist5_go(0, ws, 1n, False{}, Hist5Ok{Array.new(Nat, 10n, 0n), tbl,
+          0n, 0n, m}),
+        Nat.is_le(2n, gn))
 
 def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
                   tbl: Array<U32>) -> CKRes:
@@ -1711,7 +1720,8 @@ def class_k_opt(big: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
 # One class per two steps: phase 0 starts the k pass for the list head, phase
 # 1 consumes it. `stop` is checked on entry, so the walk ends as soon as the
 # running capacity gain reaches the best cost. The table rides in `st` and is
-# handed back through CapOk/CapSkip.
+# handed back through CapOk/CapSkip. The rebuilt list keeps the input order
+# and the input `clb` fields, because `emit_bigs` recomputes the class bound.
 def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
              +acc: +List<BigClass>, +gain: Nat, +total0: Nat,
              +best: SolveRef.Best, +gn: Nat, st: CKRes) -> CapRes:
@@ -1741,7 +1751,8 @@ def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
                         case CKRes{seen, tbl, k}:
                           cap_walk(p, False{}, 1n, bs, acc, gain, total0,
                             best, gn,
-                            class_k_opt(Nat.is_le(16n, len), ws, len, gn, tbl))
+                            class_k_opt(Nat.is_le(16n, len), ws, len, gn,
+                              tbl))
             case 1n+q:
               match bs:
                 case Nil{}:
@@ -1757,7 +1768,7 @@ def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
                           +gain2 = Nat.add(gain, Nat.sub(clb2, clb))
                           cap_walk(p,
                             Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
-                            0n, rest, BigClass{fb, ws, len, clb2} <> acc,
+                            0n, rest, BigClass{fb, ws, len, clb} <> acc,
                             gain2, total0, best, gn, CKRes{seen, tbl, k})
 
 def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
@@ -1770,6 +1781,9 @@ def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs2, rem_lb, items),
                Buf5{seen, buckets3, tbl, gen2, gn}}
 
+# The capacity walk runs only for nodes with at least 512 candidates: below
+# that the class scans cost more than the bound saves. `bigs_total` is the
+# lower bound the walk can only raise, so `total0` is its starting value.
 def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                 +gn: Nat, +rem_lb: Nat, +items: +List<Item>,
                 +bigs: +List<BigClass>, buckets3: Array<+List<CWord>>,
@@ -1779,29 +1793,17 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
-      finish_cap(cap_walk(Nat.add(3n, Nat.mul(2n, bigs_len(bigs))), False{},
+      finish_cap(cap_walk(Nat.add(1n, Nat.mul(2n, bigs_len(bigs))), False{},
                    0n, bigs, Nil{}, 0n, bigs_total(bigs, rem_lb), best, gn,
                    ck_cheap(0n, tbl3)),
         g, seen, gen2, gn, rem_lb, items, buckets3)
-
-def finish_drain5_b(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
-                    +rem_lb: Nat, +items: +List<Item>,
-                    +bigs: +List<BigClass>, buckets3: Array<+List<CWord>>,
-                    tbl3: Array<U32>, +best: SolveRef.Best, +n: Nat,
-                    skip: Bool) -> GuessRes:
-  match skip:
-    case True{}:
-      GuessRes{Nil{}, Buf5{seen, buckets3, tbl3, gen2, gn}}
-    case False{}:
-      finish_node(False{},
-        g, seen, gen2, gn, rem_lb, items, bigs, buckets3, tbl3, best)
 
 def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
                   +best: SolveRef.Best, +n: Nat, dr: Drain5State) -> GuessRes:
   match dr:
     case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
-      finish_drain5_b(g, seen, gen2, gn, rem_lb, items, bigs, buckets3, tbl3,
-        best, n, False{})
+      finish_node(Nat.is_le(512n, n),
+        g, seen, gen2, gn, rem_lb, items, bigs, buckets3, tbl3, best)
 
 def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
                +gn: Nat, +best: SolveRef.Best, fs: Fill5State) -> GuessRes:
