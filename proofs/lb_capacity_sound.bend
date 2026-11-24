@@ -2509,3 +2509,143 @@ def LBS.cls_sum(+g: +List<Nat>, +kids0: +List<Tree.Child>,
               NatProof.Nat.is_le_trans(
                 Twice.LB.maxMult(Part.LB.remw(g, f, W)), Twice.LB.maxMult(W), 1n,
                 Part.LB.maxMult_rem(g, f, W), ndW)))
+
+# The capacity bound of a leaf is at most its candidate count.
+def LBS.capbound_le_one(+n: Nat, +k: Nat,
+    h: {Nat.is_le(n, 1n) == True{} : Bool}) ->
+  {Nat.is_le(Cap.LB.capbound(n, k), n) == True{} : Bool}:
+  match n:
+    case 0n:
+      NatProof.Nat.is_le_refl(0n)
+    case 1n+np:
+      +h0 : {Nat.is_le(np, 0n) == True{} : Bool} =
+        NatProof.Nat.is_le_succ_inv(np, 0n, h)
+      +e : {np == 0n : Nat} = NatProof.Nat.eq_zero_of_le_zero(np, h0)
+      +eb : {Cap.LB.capbound(1n+np, k) == 1n : Nat} =
+        Equal.trans(Nat, Cap.LB.capbound(1n+np, k), Cap.LB.capbound(1n, k), 1n,
+          Equal.cong(Nat, Nat, y => Cap.LB.capbound(1n+y, k), np, 0n, e),
+          Equal.trans(Nat, Cap.LB.capbound(1n, k),
+            Nat.add(1n, Nat.add(Nat.sub(1n, Nat.add(1n, Nat.mul(k, 0n))), 0n)),
+            1n, {==},
+            Equal.trans(Nat,
+              Nat.add(1n, Nat.add(Nat.sub(1n, Nat.add(1n, Nat.mul(k, 0n))), 0n)),
+              Nat.add(1n, Nat.add(Nat.sub(1n, Nat.add(1n, 0n)), 0n)), 1n,
+              Equal.cong(Nat, Nat,
+                y => Nat.add(1n, Nat.add(Nat.sub(1n, Nat.add(1n, y)), 0n)),
+                Nat.mul(k, 0n), 0n, CB.CB.mul_zero(k)),
+              {==})))
+      NatProof.Nat.is_le_eq_l(1n+np, 1n, Cap.LB.capbound(1n+np, k),
+        Equal.sym(Nat, Cap.LB.capbound(1n+np, k), 1n, eb),
+        CB.CB.is_le_add_self_r(1n, np))
+
+# The bound of a node, as a value.
+def LBS.NodeVal(+g: +List<Nat>, +kids: +List<Tree.Child>, +k: Nat) -> Type:
+  @S: +List<+List<Nat>> -> @nd: {Nat.is_le(Twice.LB.maxMult(S), 1n) == True{} : Bool}
+  -> Tree.AllHaveDepth(Tree.Node{g, kids}, S)
+  -> {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, S), k),
+                Tree.cost(Tree.Node{g, kids}, S)) == True{} : Bool}
+
+# The node's bound, from its children's class bounds.
+def LBS.node_bound(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +k: Nat, kv: LBS.KidVal(k, kids), w: LBS.Wid(Tree.Node{g, kids}, k)) ->
+  LBS.NodeVal(g, kids, k):
+  match kids:
+    case Nil{}:
+      S => nd => ad =>
+        +n : Nat = List.length(&2, +List<Nat>, S)
+        +hrem2 : {Nat.is_le(n, 1n) == True{} : Bool} =
+          LBS.len_rem_le_one(g, Nil{}, S, nd, ad)
+        +hcap : {Nat.is_le(Cap.LB.capbound(n, k), n) == True{} : Bool} =
+          LBS.capbound_le_one(n, k, hrem2)
+        +ec : {Tree.cost(Tree.Node{g, Nil{}}, S) == n : Nat} =
+          Equal.trans(Nat, Tree.cost(Tree.Node{g, Nil{}}, S),
+            Nat.add(n, NodeCost.NodeCost.kid_sum(g, Nil{}, S)), n,
+            NodeCost.NodeCost.cost_node(g, Nil{}, S, ad),
+            NatProof.NatPrf.add_zero(n))
+        NatProof.Nat.is_le_eq_r(Cap.LB.capbound(n, k), n,
+          Tree.cost(Tree.Node{g, Nil{}}, S), Equal.sym(Nat,
+            Tree.cost(Tree.Node{g, Nil{}}, S), n, ec), hcap)
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          LBS.node_bound_cons(g, f, t, rest, k, kv, w)
+
+def LBS.node_bound_cons(+g: +List<Nat>, +f: +List<Feedback.Color>, +t: Tree.Tree,
+    +rest: +List<Tree.Child>, +k: Nat,
+    kv: LBS.KidVal(k, Tree.Child{f, t} <> rest),
+    w: LBS.Wid(Tree.Node{g, Tree.Child{f, t} <> rest}, k)) ->
+  LBS.NodeVal(g, Tree.Child{f, t} <> rest, k):
+  (kh, kt) = kv
+  (wlen, wkids) = w
+  S => nd => ad =>
+            +hk : {Nat.is_le(1n, k) == True{} : Bool} =
+              NatProof.Nat.is_le_trans(1n,
+                List.length(&2, Tree.Child, Tree.Child{f, t} <> rest), k,
+                NatProof.Nat.is_le_of_lt(0n, List.length(&2, Tree.Child, rest),
+                  NatProof.Nat.is_lt_succ_self(List.length(&2, Tree.Child, rest))),
+                wlen)
+            +n : Nat = List.length(&2, +List<Nat>, S)
+            +ns : +List<Nat> = LBS.sizes(g, Tree.Child{f, t} <> rest, S)
+            +hcls : {Nat.is_le(LBS.capKidSum(ns, k),
+                               NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S))
+                     == True{} : Bool} =
+              LBS.cls_sum(g, Tree.Child{f, t} <> rest, Tree.Child{f, t} <> rest,
+                Nil{}, S, S, k, hk, {==}, {==}, kv, ad, nd)
+            +lrem : Nat =
+              List.length(&2, +List<Nat>, Part.LB.rem(g, Tree.Child{f, t} <> rest, S))
+            +hrem : {Nat.is_le(lrem, 1n) == True{} : Bool} =
+              LBS.len_rem_le_one(g, Tree.Child{f, t} <> rest, S, nd, ad)
+            +etot : {n == Nat.add(Part.LB.totSize(
+                         Part.LB.classes(g, Tree.Child{f, t} <> rest, S)), lrem) : Nat} =
+              Part.LB.totSize_split(g, Tree.Child{f, t} <> rest, S)
+            +esum : {Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S))
+                     == CB.CB.sum(ns) : Nat} =
+              Equal.sym(Nat, CB.CB.sum(ns),
+                Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S)),
+                LBS.sizes_tot(g, Tree.Child{f, t} <> rest, S))
+            +e : {n == Nat.add(CB.CB.sum(ns), lrem) : Nat} =
+              Equal.trans(Nat, n,
+                Nat.add(Part.LB.totSize(
+                  Part.LB.classes(g, Tree.Child{f, t} <> rest, S)), lrem),
+                Nat.add(CB.CB.sum(ns), lrem), etot,
+                Equal.cong(Nat, Nat, y => Nat.add(y, lrem),
+                  Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, S)),
+                  CB.CB.sum(ns), esum))
+            +hle : {Nat.is_le(n, Nat.add(CB.CB.sum(ns), 1n)) == True{} : Bool} =
+              NatProof.Nat.is_le_eq_l(Nat.add(CB.CB.sum(ns), 1n),
+                Nat.add(CB.CB.sum(ns), lrem), n,
+                Equal.sym(Nat, n, Nat.add(CB.CB.sum(ns), lrem), e),
+                CB.CB.is_le_add(CB.CB.sum(ns), CB.CB.sum(ns), lrem, 1n,
+                  NatProof.Nat.is_le_refl(CB.CB.sum(ns)), hrem))
+            +hlen : {Nat.is_le(List.length(&2, Nat, ns), k) == True{} : Bool} =
+              NatProof.Nat.is_le_eq_l(
+                List.length(&2, Tree.Child, Tree.Child{f, t} <> rest),
+                List.length(&2, Nat, ns), k,
+                Equal.sym(Nat, List.length(&2, Nat, ns),
+                  List.length(&2, Tree.Child, Tree.Child{f, t} <> rest),
+                  LBS.sizes_len(g, Tree.Child{f, t} <> rest, S)),
+                wlen)
+            +hnum : {Nat.is_le(Cap.LB.capSum(n, k, n, 1n), LBS.capKidSum(ns, k))
+                     == True{} : Bool} =
+              LBS.cap_num(n, ns, k, hk, hle, hlen)
+            +hnode : {Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S)
+                      == Nat.add(n, NodeCost.NodeCost.kid_sum(
+                           g, Tree.Child{f, t} <> rest, S)) : Nat} =
+              NodeCost.NodeCost.cost_node(g, Tree.Child{f, t} <> rest, S, ad)
+            +hsum : {Nat.is_le(Nat.add(n, Cap.LB.capSum(n, k, n, 1n)),
+                       Nat.add(n, NodeCost.NodeCost.kid_sum(
+                         g, Tree.Child{f, t} <> rest, S))) == True{} : Bool} =
+              CB.CB.is_le_add(n, n, Cap.LB.capSum(n, k, n, 1n),
+                NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S),
+                NatProof.Nat.is_le_refl(n),
+                NatProof.Nat.is_le_trans(Cap.LB.capSum(n, k, n, 1n),
+                  LBS.capKidSum(ns, k),
+                  NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S),
+                  hnum, hcls))
+            NatProof.Nat.is_le_eq_r(Nat.add(n, Cap.LB.capSum(n, k, n, 1n)),
+              Nat.add(n, NodeCost.NodeCost.kid_sum(g, Tree.Child{f, t} <> rest, S)),
+              Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S),
+              Equal.sym(Nat, Tree.cost(Tree.Node{g, Tree.Child{f, t} <> rest}, S),
+                Nat.add(n, NodeCost.NodeCost.kid_sum(
+                  g, Tree.Child{f, t} <> rest, S)), hnode),
+              hsum)
