@@ -24,6 +24,12 @@ bend src/main.bend -- --guesses words/guesses.txt --candidates words/candidates.
 `bend` checks the files and starts the program each time, which costs about half a second
 before the solver begins. A built binary skips that, so use it for benchmarks and repeated runs.
 
+The solver splits the root of the search into `2^d <= k` segments evaluated in parallel, where `k`
+is the number of threads the runtime was started with: a native binary takes
+`./wordle-bend --guesses <file> --candidates <file> +RTS --threads N`, and one thread means the
+sequential root. The split does not change the printed tree, and the JSON on stdout is the same for
+every thread count.
+
 ## Usage
 
 ```text

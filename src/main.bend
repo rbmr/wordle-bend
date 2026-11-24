@@ -9,7 +9,7 @@
 # any alphabet works, and the guesses and candidates must agree on case.
 import Base
 import ./tree.bend as Tree
-import ./solve.bend as Solve
+import ./solve_k.bend as SolveK
 import ./json.bend as Json
 
 # ---------------------------------------------------------------------------
@@ -300,34 +300,39 @@ def emit(tree: Maybe<Tree.Tree>) -> IO(Unit):
 
 def with_guesses(
   guesses: +List<+List<Nat>>, candidates: +List<+List<Nat>>,
-  +candidates_path: String
+  +candidates_path: String, +chunks: Nat
 ) -> IO(Unit):
   match candidates:
     case Nil{}:
       die_input(Unit, "error: no candidates in " ++ candidates_path)
     case Con{+c, +ct}:
-      emit(Solve.solve(guesses, Con{c, ct}))
+      emit(SolveK.solve_k(guesses, Con{c, ct}, chunks))
 
 # An empty list is an input error, reported before the solver runs. Matching
 # the list and rebuilding it is how the check sees the words without reading
 # the list twice.
 def solve_lists(
   guesses: +List<+List<Nat>>, candidates: +List<+List<Nat>>,
-  +guesses_path: String, +candidates_path: String
+  +guesses_path: String, +candidates_path: String, +chunks: Nat
 ) -> IO(Unit):
   match guesses:
     case Nil{}:
       die_input(Unit, "error: no guesses in " ++ guesses_path)
     case Con{+g, +gt}:
-      with_guesses(Con{g, gt}, candidates, candidates_path)
+      with_guesses(Con{g, gt}, candidates, candidates_path, chunks)
 
+# The chunk count is the number of threads the runtime was started with, so the
+# root split follows the machine the solver runs on. One thread means the
+# sequential root.
 def solve_files(+guesses_path: String, +candidates_path: String) -> IO(Unit):
   do IO<Unit>:
+    threads : U32 <- IO.thread_count()
     guesses_text : String <- read_file(guesses_path)
     candidates_text : String <- read_file(candidates_path)
     guesses : +List<+List<Nat>> = words_of_text(guesses_text)
     candidates : +List<+List<Nat>> = words_of_text(candidates_text)
-    solve_lists(guesses, candidates, guesses_path, candidates_path)
+    solve_lists(guesses, candidates, guesses_path, candidates_path,
+      U32.to_nat(threads))
 
 def required_candidates(guesses: String, candidates: Maybe<&2, String>) -> IO(Unit):
   match candidates:
