@@ -1470,3 +1470,641 @@ def LBS.keepw_nil(+g: +List<Nat>, +fb: +List<Feedback.Color>,
       Equal.trans(+List<+List<Nat>>, Part.LB.keepw_b(g, fb, h <> tl),
         Part.LB.keepw_of(g, fb, h, tl, b), Nil{},
         Part.LB.keepw_eq(g, fb, h, tl, b, {==}), core)
+
+# --- Membership and the first-match scan -----------------------------------
+
+# Boolean membership of a word in a candidate list.
+def LBS.mem(+w: +List<Nat>, +S: +List<+List<Nat>>) -> Bool:
+  match S:
+    case Nil{}:
+      False{}
+    case Con{h, t}:
+      Bool.or(Feedback.word_eq(w, h), LBS.mem(w, t))
+
+def LBS.or_true_l(+b: Bool) -> {Bool.or(True{}, b) == True{} : Bool}:
+  {==}
+
+# A member of the leftover filter is a member of the list.
+def LBS.mem_remw_mem_go(+g: +List<Nat>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    +h: +List<Nat>, +t: +List<+List<Nat>>, b: Bool,
+    +eb: {b == Part.LB.keep(g, f, h) : Bool},
+    x: Bool, +ex: {x == Feedback.word_eq(w, h) : Bool},
+    k: @p: {LBS.mem(w, Part.LB.remw(g, f, t)) == True{} : Bool}
+       -> {LBS.mem(w, t) == True{} : Bool},
+    p: {LBS.mem(w, Part.LB.remw_of(g, f, h, t, b)) == True{} : Bool}) ->
+  {Bool.or(x, LBS.mem(w, t)) == True{} : Bool}:
+  match b:
+    case True{}:
+      match x:
+        case True{}:
+          LBS.or_true_l(LBS.mem(w, t))
+        case False{}:
+          +hm : {LBS.mem(w, Part.LB.remw(g, f, t)) == True{} : Bool} =
+            LBS.or_elim_r(x, LBS.mem(w, Part.LB.remw(g, f, t)), p, {==})
+          LBS.or_intro_r(x, LBS.mem(w, t), k(hm))
+    case False{}:
+      match x:
+        case True{}:
+          LBS.or_true_l(LBS.mem(w, t))
+        case False{}:
+          +ew : {Feedback.word_eq(w, h) == False{} : Bool} =
+            Equal.sym(Bool, x, Feedback.word_eq(w, h), ex)
+          +hm : {LBS.mem(w, Part.LB.remw(g, f, t)) == True{} : Bool} =
+            LBS.or_elim_r(Feedback.word_eq(w, h), LBS.mem(w, Part.LB.remw(g, f, t)),
+              p, ew)
+          LBS.or_intro_r(x, LBS.mem(w, t), k(hm))
+
+def LBS.mem_remw_mem(+g: +List<Nat>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    +S: +List<+List<Nat>>, p: {LBS.mem(w, Part.LB.remw(g, f, S)) == True{} : Bool}) ->
+  {LBS.mem(w, S) == True{} : Bool}:
+  match S:
+    case Nil{}:
+      Empty.absurd({LBS.mem(w, Nil{}) == True{} : Bool},
+        Logic.Proof.false_ne_true(p))
+    case Con{h, t}:
+      +b : Bool = Part.LB.keep(g, f, h)
+      +x : Bool = Feedback.word_eq(w, h)
+      +p2 : {LBS.mem(w, Part.LB.remw_of(g, f, h, t, b)) == True{} : Bool} =
+        Equal.trans(Bool, LBS.mem(w, Part.LB.remw(g, f, h <> t)),
+          LBS.mem(w, Part.LB.remw_of(g, f, h, t, b)), True{},
+          Equal.cong(+List<+List<Nat>>, Bool, y => LBS.mem(w, y),
+            Part.LB.remw(g, f, h <> t), Part.LB.remw_of(g, f, h, t, b),
+            Part.LB.remw_eq(g, f, h, t, b, {==})),
+          p)
+      LBS.mem_remw_mem_go(g, f, w, h, t, b, {==}, x, {==},
+        q => LBS.mem_remw_mem(g, f, w, t, q), p2)
+
+# A word that survives the leftover filter fails that filter's keep test.
+def LBS.mem_remw_keep_go(+g: +List<Nat>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    +h: +List<Nat>, +t: +List<+List<Nat>>, b: Bool,
+    +eb: {b == Part.LB.keep(g, f, h) : Bool},
+    x: Bool, +ex: {x == Feedback.word_eq(w, h) : Bool},
+    k: @p: {LBS.mem(w, Part.LB.remw(g, f, t)) == True{} : Bool}
+       -> {Part.LB.keep(g, f, w) == False{} : Bool},
+    p: {LBS.mem(w, Part.LB.remw_of(g, f, h, t, b)) == True{} : Bool}) ->
+  {Part.LB.keep(g, f, w) == False{} : Bool}:
+  match b:
+    case True{}:
+      k(p)
+    case False{}:
+      match x:
+        case True{}:
+          +eq : {w == h : +List<Nat>} =
+            CoverList.Cover.word_eq_true(w, h, Equal.sym(Bool, x, Feedback.word_eq(w, h), ex))
+          Equal.trans(Bool, Part.LB.keep(g, f, w), Part.LB.keep(g, f, h), False{},
+            Equal.cong(+List<Nat>, Bool, y => Part.LB.keep(g, f, y), w, h, eq),
+            Equal.sym(Bool, False{}, Part.LB.keep(g, f, h), eb))
+        case False{}:
+          +ew : {Feedback.word_eq(w, h) == False{} : Bool} =
+            Equal.sym(Bool, x, Feedback.word_eq(w, h), ex)
+          +hm : {LBS.mem(w, Part.LB.remw(g, f, t)) == True{} : Bool} =
+            LBS.or_elim_r(Feedback.word_eq(w, h), LBS.mem(w, Part.LB.remw(g, f, t)),
+              p, ew)
+          k(hm)
+
+def LBS.mem_remw_keep(+g: +List<Nat>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    +S: +List<+List<Nat>>, p: {LBS.mem(w, Part.LB.remw(g, f, S)) == True{} : Bool}) ->
+  {Part.LB.keep(g, f, w) == False{} : Bool}:
+  match S:
+    case Nil{}:
+      Empty.absurd({Part.LB.keep(g, f, w) == False{} : Bool},
+        Logic.Proof.false_ne_true(p))
+    case Con{h, t}:
+      +b : Bool = Part.LB.keep(g, f, h)
+      +x : Bool = Feedback.word_eq(w, h)
+      +p2 : {LBS.mem(w, Part.LB.remw_of(g, f, h, t, b)) == True{} : Bool} =
+        Equal.trans(Bool, LBS.mem(w, Part.LB.remw(g, f, h <> t)),
+          LBS.mem(w, Part.LB.remw_of(g, f, h, t, b)), True{},
+          Equal.cong(+List<+List<Nat>>, Bool, y => LBS.mem(w, y),
+            Part.LB.remw(g, f, h <> t), Part.LB.remw_of(g, f, h, t, b),
+            Part.LB.remw_eq(g, f, h, t, b, {==})),
+          p)
+      LBS.mem_remw_keep_go(g, f, w, h, t, b, {==}, x, {==},
+        q => LBS.mem_remw_keep(g, f, w, t, q), p2)
+
+
+# The words no child of the prefix takes, from the whole candidate list.
+def LBS.remFold(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +S: +List<+List<Nat>>) -> +List<+List<Nat>>:
+  match pre:
+    case Nil{}:
+      S
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          LBS.remFold(g, rest, Part.LB.remw(g, f, S))
+
+# Every child of the prefix fails its keep test on a leftover word.
+def LBS.NoKeep(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +w: +List<Nat>) -> Type:
+  match pre:
+    case Nil{}:
+      Unit
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          {Part.LB.keep(g, f, w) == False{} : Bool} & LBS.NoKeep(g, rest, w)
+
+# No child of the prefix has this feedback.
+def LBS.NoFB(+pre: +List<Tree.Child>, +f: +List<Feedback.Color>) -> Type:
+  match pre:
+    case Nil{}:
+      Unit
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f0, t}:
+          {Feedback.feedback_eq(f0, f) == False{} : Bool} & LBS.NoFB(rest, f)
+
+# A word of the prefix-filtered list is a word of the list.
+def LBS.mem_remFold_mem(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +S: +List<+List<Nat>>, +w: +List<Nat>,
+    +p: {LBS.mem(w, LBS.remFold(g, pre, S)) == True{} : Bool}) ->
+  {LBS.mem(w, S) == True{} : Bool}:
+  match pre:
+    case Nil{}:
+      p
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          LBS.mem_remw_mem(g, f, w, S,
+            LBS.mem_remFold_mem(g, rest, Part.LB.remw(g, f, S), w, p))
+
+# A leftover word of the prefix-filtered list fails every prefix keep test.
+def LBS.remFold_keep(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +S: +List<+List<Nat>>, +w: +List<Nat>,
+    +p: {LBS.mem(w, LBS.remFold(g, pre, S)) == True{} : Bool}) ->
+  LBS.NoKeep(g, pre, w):
+  match pre:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          +hm : {LBS.mem(w, Part.LB.remw(g, f, S)) == True{} : Bool} =
+            LBS.mem_remFold_mem(g, rest, Part.LB.remw(g, f, S), w, p)
+          (LBS.mem_remw_keep(g, f, w, S, hm),
+           LBS.remFold_keep(g, rest, Part.LB.remw(g, f, S), w, p))
+
+# The head of a keep-failure conjunction.
+def LBS.nokeep_head(+g: +List<Nat>, +f: +List<Feedback.Color>, +t: Tree.Tree,
+    +rest: +List<Tree.Child>, +w: +List<Nat>,
+    hk: LBS.NoKeep(g, Tree.Child{f, t} <> rest, w)) ->
+  {Part.LB.keep(g, f, w) == False{} : Bool}:
+  (kf, kr) = hk
+  kf
+
+# The prefix has no child with the class's feedback.
+def LBS.remFold_nofb(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +S: +List<+List<Nat>>, +w: +List<Nat>,
+    +nf: {Feedback.word_eq(g, w) == False{} : Bool},
+    +p: {LBS.mem(w, LBS.remFold(g, pre, S)) == True{} : Bool}) ->
+  LBS.NoFB(pre, Feedback.feedback(g, w)):
+  match pre:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          (LBS.keep_false_r(Feedback.word_eq(g, w),
+             Feedback.feedback_eq(f, Feedback.feedback(g, w)),
+             LBS.nokeep_head(g, f, t, rest, w, LBS.remFold_keep(g, pre, S, w, p)), nf),
+           LBS.remFold_nofb(g, rest, Part.LB.remw(g, f, S), w, nf, p))
+
+# A child list whose first child has the wanted feedback looks that child up.
+def LBS.lookup_head_go(+fb: +List<Feedback.Color>, +f: +List<Feedback.Color>,
+    +t: Tree.Tree, +rest: +List<Tree.Child>, b: Bool,
+    +eb: {b == Feedback.feedback_eq(fb, f) : Bool},
+    hb: {b == True{} : Bool}) ->
+  {Tree.lookup(fb, Tree.Child{f, t} <> rest) == Some{t} : Maybe<&1, Tree.Tree>}:
+  match b:
+    case True{}:
+      +e1 : {Tree.lookup(fb, Tree.Child{f, t} <> rest)
+            == Feedback.Bool.case(Maybe<Tree.Tree>, Feedback.feedback_eq(fb, f),
+                 Some{t}, Tree.lookup(fb, rest)) : Maybe<&1, Tree.Tree>} =
+        {==}
+      +e2 : {Feedback.Bool.case(Maybe<Tree.Tree>, Feedback.feedback_eq(fb, f),
+                  Some{t}, Tree.lookup(fb, rest))
+             == Some{t} : Maybe<&1, Tree.Tree>} =
+        Equal.cong(Bool, Maybe<Tree.Tree>,
+          b2 => Feedback.Bool.case(Maybe<Tree.Tree>, b2, Some{t}, Tree.lookup(fb, rest)),
+          Feedback.feedback_eq(fb, f), True{},
+          Equal.trans(Bool, Feedback.feedback_eq(fb, f), b, True{},
+            Equal.sym(Bool, b, Feedback.feedback_eq(fb, f), eb), hb))
+      Equal.trans(Maybe<&1, Tree.Tree>, Tree.lookup(fb, Tree.Child{f, t} <> rest),
+        Feedback.Bool.case(Maybe<Tree.Tree>, Feedback.feedback_eq(fb, f),
+          Some{t}, Tree.lookup(fb, rest)), Some{t}, e1, e2)
+    case False{}:
+      Empty.absurd({Tree.lookup(fb, Tree.Child{f, t} <> rest) == Some{t}
+                    : Maybe<&1, Tree.Tree>},
+        Logic.Proof.false_ne_true(hb))
+
+def LBS.lookup_head(+f: +List<Feedback.Color>, +t: Tree.Tree,
+    +rest: +List<Tree.Child>) ->
+  {Tree.lookup(f, Tree.Child{f, t} <> rest) == Some{t} : Maybe<&1, Tree.Tree>}:
+  LBS.lookup_head_go(f, f, t, rest, Feedback.feedback_eq(f, f), {==},
+    FbProof.FbPrf.feedback_eq_refl(f))
+
+# A prefix without the wanted feedback is skipped by the lookup.
+def LBS.lookup_skip_any(+fb: +List<Feedback.Color>, +f0: +List<Feedback.Color>,
+    +t0: Tree.Tree, +X: +List<Tree.Child>, M: Maybe<Tree.Tree>, b: Bool,
+    +eb: {b == Feedback.feedback_eq(fb, f0) : Bool},
+    hb: {b == False{} : Bool},
+    ih: {Tree.lookup(fb, X) == M : Maybe<&1, Tree.Tree>}) ->
+  {Tree.lookup(fb, Tree.Child{f0, t0} <> X) == M : Maybe<&1, Tree.Tree>}:
+  match b:
+    case True{}:
+      Empty.absurd({Tree.lookup(fb, Tree.Child{f0, t0} <> X) == M : Maybe<&1, Tree.Tree>},
+        Logic.Proof.true_ne_false(hb))
+    case False{}:
+      +e1 : {Tree.lookup(fb, Tree.Child{f0, t0} <> X)
+            == Feedback.Bool.case(Maybe<Tree.Tree>, Feedback.feedback_eq(fb, f0),
+                 Some{t0}, Tree.lookup(fb, X)) : Maybe<&1, Tree.Tree>} =
+        {==}
+      +e2 : {Feedback.Bool.case(Maybe<Tree.Tree>, Feedback.feedback_eq(fb, f0),
+                  Some{t0}, Tree.lookup(fb, X))
+             == Tree.lookup(fb, X) : Maybe<&1, Tree.Tree>} =
+        Equal.cong(Bool, Maybe<Tree.Tree>,
+          b2 => Feedback.Bool.case(Maybe<Tree.Tree>, b2, Some{t0}, Tree.lookup(fb, X)),
+          Feedback.feedback_eq(fb, f0), False{},
+          Equal.trans(Bool, Feedback.feedback_eq(fb, f0), b, False{},
+            Equal.sym(Bool, b, Feedback.feedback_eq(fb, f0), eb), hb))
+      +e12 : {Tree.lookup(fb, Tree.Child{f0, t0} <> X) == Tree.lookup(fb, X)
+              : Maybe<&1, Tree.Tree>} =
+        Equal.trans(Maybe<&1, Tree.Tree>, Tree.lookup(fb, Tree.Child{f0, t0} <> X),
+          Feedback.Bool.case(Maybe<Tree.Tree>, Feedback.feedback_eq(fb, f0),
+            Some{t0}, Tree.lookup(fb, X)), Tree.lookup(fb, X), e1, e2)
+      Equal.trans(Maybe<&1, Tree.Tree>, Tree.lookup(fb, Tree.Child{f0, t0} <> X),
+        Tree.lookup(fb, X), M, e12, ih)
+
+def LBS.lookup_skip_pre(+f: +List<Feedback.Color>, +pre: +List<Tree.Child>,
+    +X: +List<Tree.Child>, p: LBS.NoFB(pre, f)) ->
+  {Tree.lookup(f, List.append(&2, Tree.Child, pre, X)) == Tree.lookup(f, X)
+   : Maybe<&1, Tree.Tree>}:
+  match pre:
+    case Nil{}:
+      {==}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f0, t0}:
+          (nf0, nr) = p
+          +ef0 : {Feedback.feedback_eq(f, f0) == False{} : Bool} =
+            Equal.trans(Bool, Feedback.feedback_eq(f, f0),
+              Feedback.feedback_eq(f0, f), False{},
+              FbProof.FeedbackProof.feedback_eq_sym_bool(f, f0), nf0)
+          +ih : {Tree.lookup(f, List.append(&2, Tree.Child, rest, X))
+                 == Tree.lookup(f, X) : Maybe<&1, Tree.Tree>} =
+            LBS.lookup_skip_pre(f, rest, X, nr)
+          LBS.lookup_skip_any(f, f0, t0, List.append(&2, Tree.Child, rest, X),
+            Tree.lookup(f, X), Feedback.feedback_eq(f, f0), {==}, ef0, ih)
+
+# A member of the kept filter is a member of the list.
+def LBS.mem_keepw_mem_go(+g: +List<Nat>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    +h: +List<Nat>, +t: +List<+List<Nat>>, b: Bool,
+    +eb: {b == Part.LB.keep(g, f, h) : Bool},
+    x: Bool, +ex: {x == Feedback.word_eq(w, h) : Bool},
+    k: @p: {LBS.mem(w, Part.LB.keepw_b(g, f, t)) == True{} : Bool}
+       -> {LBS.mem(w, t) == True{} : Bool},
+    p: {LBS.mem(w, Part.LB.keepw_of(g, f, h, t, b)) == True{} : Bool}) ->
+  {Bool.or(x, LBS.mem(w, t)) == True{} : Bool}:
+  match b:
+    case True{}:
+      match x:
+        case True{}:
+          LBS.or_true_l(LBS.mem(w, t))
+        case False{}:
+          +ew : {Feedback.word_eq(w, h) == False{} : Bool} =
+            Equal.sym(Bool, x, Feedback.word_eq(w, h), ex)
+          +hm : {LBS.mem(w, Part.LB.keepw_b(g, f, t)) == True{} : Bool} =
+            LBS.or_elim_r(Feedback.word_eq(w, h),
+              LBS.mem(w, Part.LB.keepw_b(g, f, t)), p, ew)
+          LBS.or_intro_r(x, LBS.mem(w, t), k(hm))
+    case False{}:
+      LBS.or_intro_r(x, LBS.mem(w, t), k(p))
+
+def LBS.mem_keepw_mem(+g: +List<Nat>, +f: +List<Feedback.Color>, +w: +List<Nat>,
+    +S: +List<+List<Nat>>, p: {LBS.mem(w, Part.LB.keepw_b(g, f, S)) == True{} : Bool}) ->
+  {LBS.mem(w, S) == True{} : Bool}:
+  match S:
+    case Nil{}:
+      Empty.absurd({LBS.mem(w, Nil{}) == True{} : Bool}, Logic.Proof.false_ne_true(p))
+    case Con{h, t}:
+      +b : Bool = Part.LB.keep(g, f, h)
+      +x : Bool = Feedback.word_eq(w, h)
+      +p2 : {LBS.mem(w, Part.LB.keepw_of(g, f, h, t, b)) == True{} : Bool} =
+        Equal.trans(Bool, LBS.mem(w, Part.LB.keepw_b(g, f, h <> t)),
+          LBS.mem(w, Part.LB.keepw_of(g, f, h, t, b)), True{},
+          Equal.cong(+List<+List<Nat>>, Bool, y => LBS.mem(w, y),
+            Part.LB.keepw_b(g, f, h <> t), Part.LB.keepw_of(g, f, h, t, b),
+            Part.LB.keepw_eq(g, f, h, t, b, {==})),
+          p)
+      LBS.mem_keepw_mem_go(g, f, w, h, t, b, {==}, x, {==},
+        q => LBS.mem_keepw_mem(g, f, w, t, q), p2)
+
+# The head of a non-empty list is a member.
+def LBS.mem_head(+h: +List<Nat>, +tl: +List<+List<Nat>>) ->
+  {LBS.mem(h, h <> tl) == True{} : Bool}:
+  LBS.or_intro_l(Feedback.word_eq(h, h), LBS.mem(h, tl), FbProof.FbPrf.word_eq_refl(h))
+
+# Transport the no-feedback condition along an equality of feedbacks.
+def LBS.nofb_eq(+pre: +List<Tree.Child>, +f1: +List<Feedback.Color>,
+    +f2: +List<Feedback.Color>, +e: {f1 == f2 : +List<Feedback.Color>},
+    p: LBS.NoFB(pre, f1)) -> LBS.NoFB(pre, f2):
+  match pre:
+    case Nil{}:
+      Unit{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f0, t}:
+          (nf0, nr) = p
+          (Equal.trans(Bool, Feedback.feedback_eq(f0, f2), Feedback.feedback_eq(f0, f1),
+             False{}, Equal.cong(+List<Feedback.Color>, Bool,
+               y => Feedback.feedback_eq(f0, y), f2, f1, Equal.sym(+List<Feedback.Color>,
+                 f1, f2, e)), nf0),
+           LBS.nofb_eq(rest, f1, f2, e, nr))
+
+# A non-empty class's tree is the child at its own position.
+def LBS.cls_lookup(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +rest: +List<Tree.Child>,
+    +S: +List<+List<Nat>>, +h: +List<Nat>, +tl: +List<+List<Nat>>,
+    +eq : {Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)) == h <> tl
+           : +List<+List<Nat>>},
+    +nw : {Feedback.word_eq(g, h) == False{} : Bool},
+    +nf : {Feedback.feedback_eq(f, Feedback.feedback(g, h)) == True{} : Bool}) ->
+  {Tree.lookup(f, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest))
+   == Some{t} : Maybe<&1, Tree.Tree>}:
+  +hmem1 : {LBS.mem(h, Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S))) == True{} : Bool} =
+    Equal.trans(Bool, LBS.mem(h, Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S))),
+      LBS.mem(h, h <> tl), True{},
+      Equal.cong(+List<+List<Nat>>, Bool, y => LBS.mem(h, y),
+        Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)), h <> tl, eq),
+      LBS.mem_head(h, tl))
+  +hmem : {LBS.mem(h, LBS.remFold(g, pre, S)) == True{} : Bool} =
+    LBS.mem_keepw_mem(g, f, h, LBS.remFold(g, pre, S), hmem1)
+  +efh : {Feedback.feedback(g, h) == f : +List<Feedback.Color>} =
+    Equal.sym(+List<Feedback.Color>, f, Feedback.feedback(g, h),
+      FbProof.FbPrf.feedback_eq_true(f, Feedback.feedback(g, h), nf))
+  nofb : LBS.NoFB(pre, f) =
+    LBS.nofb_eq(pre, Feedback.feedback(g, h), f, efh,
+      LBS.remFold_nofb(g, pre, S, h, nw, hmem))
+  +lk1 : {Tree.lookup(f, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest))
+          == Tree.lookup(f, Tree.Child{f, t} <> rest) : Maybe<&1, Tree.Tree>} =
+    LBS.lookup_skip_pre(f, pre, Tree.Child{f, t} <> rest, nofb)
+  Equal.trans(Maybe<&1, Tree.Tree>,
+    Tree.lookup(f, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest)),
+    Tree.lookup(f, Tree.Child{f, t} <> rest), Some{t}, lk1,
+    LBS.lookup_head(f, t, rest))
+
+# The head facts of a class.
+def LBS.kf_nw(+g: +List<Nat>, +f: +List<Feedback.Color>, +h: +List<Nat>,
+    +tl: +List<+List<Nat>>, kf: Decomp.LB.KeepFacts(g, f, h <> tl)) ->
+  {Feedback.word_eq(g, h) == False{} : Bool}:
+  (nw, rest) = kf
+  (nf, krest) = rest
+  nw
+
+def LBS.kf_nf(+g: +List<Nat>, +f: +List<Feedback.Color>, +h: +List<Nat>,
+    +tl: +List<+List<Nat>>, kf: Decomp.LB.KeepFacts(g, f, h <> tl)) ->
+  {Feedback.feedback_eq(f, Feedback.feedback(g, h)) == True{} : Bool}:
+  (nw, rest) = kf
+  (nf, krest) = rest
+  nf
+
+def LBS.kf_tail(+g: +List<Nat>, +f: +List<Feedback.Color>, +h: +List<Nat>,
+    +tl: +List<+List<Nat>>, kf: Decomp.LB.KeepFacts(g, f, h <> tl)) ->
+  Decomp.LB.KeepFacts(g, f, tl):
+  (nw, rest) = kf
+  (nf, krest) = rest
+  krest
+
+# One candidate's cost at a node is its depth in the looked-up child.
+def LBS.kid_cost_false(+g: +List<Nat>, +kids0: +List<Tree.Child>, +h: +List<Nat>,
+    b: Bool, +eb: {b == Feedback.word_eq(g, h) : Bool},
+    hb: {b == False{} : Bool}) ->
+  {NodeCost.NodeCost.kid_cost(g, kids0, h)
+   == NodeCost.NodeCost.maybe_depth(
+        Tree.lookup(Feedback.feedback(g, h), kids0), h) : Nat}:
+  match b:
+    case True{}:
+      Empty.absurd({NodeCost.NodeCost.kid_cost(g, kids0, h)
+                    == NodeCost.NodeCost.maybe_depth(
+                         Tree.lookup(Feedback.feedback(g, h), kids0), h) : Nat},
+        Logic.Proof.true_ne_false(hb))
+    case False{}:
+      +e1 : {NodeCost.NodeCost.kid_cost(g, kids0, h)
+             == Feedback.Bool.case(Nat, Feedback.word_eq(g, h), 0n,
+                  NodeCost.NodeCost.maybe_depth(
+                    Tree.lookup(Feedback.feedback(g, h), kids0), h)) : Nat} =
+        {==}
+      +e2 : {Feedback.Bool.case(Nat, Feedback.word_eq(g, h), 0n,
+                  NodeCost.NodeCost.maybe_depth(
+                    Tree.lookup(Feedback.feedback(g, h), kids0), h))
+             == Feedback.Bool.case(Nat, False{}, 0n,
+                  NodeCost.NodeCost.maybe_depth(
+                    Tree.lookup(Feedback.feedback(g, h), kids0), h)) : Nat} =
+        Equal.cong(Bool, Nat,
+          y => Feedback.Bool.case(Nat, y, 0n,
+            NodeCost.NodeCost.maybe_depth(
+              Tree.lookup(Feedback.feedback(g, h), kids0), h)),
+          Feedback.word_eq(g, h), False{},
+          Equal.trans(Bool, Feedback.word_eq(g, h), b, False{},
+            Equal.sym(Bool, b, Feedback.word_eq(g, h), eb), hb))
+      Equal.trans(Nat, NodeCost.NodeCost.kid_cost(g, kids0, h),
+        Feedback.Bool.case(Nat, Feedback.word_eq(g, h), 0n,
+          NodeCost.NodeCost.maybe_depth(
+            Tree.lookup(Feedback.feedback(g, h), kids0), h)),
+        NodeCost.NodeCost.maybe_depth(
+          Tree.lookup(Feedback.feedback(g, h), kids0), h),
+        e1, Equal.trans(Nat,
+          Feedback.Bool.case(Nat, Feedback.word_eq(g, h), 0n,
+            NodeCost.NodeCost.maybe_depth(
+              Tree.lookup(Feedback.feedback(g, h), kids0), h)),
+          Feedback.Bool.case(Nat, False{}, 0n,
+            NodeCost.NodeCost.maybe_depth(
+              Tree.lookup(Feedback.feedback(g, h), kids0), h)),
+          NodeCost.NodeCost.maybe_depth(
+            Tree.lookup(Feedback.feedback(g, h), kids0), h), e2, {==}))
+
+def LBS.kid_cost_at(+g: +List<Nat>, +kids0: +List<Tree.Child>, +h: +List<Nat>,
+    +t: Tree.Tree, +f: +List<Feedback.Color>,
+    +nw: {Feedback.word_eq(g, h) == False{} : Bool},
+    +nf: {Feedback.feedback_eq(f, Feedback.feedback(g, h)) == True{} : Bool},
+    +lk: {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>}) ->
+  {NodeCost.NodeCost.kid_cost(g, kids0, h)
+   == Maybe.default(&1, Nat, Tree.depth(t, h), 0n) : Nat}:
+  +e1 : {NodeCost.NodeCost.kid_cost(g, kids0, h)
+         == NodeCost.NodeCost.maybe_depth(
+              Tree.lookup(Feedback.feedback(g, h), kids0), h) : Nat} =
+    LBS.kid_cost_false(g, kids0, h, Feedback.word_eq(g, h), {==}, nw)
+  +efh : {Feedback.feedback(g, h) == f : +List<Feedback.Color>} =
+    Equal.sym(+List<Feedback.Color>, f, Feedback.feedback(g, h),
+      FbProof.FbPrf.feedback_eq_true(f, Feedback.feedback(g, h), nf))
+  Equal.trans(Nat, NodeCost.NodeCost.kid_cost(g, kids0, h),
+    NodeCost.NodeCost.maybe_depth(Tree.lookup(Feedback.feedback(g, h), kids0), h),
+    Maybe.default(&1, Nat, Tree.depth(t, h), 0n), e1,
+    Equal.trans(Nat,
+      NodeCost.NodeCost.maybe_depth(Tree.lookup(Feedback.feedback(g, h), kids0), h),
+      NodeCost.NodeCost.maybe_depth(Tree.lookup(f, kids0), h),
+      Maybe.default(&1, Nat, Tree.depth(t, h), 0n),
+      Equal.cong(+List<Feedback.Color>, Nat,
+        y => NodeCost.NodeCost.maybe_depth(Tree.lookup(y, kids0), h),
+        Feedback.feedback(g, h), f, efh),
+      Equal.trans(Nat, NodeCost.NodeCost.maybe_depth(Tree.lookup(f, kids0), h),
+        NodeCost.NodeCost.maybe_depth(Some{t}, h),
+        Maybe.default(&1, Nat, Tree.depth(t, h), 0n),
+        Equal.cong(Maybe<&1, Tree.Tree>, Nat,
+          y => NodeCost.NodeCost.maybe_depth(y, h), Tree.lookup(f, kids0), Some{t}, lk),
+        {==})))
+
+# The whole class costs what the child costs on it.
+def LBS.cls_cost(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +ws: +List<+List<Nat>>,
+    +lk: {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>},
+    kf: Decomp.LB.KeepFacts(g, f, ws)) ->
+  {NodeCost.NodeCost.kid_sum(g, kids0, ws) == Tree.cost(t, ws) : Nat}:
+  match ws:
+    case Nil{}:
+      {==}
+    case Con{h, tl}:
+      (nw, rest) = kf
+      (nf, krest) = rest
+      +ih : {NodeCost.NodeCost.kid_sum(g, kids0, tl) == Tree.cost(t, tl) : Nat} =
+        LBS.cls_cost(g, kids0, f, t, tl, lk, krest)
+      +eh : {NodeCost.NodeCost.kid_cost(g, kids0, h)
+             == Maybe.default(&1, Nat, Tree.depth(t, h), 0n) : Nat} =
+        LBS.kid_cost_at(g, kids0, h, t, f, nw, nf, lk)
+      Equal.trans(Nat, NodeCost.NodeCost.kid_sum(g, kids0, h <> tl),
+        Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n),
+                NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+        Tree.cost(t, h <> tl),
+        Equal.cong(Nat, Nat,
+          y => Nat.add(y, NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+          NodeCost.NodeCost.kid_cost(g, kids0, h),
+          Maybe.default(&1, Nat, Tree.depth(t, h), 0n), eh),
+        Equal.trans(Nat,
+          Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n),
+                  NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+          Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n), Tree.cost(t, tl)),
+          Tree.cost(t, h <> tl),
+          Equal.cong(Nat, Nat,
+            y => Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n), y),
+            NodeCost.NodeCost.kid_sum(g, kids0, tl), Tree.cost(t, tl), ih),
+          {==}))
+
+# A class word's depth in the class's child exists.
+def LBS.cls_ad_go(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +h: +List<Nat>,
+    +tl: +List<+List<Nat>>,
+    sh: {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids0}, h)) == True{} : Bool},
+    +nw: {Feedback.word_eq(g, h) == False{} : Bool},
+    +nf: {Feedback.feedback_eq(f, Feedback.feedback(g, h)) == True{} : Bool},
+    +lk: {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>},
+    ih: Tree.AllHaveDepth(t, tl)) ->
+  Tree.AllHaveDepth(t, h <> tl):
+  +ed : {Tree.depth(Tree.Node{g, kids0}, h)
+         == Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h))
+         : Maybe<Nat>} =
+    LBS.node_depth_false(g, kids0, h, nw)
+  +s1 : {Maybe.is_some(&1, Nat,
+           Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h)))
+         == True{} : Bool} =
+    Equal.trans(Bool, Maybe.is_some(&1, Nat,
+        Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h))),
+      Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids0}, h)), True{},
+      Equal.cong(Maybe<Nat>, Bool, m2 => Maybe.is_some(&1, Nat, m2),
+        Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h)),
+        Tree.depth(Tree.Node{g, kids0}, h), Equal.sym(Maybe<Nat>,
+          Tree.depth(Tree.Node{g, kids0}, h),
+          Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h)), ed)),
+      sh)
+  +s2 : {Maybe.is_some(&1, Nat, Tree.depth.go(kids0, Feedback.feedback(g, h), h))
+         == True{} : Bool} =
+    Equal.trans(Bool,
+      Maybe.is_some(&1, Nat, Tree.depth.go(kids0, Feedback.feedback(g, h), h)),
+      Maybe.is_some(&1, Nat,
+        Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h))),
+      True{},
+      Equal.sym(Bool,
+        Maybe.is_some(&1, Nat,
+          Tree.depth.bump(Tree.depth.go(kids0, Feedback.feedback(g, h), h))),
+        Maybe.is_some(&1, Nat, Tree.depth.go(kids0, Feedback.feedback(g, h), h)),
+        NodeCost.NodeCost.is_some_bump(
+          Tree.depth.go(kids0, Feedback.feedback(g, h), h))),
+      s1)
+  +s3 : {Maybe.is_some(&1, Nat,
+           DepthProof.DepthProof.lookup_depth(
+             Tree.lookup(Feedback.feedback(g, h), kids0), h)) == True{} : Bool} =
+    Equal.trans(Bool,
+      Maybe.is_some(&1, Nat,
+        DepthProof.DepthProof.lookup_depth(
+          Tree.lookup(Feedback.feedback(g, h), kids0), h)),
+      Maybe.is_some(&1, Nat, Tree.depth.go(kids0, Feedback.feedback(g, h), h)),
+      True{},
+      Equal.cong(Maybe<Nat>, Bool, m2 => Maybe.is_some(&1, Nat, m2),
+        DepthProof.DepthProof.lookup_depth(
+          Tree.lookup(Feedback.feedback(g, h), kids0), h),
+        Tree.depth.go(kids0, Feedback.feedback(g, h), h),
+        Equal.sym(Maybe<Nat>, Tree.depth.go(kids0, Feedback.feedback(g, h), h),
+          DepthProof.DepthProof.lookup_depth(
+            Tree.lookup(Feedback.feedback(g, h), kids0), h),
+          DepthProof.DepthProof.depth_go_lookup(kids0, Feedback.feedback(g, h), h))),
+      s2)
+  +efh : {Feedback.feedback(g, h) == f : +List<Feedback.Color>} =
+    Equal.sym(+List<Feedback.Color>, f, Feedback.feedback(g, h),
+      FbProof.FbPrf.feedback_eq_true(f, Feedback.feedback(g, h), nf))
+  +s4 : {Maybe.is_some(&1, Nat,
+           DepthProof.DepthProof.lookup_depth(Tree.lookup(f, kids0), h))
+         == True{} : Bool} =
+    Equal.trans(Bool,
+      Maybe.is_some(&1, Nat,
+        DepthProof.DepthProof.lookup_depth(Tree.lookup(f, kids0), h)),
+      Maybe.is_some(&1, Nat,
+        DepthProof.DepthProof.lookup_depth(
+          Tree.lookup(Feedback.feedback(g, h), kids0), h)),
+      True{},
+      Equal.cong(Maybe<Tree.Tree>, Bool,
+        m2 => Maybe.is_some(&1, Nat, DepthProof.DepthProof.lookup_depth(m2, h)),
+        Tree.lookup(f, kids0), Tree.lookup(Feedback.feedback(g, h), kids0),
+        Equal.cong(+List<Feedback.Color>, Maybe<&1, Tree.Tree>,
+          y => Tree.lookup(y, kids0), f, Feedback.feedback(g, h),
+          Equal.sym(+List<Feedback.Color>, Feedback.feedback(g, h), f, efh))),
+      s3)
+  +s5 : {Maybe.is_some(&1, Nat,
+           DepthProof.DepthProof.lookup_depth(Some{t}, h)) == True{} : Bool} =
+    Equal.trans(Bool,
+      Maybe.is_some(&1, Nat, DepthProof.DepthProof.lookup_depth(Some{t}, h)),
+      Maybe.is_some(&1, Nat,
+        DepthProof.DepthProof.lookup_depth(Tree.lookup(f, kids0), h)),
+      True{},
+      Equal.cong(Maybe<&1, Tree.Tree>, Bool,
+        m2 => Maybe.is_some(&1, Nat, DepthProof.DepthProof.lookup_depth(m2, h)),
+        Some{t}, Tree.lookup(f, kids0), Equal.sym(Maybe<&1, Tree.Tree>,
+          Tree.lookup(f, kids0), Some{t}, lk)),
+      s4)
+  +s6 : {Maybe.is_some(&1, Nat, DepthProof.DepthProof.step(t, h)) == True{} : Bool} =
+    s5
+  +s7 : {Maybe.is_some(&1, Nat, Tree.depth(t, h)) == True{} : Bool} =
+    Equal.trans(Bool, Maybe.is_some(&1, Nat, Tree.depth(t, h)),
+      Maybe.is_some(&1, Nat, DepthProof.DepthProof.step(t, h)), True{},
+      Equal.sym(Bool, Maybe.is_some(&1, Nat, DepthProof.DepthProof.step(t, h)),
+        Maybe.is_some(&1, Nat, Tree.depth(t, h)),
+        Equal.cong(Maybe<Nat>, Bool, m2 => Maybe.is_some(&1, Nat, m2),
+          DepthProof.DepthProof.step(t, h), Tree.depth(t, h),
+          NodeCost.NodeCost.step_is_depth(t, h))),
+      s6)
+  (s7, ih)
+
+def LBS.cls_ad(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +ws: +List<+List<Nat>>,
+    +lk: {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>},
+    kf: Decomp.LB.KeepFacts(g, f, ws),
+    ad: Tree.AllHaveDepth(Tree.Node{g, kids0}, ws)) ->
+  Tree.AllHaveDepth(t, ws):
+  match ws:
+    case Nil{}:
+      Unit{}
+    case Con{h, tl}:
+      (nw, rest) = kf
+      (nf, krest) = rest
+      (sh, st) = ad
+      LBS.cls_ad_go(g, kids0, f, t, h, tl, sh, nw, nf, lk,
+        LBS.cls_ad(g, kids0, f, t, tl, lk, krest, st))
