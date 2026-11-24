@@ -2246,7 +2246,7 @@ def LBS.cls_one(+g: +List<Nat>, +kids0: +List<Tree.Child>,
            : +List<Tree.Child>},
     +wseq: {Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)) == ws : +List<+List<Nat>>},
     capT: LBS.CapT(k, t),
-    adW: Tree.AllHaveDepth(Tree.Node{g, kids0}, LBS.remFold(g, pre, S)),
+    adws: Tree.AllHaveDepth(Tree.Node{g, kids0}, ws),
     +ndW: {Nat.is_le(Twice.LB.maxMult(LBS.remFold(g, pre, S)), 1n) == True{} : Bool}) ->
   {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
              NodeCost.NodeCost.kid_sum(g, kids0, ws)) == True{} : Bool}:
@@ -2289,8 +2289,7 @@ def LBS.cls_one(+g: +List<Nat>, +kids0: +List<Tree.Child>,
           Decomp.LB.keepfacts_eq(g, f,
             Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)), h <> tl, wseq,
             Decomp.LB.keep_facts(g, f, LBS.remFold(g, pre, S))),
-          LBS.ad_keepw(Tree.Node{g, kids0}, g, f, LBS.remFold(g, pre, S),
-            h <> tl, wseq, adW)))
+          adws))
 
 # The class sizes of the scan, one per position.
 def LBS.sizes(+g: +List<Nat>, +kids: +List<Tree.Child>,
@@ -2350,20 +2349,20 @@ def LBS.sizes_len(+g: +List<Nat>, +kids: +List<Tree.Child>,
             List.length(&2, Tree.Child, rest),
             LBS.sizes_len(g, rest, Part.LB.remw(g, f, W)))
 
-# Appending a list of children is associative, one child at a time.
-def LBS.app_assoc(+xs: +List<Tree.Child>, +ys: +List<Tree.Child>,
-    +zs: +List<Tree.Child>) ->
-  {List.append(&2, Tree.Child, xs, List.append(&2, Tree.Child, ys, zs))
-   == List.append(&2, Tree.Child, List.append(&2, Tree.Child, xs, ys), zs)
+# Appending one child at the end of a prefix is the same as appending ahead.
+def LBS.app_snoc(+xs: +List<Tree.Child>, +c: Tree.Child,
+    +rest: +List<Tree.Child>) ->
+  {List.append(&2, Tree.Child, xs, c <> rest)
+   == List.append(&2, Tree.Child, List.append(&2, Tree.Child, xs, [c]), rest)
    : +List<Tree.Child>}:
   match xs:
     case Nil{}:
       {==}
     case Con{x, xt}:
       Equal.cong(+List<Tree.Child>, +List<Tree.Child>, y => x <> y,
-        List.append(&2, Tree.Child, xt, List.append(&2, Tree.Child, ys, zs)),
-        List.append(&2, Tree.Child, List.append(&2, Tree.Child, xt, ys), zs),
-        LBS.app_assoc(xt, ys, zs))
+        List.append(&2, Tree.Child, xt, c <> rest),
+        List.append(&2, Tree.Child, List.append(&2, Tree.Child, xt, [c]), rest),
+        LBS.app_snoc(xt, c, rest))
 
 # Extending the prefix at the end is one more leftover filter.
 def LBS.remFold_snoc(+g: +List<Nat>, +pre: +List<Tree.Child>,
@@ -2391,3 +2390,122 @@ def LBS.ad_remw(+t: Tree.Tree, +g: +List<Nat>, +f: +List<Feedback.Color>,
     +W: +List<+List<Nat>>, ad: Tree.AllHaveDepth(t, W)) ->
   Tree.AllHaveDepth(t, Part.LB.remw(g, f, W)):
   LBS.ad_remw_take(t, g, f, W, AdSplit.LB.ad_split(t, g, f, W, ad))
+
+# Rewrite the left side of a bound by one.
+def LBS.le_maxMult_rewrite(+a: Nat, +b: Nat, e: {a == b : Nat},
+    p: {Nat.is_le(a, 1n) == True{} : Bool}) -> {Nat.is_le(b, 1n) == True{} : Bool}:
+  LBS.le_one_rewrite(a, b, 1n, e, p)
+
+# The tail of the per-position bounds.
+def LBS.kidval_tail(+k: Nat, +f: +List<Feedback.Color>, +t: Tree.Tree,
+    +rest: +List<Tree.Child>, kv: LBS.KidVal(k, Tree.Child{f, t} <> rest)) ->
+  LBS.KidVal(k, rest):
+  (kh, kt) = kv
+  kt
+
+# One class step of the scan, with the split depth facts as a parameter.
+def LBS.cls_sum_go(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +pre: +List<Tree.Child>, +S: +List<+List<Nat>>, +W: +List<+List<Nat>>, +k: Nat,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +rest: +List<Tree.Child>,
+    +keq: {kids0 == List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest)
+           : +List<Tree.Child>},
+    +weq: {W == LBS.remFold(g, pre, S) : +List<+List<Nat>>},
+    kh: LBS.CapT(k, t),
+    p: Tree.AllHaveDepth(Tree.Node{g, kids0}, Part.LB.keepw_b(g, f, W))
+       & Tree.AllHaveDepth(Tree.Node{g, kids0}, Part.LB.remw(g, f, W)),
+    +ndW: {Nat.is_le(Twice.LB.maxMult(W), 1n) == True{} : Bool},
+    h2f: @ar: Tree.AllHaveDepth(Tree.Node{g, kids0}, Part.LB.remw(g, f, W))
+         -> {Nat.is_le(LBS.capKidSum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)), k),
+                       NodeCost.NodeCost.kid_sum(g, kids0, Part.LB.remw(g, f, W)))
+             == True{} : Bool}) ->
+  {Nat.is_le(LBS.capKidSum(LBS.sizes(g, Tree.Child{f, t} <> rest, W), k),
+             NodeCost.NodeCost.kid_sum(g, kids0, W)) == True{} : Bool}:
+  (ak, ar) = p
+  +ws : +List<+List<Nat>> = Part.LB.keepw_b(g, f, W)
+  +h1 : {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+                   NodeCost.NodeCost.kid_sum(g, kids0, ws)) == True{} : Bool} =
+    LBS.cls_one(g, kids0, pre, f, t, rest, S, k, ws, keq,
+      Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
+        y => Part.LB.keepw_b(g, f, y), LBS.remFold(g, pre, S), W,
+        Equal.sym(+List<+List<Nat>>, W, LBS.remFold(g, pre, S), weq)),
+      kh, LBS.ad_eq(Tree.Node{g, kids0}, Part.LB.keepw_b(g, f, W), ws, {==}, ak),
+      LBS.le_maxMult_rewrite(
+        Twice.LB.maxMult(W), Twice.LB.maxMult(LBS.remFold(g, pre, S)),
+        Equal.cong(+List<+List<Nat>>, Nat, y => Twice.LB.maxMult(y),
+          W, LBS.remFold(g, pre, S), weq), ndW))
+  +h2 : {Nat.is_le(LBS.capKidSum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)), k),
+                   NodeCost.NodeCost.kid_sum(g, kids0, Part.LB.remw(g, f, W)))
+         == True{} : Bool} = h2f(ar)
+  +h : {Nat.is_le(
+          Nat.add(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+            LBS.capKidSum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)), k)),
+          Nat.add(NodeCost.NodeCost.kid_sum(g, kids0, ws),
+            NodeCost.NodeCost.kid_sum(g, kids0, Part.LB.remw(g, f, W))))
+        == True{} : Bool} =
+    CB.CB.is_le_add(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+      NodeCost.NodeCost.kid_sum(g, kids0, ws),
+      LBS.capKidSum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)), k),
+      NodeCost.NodeCost.kid_sum(g, kids0, Part.LB.remw(g, f, W)), h1, h2)
+  NatProof.Nat.is_le_eq_l(
+    NodeCost.NodeCost.kid_sum(g, kids0, W),
+    Nat.add(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+      LBS.capKidSum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)), k)),
+    LBS.capKidSum(LBS.sizes(g, Tree.Child{f, t} <> rest, W), k),
+    {==},
+    NatProof.Nat.is_le_eq_r(
+      Nat.add(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+        LBS.capKidSum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)), k)),
+      Nat.add(NodeCost.NodeCost.kid_sum(g, kids0, ws),
+        NodeCost.NodeCost.kid_sum(g, kids0, Part.LB.remw(g, f, W))),
+      NodeCost.NodeCost.kid_sum(g, kids0, W),
+      Equal.sym(Nat, NodeCost.NodeCost.kid_sum(g, kids0, W),
+        Nat.add(NodeCost.NodeCost.kid_sum(g, kids0, ws),
+          NodeCost.NodeCost.kid_sum(g, kids0, Part.LB.remw(g, f, W))),
+        Decomp.LB.kid_sum_split(g, kids0, f, W)),
+      h))
+
+# The sum of the class bounds along the scan is at most the children's
+# contribution on the current words.
+def LBS.cls_sum(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +kids: +List<Tree.Child>, +pre: +List<Tree.Child>,
+    +S: +List<+List<Nat>>, +W: +List<+List<Nat>>, +k: Nat,
+    +hk: {Nat.is_le(1n, k) == True{} : Bool},
+    +keq: {kids0 == List.append(&2, Tree.Child, pre, kids) : +List<Tree.Child>},
+    +weq: {W == LBS.remFold(g, pre, S) : +List<+List<Nat>>},
+    kv: LBS.KidVal(k, kids),
+    adW: Tree.AllHaveDepth(Tree.Node{g, kids0}, W),
+    +ndW: {Nat.is_le(Twice.LB.maxMult(W), 1n) == True{} : Bool}) ->
+  {Nat.is_le(LBS.capKidSum(LBS.sizes(g, kids, W), k),
+             NodeCost.NodeCost.kid_sum(g, kids0, W)) == True{} : Bool}:
+  match kids:
+    case Nil{}:
+      NatProof.Nat.is_le_zero_l(NodeCost.NodeCost.kid_sum(g, kids0, W))
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          (kh, kt) = kv
+          LBS.cls_sum_go(g, kids0, pre, S, W, k, f, t, rest, keq, weq, kh,
+            AdSplit.LB.ad_split(Tree.Node{g, kids0}, g, f, W, adW), ndW,
+            ar => LBS.cls_sum(g, kids0, rest,
+              List.append(&2, Tree.Child, pre, [Tree.Child{f, t}]), S,
+              Part.LB.remw(g, f, W), k, hk,
+              Equal.trans(+List<Tree.Child>, kids0,
+                List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest),
+                List.append(&2, Tree.Child,
+                  List.append(&2, Tree.Child, pre, [Tree.Child{f, t}]), rest),
+                keq, LBS.app_snoc(pre, Tree.Child{f, t}, rest)),
+              Equal.trans(+List<+List<Nat>>, Part.LB.remw(g, f, W),
+                Part.LB.remw(g, f, LBS.remFold(g, pre, S)),
+                LBS.remFold(g,
+                  List.append(&2, Tree.Child, pre, [Tree.Child{f, t}]), S),
+                Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
+                  y => Part.LB.remw(g, f, y), W, LBS.remFold(g, pre, S), weq),
+                Equal.sym(+List<+List<Nat>>,
+                  LBS.remFold(g,
+                    List.append(&2, Tree.Child, pre, [Tree.Child{f, t}]), S),
+                  Part.LB.remw(g, f, LBS.remFold(g, pre, S)),
+                  LBS.remFold_snoc(g, pre, f, t, S))),
+              kt, ar,
+              NatProof.Nat.is_le_trans(
+                Twice.LB.maxMult(Part.LB.remw(g, f, W)), Twice.LB.maxMult(W), 1n,
+                Part.LB.maxMult_rem(g, f, W), ndW)))
