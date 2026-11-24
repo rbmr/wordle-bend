@@ -1631,32 +1631,36 @@ def drain5_go(+gn: Nat, +touched: +List<U32>, st: Drain5State) -> Drain5State:
             drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<CWord>, buckets, code, Nil{})))
 
+# The scan result: the table rides through and `k` is the largest count so far.
+# The dedup scratch array never leaves the scan, so no consumer or proof state
+# has to mention it.
 type CKRes is Type:
-  CKRes{seen: Array<Nat>, tbl: Array<U32>, k: Nat}
+  CKRes{tbl: Array<U32>, k: Nat}
 
 # One pass over the class per guess, reusing the proven histogram fold: the
 # `k` of a `Hist5Ok` is the number of distinct feedback codes of that guess on
 # the class. `fuel` counts the guesses still to process, `more` says whether a
 # further guess follows the current one, and the row of each pass is its guess
-# index, so the scan never reads a table row past the guess list. The scratch
-# state rides through `CKRes`.
+# index, so the scan never reads a table row past the guess list. The dedup
+# buffer is allocated once per class and reused: every pass raises `gen`, which
+# makes the stamps of the previous pass stale.
 def ck_loop(+fuel: Nat, +i: Nat, +C: +List<CWord>, +gen: Nat, +m: Nat,
             +kmax: Nat, hist: Hist5Res, more: Bool) -> CKRes:
   match fuel:
     case 0n:
       match hist:
         case Hist5Pruned{seen2, tbl2}:
-          CKRes{seen2, tbl2, kmax}
+          CKRes{tbl2, kmax}
         case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
-          CKRes{seen2, tbl2, Nat.max(kmax, k2)}
+          CKRes{tbl2, Nat.max(kmax, k2)}
     case 1n+p:
       match hist:
         case Hist5Pruned{seen2, tbl2}:
-          CKRes{seen2, tbl2, kmax}
+          CKRes{tbl2, kmax}
         case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
           match more:
             case False{}:
-              CKRes{seen2, tbl2, Nat.max(kmax, k2)}
+              CKRes{tbl2, Nat.max(kmax, k2)}
             case True{}:
               ck_loop(p, Nat.add(1n, i), C, Nat.add(1n, gen), m,
                 Nat.max(kmax, k2),
@@ -1668,7 +1672,7 @@ def class_k_start_b(empty: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
                     tbl: Array<U32>) -> CKRes:
   match empty:
     case True{}:
-      CKRes{Array.new(Nat, 10n, 0n), tbl, 0n}
+      CKRes{tbl, 0n}
     case False{}:
       ck_loop(gn, 0n, ws, 1n, m, 0n,
         hist5_go(0, ws, 1n, False{}, Hist5Ok{Array.new(Nat, 10n, 0n), tbl,
@@ -1707,7 +1711,7 @@ def bigs_len(+bs: +List<BigClass>) -> Nat:
       Nat.add(1n, bigs_len(t))
 
 def ck_cheap(+m: Nat, tbl: Array<U32>) -> CKRes:
-  CKRes{Array.new(Nat, 10n, 0n), tbl, m}
+  CKRes{tbl, m}
 
 def class_k_opt(big: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
                 tbl: Array<U32>) -> CKRes:
@@ -1728,13 +1732,13 @@ def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
   match fuel:
     case 0n:
       match st:
-        case CKRes{seen, tbl, k}:
+        case CKRes{tbl, k}:
           CapSkip{tbl}
     case 1n+p:
       match stop:
         case True{}:
           match st:
-            case CKRes{seen, tbl, k}:
+            case CKRes{tbl, k}:
               CapSkip{tbl}
         case False{}:
           match phase:
@@ -1742,13 +1746,13 @@ def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
               match bs:
                 case Nil{}:
                   match st:
-                    case CKRes{seen, tbl, k}:
+                    case CKRes{tbl, k}:
                       CapOk{rev_bigs(acc, Nil{}), tbl}
                 case Con{bc, rest}:
                   match bc:
                     case BigClass{+fb, +ws, +len, +clb}:
                       match st:
-                        case CKRes{seen, tbl, k}:
+                        case CKRes{tbl, k}:
                           cap_walk(p, False{}, 1n, bs, acc, gain, total0,
                             best, gn,
                             class_k_opt(Nat.is_le(16n, len), ws, len, gn,
@@ -1757,19 +1761,19 @@ def cap_walk(+fuel: Nat, stop: Bool, +phase: Nat, +bs: +List<BigClass>,
               match bs:
                 case Nil{}:
                   match st:
-                    case CKRes{seen, tbl, k}:
+                    case CKRes{tbl, k}:
                       CapOk{rev_bigs(acc, Nil{}), tbl}
                 case Con{bc, rest}:
                   match bc:
                     case BigClass{+fb, +ws, +len, +clb}:
                       match st:
-                        case CKRes{seen, tbl, +k}:
+                        case CKRes{tbl, +k}:
                           +clb2 = Nat.max(clb, capbound(len, k))
                           +gain2 = Nat.add(gain, Nat.sub(clb2, clb))
                           cap_walk(p,
                             Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
                             0n, rest, BigClass{fb, ws, len, clb} <> acc,
-                            gain2, total0, best, gn, CKRes{seen, tbl, k})
+                            gain2, total0, best, gn, CKRes{tbl, k})
 
 def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                +gn: Nat, +rem_lb: Nat, +items: +List<Item>,

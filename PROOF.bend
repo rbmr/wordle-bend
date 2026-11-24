@@ -49,7 +49,9 @@ import ./proofs/lb_nodup.bend as LBProof4
 import ./proofs/lb_classes.bend as LBProof5
 import ./proofs/lb_decomp.bend as LBProof6
 import ./proofs/lb_adsplit.bend as LBProof7
-import ./proofs/lb_class_cap.bend as LBProof8
+import ./proofs/lb_capacity_sound.bend as LBProof8
+import ./proofs/lb_class_cap.bend as LBProof9
+import ./proofs/class_k.bend as CKProof
 import ./src/solve_k.bend as SolveK
 import ./proofs/par_chunk.bend as ParChunk
 
