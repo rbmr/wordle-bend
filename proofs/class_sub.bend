@@ -24,6 +24,7 @@ import ./cover_list.bend as Cover
 import ./fast_hist5.bend as FH
 import ./fast_nodup.bend as FN
 import ./class_k.bend as CK
+import ./fast_tbl.bend as FT
 
 # ---------------------------------------------------------------------------
 # Boolean helpers
@@ -1438,3 +1439,101 @@ def CS.build_count(+g: +List<Nat>, +ws: +List<+List<Nat>>,
         CS.build_count(g, t, acc),
         CS.build_count(g, t,
           Groups.group_add(w, Feedback.feedback(g, w), acc)))
+
+# The count of the empty accumulator.
+def CS.build_count_nil(+g: +List<Nat>, +ws: +List<+List<Nat>>) ->
+  {List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{}))
+   == CS.newc(CS.codes(g, ws), Nil{}) : Nat}:
+  CS.build_count(g, ws, Nil{})
+
+# A subsequence proof can be used twice.
+def CS.subseq_dup(+xs: +List<+List<Nat>>, +ys: +List<+List<Nat>>,
+    p: Cover.Cover.Subseq(xs, ys)) ->
+  Cover.Cover.Subseq(xs, ys) & Cover.Cover.Subseq(xs, ys):
+  match xs ys:
+    case Nil{} _:
+      (Unit{}, Unit{})
+    case Con{h, t} Nil{}:
+      match p:
+    case Con{h, t} Con{y, r}:
+      match p:
+        case Inl{q}:
+          (+e, pt) = q
+          CS.use_pair(
+            Cover.Cover.Subseq(xs, ys) & Cover.Cover.Subseq(xs, ys),
+            Cover.Cover.Subseq(t, r), Cover.Cover.Subseq(t, r),
+            CS.subseq_dup(t, r, pt),
+            p1 => p2 => (Inl{(e, p1)}, Inl{(e, p2)}))
+        case Inr{q}:
+          CS.use_pair(
+            Cover.Cover.Subseq(xs, ys) & Cover.Cover.Subseq(xs, ys),
+            Cover.Cover.Subseq(xs, r), Cover.Cover.Subseq(xs, r),
+            CS.subseq_dup(xs, r, q),
+            p1 => p2 => (Inr{p1}, Inr{p2}))
+
+# The branching count of a subclass never exceeds that of the class.
+def CS.count_sub(+g: +List<Nat>, +ws: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, p: Cover.Cover.Subseq(ws, S)) ->
+  {Nat.is_le(CK.CK.count(g, ws), CK.CK.count(g, S)) == True{} : Bool}:
+  +hn : {CK.CK.count(g, ws) == CS.newc(CS.codes(g, ws), Nil{}) : Nat} =
+    Equal.trans(Nat, CK.CK.count(g, ws),
+      List.length(&2, Groups.Group, Groups.groups_build(g, ws, Nil{})),
+      CS.newc(CS.codes(g, ws), Nil{}),
+      CS.count_eq_build(g, ws), CS.build_count_nil(g, ws))
+  +hS : {CK.CK.count(g, S) == CS.newc(CS.codes(g, S), Nil{}) : Nat} =
+    Equal.trans(Nat, CK.CK.count(g, S),
+      List.length(&2, Groups.Group, Groups.groups_build(g, S, Nil{})),
+      CS.newc(CS.codes(g, S), Nil{}),
+      CS.count_eq_build(g, S), CS.build_count_nil(g, S))
+  +hc : {Nat.is_le(CS.newc(CS.codes(g, ws), Nil{}),
+             CS.newc(CS.codes(g, S), Nil{})) == True{} : Bool} =
+    CS.subc_count(CS.codes(g, ws), CS.codes(g, S),
+      CS.sub_codes(g, ws, S, p), Nil{})
+  NatProof.Nat.is_le_eq_l(CK.CK.count(g, S),
+    CS.newc(CS.codes(g, ws), Nil{}), CK.CK.count(g, ws),
+    Equal.sym(Nat, CK.CK.count(g, ws), CS.newc(CS.codes(g, ws), Nil{}), hn),
+    NatProof.Nat.is_le_eq_r(CS.newc(CS.codes(g, ws), Nil{}),
+      CS.newc(CS.codes(g, S), Nil{}), CK.CK.count(g, S),
+      Equal.sym(Nat, CK.CK.count(g, S), CS.newc(CS.codes(g, S), Nil{}), hS), hc))
+
+# One step of the `prefmax` fold.
+def CS.prefmax_step(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +q: Nat,
+    +ih: {Nat.is_le(CK.CK.prefmax(G, ws, q), CK.CK.prefmax(G, S, q))
+          == True{} : Bool},
+    +hc: {Nat.is_le(CK.CK.count(FT.FT.nth_word(G, q), ws),
+                    CK.CK.count(FT.FT.nth_word(G, q), S))
+          == True{} : Bool}) ->
+  {Nat.is_le(CK.CK.prefmax(G, ws, 1n+q), CK.CK.prefmax(G, S, 1n+q))
+   == True{} : Bool}:
+  CK.CK.max_le(CK.CK.count(FT.FT.nth_word(G, q), ws),
+    CK.CK.prefmax(G, ws, q),
+    Nat.max(CK.CK.count(FT.FT.nth_word(G, q), S), CK.CK.prefmax(G, S, q)),
+    NatProof.Nat.is_le_trans(CK.CK.count(FT.FT.nth_word(G, q), ws),
+      CK.CK.count(FT.FT.nth_word(G, q), S),
+      Nat.max(CK.CK.count(FT.FT.nth_word(G, q), S), CK.CK.prefmax(G, S, q)),
+      hc, CK.CK.le_max_l(CK.CK.count(FT.FT.nth_word(G, q), S),
+        CK.CK.prefmax(G, S, q))),
+    NatProof.Nat.is_le_trans(CK.CK.prefmax(G, ws, q),
+      CK.CK.prefmax(G, S, q),
+      Nat.max(CK.CK.count(FT.FT.nth_word(G, q), S), CK.CK.prefmax(G, S, q)),
+      ih, CK.CK.le_max_r(CK.CK.count(FT.FT.nth_word(G, q), S),
+        CK.CK.prefmax(G, S, q))))
+
+# The largest count over the first guesses is monotone under a subclass.
+def CS.prefmax_sub(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +i: Nat, p: Cover.Cover.Subseq(ws, S)) ->
+  {Nat.is_le(CK.CK.prefmax(G, ws, i), CK.CK.prefmax(G, S, i))
+   == True{} : Bool}:
+  match i:
+    case 0n:
+      NatProof.Nat.is_le_refl(0n)
+    case 1n+q:
+      CS.use_pair(
+        {Nat.is_le(CK.CK.prefmax(G, ws, 1n+q), CK.CK.prefmax(G, S, 1n+q))
+         == True{} : Bool},
+        Cover.Cover.Subseq(ws, S), Cover.Cover.Subseq(ws, S),
+        CS.subseq_dup(ws, S, p),
+        p1 => p2 => CS.prefmax_step(G, ws, S, q,
+          CS.prefmax_sub(G, ws, S, q, p2),
+          CS.count_sub(FT.FT.nth_word(G, q), ws, S, p1)))
