@@ -111,6 +111,12 @@ They are what a pruning rule needs to discard a guess or a class before searchin
 
 The soundness statement for the capacity bound, that a valid tree with no duplicate candidates whose nodes have at most `k` children costs at least `capbound(|S|, k)`, is not proved yet. The induction runs over the tree with a capacity sequence of its own: a node can hold at most its own guess's candidates below depth one plus the candidates its classes hold one level further down, which is why the bound is stated with the per-node class sizes rather than with `k` alone. The partition in `lb_classes.bend` and the duplicate-freeness of its classes in `lb_nodup.bend` are the two inputs that step needs.
 
+The solver now uses the bound in the duplicate-free buffered path (`cap_walk` and the node gate in `src/solve_fast.bend`), so the open goal has three parts:
+
+1. `LB.capbound_sound`: for `t : Tree`, `S, G : List (List Nat)` and `k : Nat`, given `Tree.Valid(t, G, S)`, no duplicate word in `S`, and every node of `t` having at most `k` children, prove `Nat.is_le(LB.capbound(len(S), k), Tree.cost(t, S)) == True{}`. The inductive invariant that makes the level counting work is `countDepthLess(t, L, S) <= G(L - 1)` for every `L`, with `G(0) = 0` and `G(j) = 1 + k + ... + k^(j-1)`, followed by the telescoping identity `cost(t, S) = sum over j from 1 to len(S) + 1 of (len(S) - countDepthLess(t, j, S))`.
+2. `LB.class_k_bounds_branching`: `class_k_start` returns the maximum over the whole guess list of the number of distinct feedback codes on the class words. A child class is a subset of its parent, so a guess produces no more classes on the child, and every node of any valid tree over the class has at most that many children. The implementation side needs a specification of `ck_go` in the style of the `hist5_go` proof in `fast_hist5.bend`.
+3. The wiring in `fast_hist5.bend`: `FH.big_ok_b` and `FH.BodyMatch` must carry `clb <= cost of the class`, and the whole-guess skip in `cap_walk`/`finish_node` uses the same bound. With `clb = max(2*m - 1, capbound(m, k))` for every class of size `m`, the guess costs at least `n` plus the sum of its class bounds.
+
 ### Bound-pruned search
 
 | File | What it proves |
