@@ -41,6 +41,7 @@ import ./depth.bend as DepthProof
 import ./lb_decomp.bend as Decomp
 import ./lb_capacity.bend as Cap
 import ./cover_list.bend as CoverList
+import ./lb_adsplit.bend as AdSplit
 
 # Every node has at most `k` children: the child-list half of the width
 # condition the capacity bound needs.
@@ -2108,3 +2109,285 @@ def LBS.cls_ad(+g: +List<Nat>, +kids0: +List<Tree.Child>,
       (sh, st) = ad
       LBS.cls_ad_go(g, kids0, f, t, h, tl, sh, nw, nf, lk,
         LBS.cls_ad(g, kids0, f, t, tl, lk, krest, st))
+
+# The bound for a tree, as a value: every candidate list with no duplicates
+# that the tree covers costs at least the capacity bound.
+def LBS.CapT(+k: Nat, t: Tree.Tree) -> Type:
+  @S: +List<+List<Nat>>
+  -> @nd: {Nat.is_le(Twice.LB.maxMult(S), 1n) == True{} : Bool}
+  -> Tree.AllHaveDepth(t, S)
+  -> {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, S), k), Tree.cost(t, S))
+      == True{} : Bool}
+
+# The bounds of a list of subtrees, one per position.
+def LBS.KidVal(+k: Nat, +kids: +List<Tree.Child>) -> Type:
+  match kids:
+    case Nil{}:
+      Unit
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          LBS.CapT(k, t) & LBS.KidVal(k, rest)
+
+# Transport the depth facts along an equality of lists.
+def LBS.ad_eq(+t: Tree.Tree, +S1: +List<+List<Nat>>, +S2: +List<+List<Nat>>,
+    e: {S1 == S2 : +List<+List<Nat>>}, p: Tree.AllHaveDepth(t, S1)) ->
+  Tree.AllHaveDepth(t, S2):
+  %e : Tree.AllHaveDepth(t, _)
+  p
+
+# The first half of a split pair of depth facts.
+def LBS.ad_keepw_take(+t: Tree.Tree, +g: +List<Nat>, +f: +List<Feedback.Color>,
+    +W: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
+    +wseq: {Part.LB.keepw_b(g, f, W) == ws : +List<+List<Nat>>},
+    p: Tree.AllHaveDepth(t, Part.LB.keepw_b(g, f, W))
+       & Tree.AllHaveDepth(t, Part.LB.remw(g, f, W))) ->
+  Tree.AllHaveDepth(t, ws):
+  (a, b) = p
+  LBS.ad_eq(t, Part.LB.keepw_b(g, f, W), ws, wseq, a)
+
+# The depth facts of a node on a class.
+def LBS.ad_keepw(+t: Tree.Tree, +g: +List<Nat>, +f: +List<Feedback.Color>,
+    +W: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
+    +wseq: {Part.LB.keepw_b(g, f, W) == ws : +List<+List<Nat>>},
+    ad: Tree.AllHaveDepth(t, W)) -> Tree.AllHaveDepth(t, ws):
+  LBS.ad_keepw_take(t, g, f, W, ws, wseq, AdSplit.LB.ad_split(t, g, f, W, ad))
+
+# Rewrite the left side of a bound by one.
+def LBS.le_one_rewrite(+a: Nat, +b: Nat, +c: Nat,
+    e: {a == b : Nat},
+    p: {Nat.is_le(a, c) == True{} : Bool}) ->
+  {Nat.is_le(b, c) == True{} : Bool}:
+  NatProof.Nat.is_le_eq_l(c, a, b, e, p)
+
+# The class's depth facts and its cost identity, built together.
+def LBS.cls_facts_go(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +h: +List<Nat>,
+    +tl: +List<+List<Nat>>,
+    sh: {Maybe.is_some(&1, Nat, Tree.depth(Tree.Node{g, kids0}, h)) == True{} : Bool},
+    +nw: {Feedback.word_eq(g, h) == False{} : Bool},
+    +nf: {Feedback.feedback_eq(f, Feedback.feedback(g, h)) == True{} : Bool},
+    +lk: {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>},
+    tail: Tree.AllHaveDepth(t, tl)
+          & {NodeCost.NodeCost.kid_sum(g, kids0, tl) == Tree.cost(t, tl) : Nat}) ->
+  Tree.AllHaveDepth(t, h <> tl)
+  & {NodeCost.NodeCost.kid_sum(g, kids0, h <> tl) == Tree.cost(t, h <> tl) : Nat}:
+  (ih_ad, ih_sum) = tail
+  +eh : {NodeCost.NodeCost.kid_cost(g, kids0, h)
+         == Maybe.default(&1, Nat, Tree.depth(t, h), 0n) : Nat} =
+    LBS.kid_cost_at(g, kids0, h, t, f, nw, nf, lk)
+  (LBS.cls_ad_go(g, kids0, f, t, h, tl, sh, nw, nf, lk, ih_ad),
+   Equal.trans(Nat, NodeCost.NodeCost.kid_sum(g, kids0, h <> tl),
+     Nat.add(NodeCost.NodeCost.kid_cost(g, kids0, h),
+             NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+     Tree.cost(t, h <> tl),
+     {==},
+     Equal.trans(Nat,
+       Nat.add(NodeCost.NodeCost.kid_cost(g, kids0, h),
+               NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+       Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n),
+               NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+       Tree.cost(t, h <> tl),
+       Equal.cong(Nat, Nat,
+         y => Nat.add(y, NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+         NodeCost.NodeCost.kid_cost(g, kids0, h),
+         Maybe.default(&1, Nat, Tree.depth(t, h), 0n), eh),
+       Equal.trans(Nat,
+         Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n),
+                 NodeCost.NodeCost.kid_sum(g, kids0, tl)),
+         Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n), Tree.cost(t, tl)),
+         Tree.cost(t, h <> tl),
+         Equal.cong(Nat, Nat,
+           y => Nat.add(Maybe.default(&1, Nat, Tree.depth(t, h), 0n), y),
+           NodeCost.NodeCost.kid_sum(g, kids0, tl), Tree.cost(t, tl), ih_sum),
+         {==}))))
+
+def LBS.cls_facts(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +ws: +List<+List<Nat>>,
+    +lk: {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>},
+    kf: Decomp.LB.KeepFacts(g, f, ws),
+    ad: Tree.AllHaveDepth(Tree.Node{g, kids0}, ws)) ->
+  Tree.AllHaveDepth(t, ws)
+  & {NodeCost.NodeCost.kid_sum(g, kids0, ws) == Tree.cost(t, ws) : Nat}:
+  match ws:
+    case Nil{}:
+      (Unit{}, {==})
+    case Con{h, tl}:
+      (nw, rest1) = kf
+      (nf, krest) = rest1
+      (sh, st) = ad
+      LBS.cls_facts_go(g, kids0, f, t, h, tl, sh, nw, nf, lk,
+        LBS.cls_facts(g, kids0, f, t, tl, lk, krest, st))
+
+# The final step of a class: the bound follows from the facts pair.
+def LBS.cls_one_go(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +k: Nat, +ws: +List<+List<Nat>>, t: Tree.Tree,
+    capT: LBS.CapT(k, t),
+    +ndK: {Nat.is_le(Twice.LB.maxMult(ws), 1n) == True{} : Bool},
+    p: Tree.AllHaveDepth(t, ws)
+       & {NodeCost.NodeCost.kid_sum(g, kids0, ws) == Tree.cost(t, ws) : Nat}) ->
+  {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+             NodeCost.NodeCost.kid_sum(g, kids0, ws)) == True{} : Bool}:
+  (adT, ksum) = p
+  cap : {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+                   Tree.cost(t, ws)) == True{} : Bool} = capT(ws, ndK, adT)
+  NatProof.Nat.is_le_eq_r(
+    Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+    Tree.cost(t, ws), NodeCost.NodeCost.kid_sum(g, kids0, ws),
+    Equal.sym(Nat, NodeCost.NodeCost.kid_sum(g, kids0, ws), Tree.cost(t, ws), ksum), cap)
+
+# One class's share: the capacity bound of its size is at most the children's
+# contribution on its words.
+def LBS.cls_one(+g: +List<Nat>, +kids0: +List<Tree.Child>,
+    +pre: +List<Tree.Child>, +f: +List<Feedback.Color>, +t: Tree.Tree,
+    +rest: +List<Tree.Child>, +S: +List<+List<Nat>>, +k: Nat,
+    +ws: +List<+List<Nat>>,
+    +keq: {kids0 == List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest)
+           : +List<Tree.Child>},
+    +wseq: {Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)) == ws : +List<+List<Nat>>},
+    capT: LBS.CapT(k, t),
+    adW: Tree.AllHaveDepth(Tree.Node{g, kids0}, LBS.remFold(g, pre, S)),
+    +ndW: {Nat.is_le(Twice.LB.maxMult(LBS.remFold(g, pre, S)), 1n) == True{} : Bool}) ->
+  {Nat.is_le(Cap.LB.capbound(List.length(&2, +List<Nat>, ws), k),
+             NodeCost.NodeCost.kid_sum(g, kids0, ws)) == True{} : Bool}:
+  match ws:
+    case Nil{}:
+      NatProof.Nat.is_le_refl(0n)
+    case Con{h, tl}:
+      +lk0 : {Tree.lookup(f, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest))
+              == Some{t} : Maybe<&1, Tree.Tree>} =
+        LBS.cls_lookup(g, pre, f, t, rest, S, h, tl, wseq,
+          LBS.kf_nw(g, f, h, tl,
+            Decomp.LB.keepfacts_eq(g, f,
+              Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)), h <> tl, wseq,
+              Decomp.LB.keep_facts(g, f, LBS.remFold(g, pre, S)))),
+          LBS.kf_nf(g, f, h, tl,
+            Decomp.LB.keepfacts_eq(g, f,
+              Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)), h <> tl, wseq,
+              Decomp.LB.keep_facts(g, f, LBS.remFold(g, pre, S)))))
+      +lk : {Tree.lookup(f, kids0) == Some{t} : Maybe<&1, Tree.Tree>} =
+        Equal.trans(Maybe<&1, Tree.Tree>, Tree.lookup(f, kids0),
+          Tree.lookup(f, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest)),
+          Some{t},
+          Equal.cong(+List<Tree.Child>, Maybe<&1, Tree.Tree>, y => Tree.lookup(f, y),
+            kids0, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> rest), keq),
+          lk0)
+      +ndK0 : {Nat.is_le(Twice.LB.maxMult(Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S))), 1n)
+               == True{} : Bool} =
+        NatProof.Nat.is_le_trans(
+          Twice.LB.maxMult(Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S))),
+          Twice.LB.maxMult(LBS.remFold(g, pre, S)), 1n,
+          Part.LB.maxMult_keep(g, f, LBS.remFold(g, pre, S)), ndW)
+      +ndK : {Nat.is_le(Twice.LB.maxMult(h <> tl), 1n) == True{} : Bool} =
+        LBS.le_one_rewrite(Twice.LB.maxMult(Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S))),
+          Twice.LB.maxMult(h <> tl), 1n,
+          Equal.cong(+List<+List<Nat>>, Nat, y => Twice.LB.maxMult(y),
+            Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)), h <> tl, wseq),
+          ndK0)
+      LBS.cls_one_go(g, kids0, k, h <> tl, t, capT, ndK,
+        LBS.cls_facts(g, kids0, f, t, h <> tl, lk,
+          Decomp.LB.keepfacts_eq(g, f,
+            Part.LB.keepw_b(g, f, LBS.remFold(g, pre, S)), h <> tl, wseq,
+            Decomp.LB.keep_facts(g, f, LBS.remFold(g, pre, S))),
+          LBS.ad_keepw(Tree.Node{g, kids0}, g, f, LBS.remFold(g, pre, S),
+            h <> tl, wseq, adW)))
+
+# The class sizes of the scan, one per position.
+def LBS.sizes(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +W: +List<+List<Nat>>) -> +List<Nat>:
+  match kids:
+    case Nil{}:
+      Nil{}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          List.length(&2, +List<Nat>, Part.LB.keepw_b(g, f, W))
+          <> LBS.sizes(g, rest, Part.LB.remw(g, f, W))
+
+# The sizes add up to the class sizes of the list.
+def LBS.sizes_tot(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +W: +List<+List<Nat>>) ->
+  {CB.CB.sum(LBS.sizes(g, kids, W))
+   == Part.LB.totSize(Part.LB.classes(g, kids, W)) : Nat}:
+  match kids:
+    case Nil{}:
+      {==}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          Equal.trans(Nat, CB.CB.sum(LBS.sizes(g, Tree.Child{f, t} <> rest, W)),
+            Nat.add(List.length(&2, +List<Nat>, Part.LB.keepw_b(g, f, W)),
+              CB.CB.sum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)))),
+            Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, W)),
+            {==},
+            Equal.trans(Nat,
+              Nat.add(List.length(&2, +List<Nat>, Part.LB.keepw_b(g, f, W)),
+                CB.CB.sum(LBS.sizes(g, rest, Part.LB.remw(g, f, W)))),
+              Nat.add(List.length(&2, +List<Nat>, Part.LB.keepw_b(g, f, W)),
+                Part.LB.totSize(Part.LB.classes(g, rest, Part.LB.remw(g, f, W)))),
+              Part.LB.totSize(Part.LB.classes(g, Tree.Child{f, t} <> rest, W)),
+              Equal.cong(Nat, Nat,
+                y => Nat.add(
+                  List.length(&2, +List<Nat>, Part.LB.keepw_b(g, f, W)), y),
+                CB.CB.sum(LBS.sizes(g, rest, Part.LB.remw(g, f, W))),
+                Part.LB.totSize(Part.LB.classes(g, rest, Part.LB.remw(g, f, W))),
+                LBS.sizes_tot(g, rest, Part.LB.remw(g, f, W))),
+              {==}))
+
+# The number of classes is the number of children.
+def LBS.sizes_len(+g: +List<Nat>, +kids: +List<Tree.Child>,
+    +W: +List<+List<Nat>>) ->
+  {List.length(&2, Nat, LBS.sizes(g, kids, W))
+   == List.length(&2, Tree.Child, kids) : Nat}:
+  match kids:
+    case Nil{}:
+      {==}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f, t}:
+          Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+            List.length(&2, Nat, LBS.sizes(g, rest, Part.LB.remw(g, f, W))),
+            List.length(&2, Tree.Child, rest),
+            LBS.sizes_len(g, rest, Part.LB.remw(g, f, W)))
+
+# Appending a list of children is associative, one child at a time.
+def LBS.app_assoc(+xs: +List<Tree.Child>, +ys: +List<Tree.Child>,
+    +zs: +List<Tree.Child>) ->
+  {List.append(&2, Tree.Child, xs, List.append(&2, Tree.Child, ys, zs))
+   == List.append(&2, Tree.Child, List.append(&2, Tree.Child, xs, ys), zs)
+   : +List<Tree.Child>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{x, xt}:
+      Equal.cong(+List<Tree.Child>, +List<Tree.Child>, y => x <> y,
+        List.append(&2, Tree.Child, xt, List.append(&2, Tree.Child, ys, zs)),
+        List.append(&2, Tree.Child, List.append(&2, Tree.Child, xt, ys), zs),
+        LBS.app_assoc(xt, ys, zs))
+
+# Extending the prefix at the end is one more leftover filter.
+def LBS.remFold_snoc(+g: +List<Nat>, +pre: +List<Tree.Child>,
+    +f: +List<Feedback.Color>, +t: Tree.Tree, +S: +List<+List<Nat>>) ->
+  {LBS.remFold(g, List.append(&2, Tree.Child, pre, Tree.Child{f, t} <> Nil{}), S)
+   == Part.LB.remw(g, f, LBS.remFold(g, pre, S)) : +List<+List<Nat>>}:
+  match pre:
+    case Nil{}:
+      {==}
+    case Con{c, rest}:
+      match c:
+        case Tree.Child{f0, t0}:
+          LBS.remFold_snoc(g, rest, f, t, Part.LB.remw(g, f0, S))
+
+# The leftover depth facts of a child split.
+def LBS.ad_remw_take(+t: Tree.Tree, +g: +List<Nat>, +f: +List<Feedback.Color>,
+    +W: +List<+List<Nat>>,
+    p: Tree.AllHaveDepth(t, Part.LB.keepw_b(g, f, W))
+       & Tree.AllHaveDepth(t, Part.LB.remw(g, f, W))) ->
+  Tree.AllHaveDepth(t, Part.LB.remw(g, f, W)):
+  (a, b) = p
+  b
+
+def LBS.ad_remw(+t: Tree.Tree, +g: +List<Nat>, +f: +List<Feedback.Color>,
+    +W: +List<+List<Nat>>, ad: Tree.AllHaveDepth(t, W)) ->
+  Tree.AllHaveDepth(t, Part.LB.remw(g, f, W)):
+  LBS.ad_remw_take(t, g, f, W, AdSplit.LB.ad_split(t, g, f, W, ad))
