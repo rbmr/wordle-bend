@@ -25,6 +25,8 @@ import ./fast_hist5.bend as FH
 import ./fast_nodup.bend as FN
 import ./class_k.bend as CK
 import ./fast_tbl.bend as FT
+import ./children.bend as CH
+import ../src/tree.bend as Tree
 
 # ---------------------------------------------------------------------------
 # Boolean helpers
@@ -1537,3 +1539,41 @@ def CS.prefmax_sub(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
         p1 => p2 => CS.prefmax_step(G, ws, S, q,
           CS.prefmax_sub(G, ws, S, q, p2),
           CS.count_sub(FT.FT.nth_word(G, q), ws, S, p1)))
+
+# ---------------------------------------------------------------------------
+# The children of a node
+# ---------------------------------------------------------------------------
+
+# One child per class.
+def CS.len_children(+p: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +groups: +List<Groups.Group>, +inf: Nat) ->
+  {List.length(&2, Tree.Child, CH.CH.children(p, G, S, groups, inf))
+   == List.length(&2, Groups.Group, groups) : Nat}:
+  match groups:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          Equal.cong(Nat, Nat, x => Nat.add(1n, x),
+            List.length(&2, Tree.Child, CH.CH.children(p, G, S, rest, inf)),
+            List.length(&2, Groups.Group, rest),
+            CS.len_children(p, G, S, rest, inf))
+
+# A node of the reference tree has `CK.count` children.
+def CS.len_children_build(+p: Nat, +G: +List<+List<Nat>>,
+    +S: +List<+List<Nat>>, +g: +List<Nat>, +inf: Nat) ->
+  {List.length(&2, Tree.Child,
+     CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf))
+   == CK.CK.count(g, S) : Nat}:
+  +e : {List.length(&2, Tree.Child,
+         CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf))
+        == List.length(&2, Groups.Group, Groups.groups_build(g, S, Nil{}))
+        : Nat} =
+    CS.len_children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)
+  Equal.trans(Nat, List.length(&2, Tree.Child,
+      CH.CH.children(p, G, S, Groups.groups_build(g, S, Nil{}), inf)),
+    List.length(&2, Groups.Group, Groups.groups_build(g, S, Nil{})),
+    CK.CK.count(g, S), e, Equal.sym(Nat, CK.CK.count(g, S),
+      List.length(&2, Groups.Group, Groups.groups_build(g, S, Nil{})),
+      CS.count_eq_build(g, S)))
