@@ -63,6 +63,27 @@ def chunk_best(+fuel: Nat, +seg: +List<+List<Nat>>, +off: U32,
       SolveFast.is_floor_hit(nodup, floor, b0),
       SolveFast.GuessRes{Nil{}, buf}))
 
+# The floor half of a length, by structural recursion. This is `n / 2`; it is
+# spelled out so the proof can bound it (the builtin division has no such
+# lemma).
+def half_go(fuel: Nat, +n: Nat) -> Nat:
+  match fuel:
+    case 0n:
+      0n
+    case 1n+p:
+      match n:
+        case 0n:
+          0n
+        case 1n+q:
+          match q:
+            case 0n:
+              0n
+            case 1n+r:
+              Nat.add(1n, half_go(p, r))
+
+def half(+n: Nat) -> Nat:
+  half_go(n, n)
+
 # Split `seg` into halves `d` times and evaluate the leaves in parallel, left
 # half first. `off` is the row of `seg`'s first word in the guess list, so each
 # leaf addresses its feedback-table rows directly. An empty or one-word segment
@@ -87,10 +108,10 @@ def par_chunks(+d: Nat, +seg: +List<+List<Nat>>, +off: U32,
                 inf, SolveFast.mk_buf_tbl(nodup, G, S, n)) <> Nil{}
             case Con{w2, rest2}:
               +len : Nat = Groups.len_words(seg)
-              +half : Nat = Nat.div(len, 2n)
-              +left : +List<+List<Nat>> = List.take(&2, +List<Nat>, seg, half)
-              +right : +List<+List<Nat>> = List.drop(&2, +List<Nat>, seg, half)
-              +off2 : U32 = U32.add(off, U32.from_nat(half))
+              +mid : Nat = half(len)
+              +left : +List<+List<Nat>> = List.take(&2, +List<Nat>, seg, mid)
+              +right : +List<+List<Nat>> = List.drop(&2, +List<Nat>, seg, mid)
+              +off2 : U32 = U32.add(off, U32.from_nat(mid))
               ra rb = par_chunks(p, left, off, fuel, G, glist_G, cs, S, n,
                 nodup, floor, inf) par_chunks(p, right, off2, fuel, G, glist_G,
                 cs, S, n, nodup, floor, inf)
