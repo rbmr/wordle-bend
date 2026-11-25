@@ -1825,7 +1825,7 @@ def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
 # class-independent part of the lower bound and `bigs_total` adds the depth
 # bound of every big class, so `total0` is the walk's starting value.
 def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
-                +gn: Nat, +rem_lb: Nat, +items: +List<Item>,
+                +gn: Nat, +n: Nat, +rem_lb: Nat, +items: +List<Item>,
                 +bigs: +List<BigClass>, buckets3: Array<+List<CWord>>,
                 tbl3: Array<U32>, +best: SolveRef.Best) -> GuessRes:
   match ok:
@@ -1843,7 +1843,7 @@ def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
   match dr:
     case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
       finish_node(Nat.is_le(512n, n),
-        g, seen, gen2, gn, rem_lb, items, bigs, buckets3, tbl3, best)
+        g, seen, gen2, gn, n, rem_lb, items, bigs, buckets3, tbl3, best)
 
 def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
                +gn: Nat, +best: SolveRef.Best, fs: Fill5State) -> GuessRes:
