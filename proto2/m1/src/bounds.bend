@@ -30,18 +30,29 @@ def all_candidates_fill(+m: Nat, +roots: Nat, +k: Nat) -> Nat:
 # --- forest_g: g(a1); once reach >= m every later term is 0 ----------------
 
 def forest_g_go(+fuel: Nat, +m: Nat, +roots: Nat, +k: Nat, +a1: Nat,
-                +pow: Nat, +cost: Nat) -> Nat:
+                +pow: Nat, +cost: Nat, done: Bool) -> Nat:
   match fuel:
     case 0n:
       cost
     case 1n+f:
-      +cap = Nat.mul(roots, Nat.mul(pow, k))
-      +used = Nat.mul(Nat.sub(pow, 1n), a1)
-      forest_g_go(f, m, roots, k, a1, Nat.mul(pow, k),
-                  Nat.add(cost, Nat.sub(m, Nat.sub(cap, used))))
+      match done:
+        case True{}:
+          cost
+        case False{}:
+          +cap = Nat.mul(roots, Nat.mul(pow, k))
+          +used = Nat.mul(Nat.sub(pow, 1n), a1)
+          +reach = Nat.sub(cap, used)
+          +pow2 = Nat.mul(pow, k)
+          +cap2 = Nat.mul(roots, Nat.mul(pow2, k))
+          +used2 = Nat.mul(Nat.sub(pow2, 1n), a1)
+          forest_g_go(f, m, roots, k, a1, pow2,
+                      Nat.add(cost, Nat.sub(m, reach)),
+                      Nat.is_le(m, Nat.sub(cap2, used2)))
 
 def forest_g(+m: Nat, +roots: Nat, +k: Nat, +a1: Nat) -> Nat:
-  forest_g_go(24n, m, roots, k, a1, 1n, Nat.add(m, Nat.sub(m, a1)))
+  +cap = Nat.mul(roots, k)
+  forest_g_go(24n, m, roots, k, a1, 1n, Nat.add(m, Nat.sub(m, a1)),
+              Nat.is_le(m, cap))
 
 # --- forest_bound -----------------------------------------------------------
 
