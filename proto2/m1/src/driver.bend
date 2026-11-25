@@ -14,6 +14,7 @@ def setdep() -> U32:
   127
 
 # DEBUG: dump the root bucket trace (0 = absent).
+# Sum of the first `n` cells (a debug check of the feedback table).
 def mxcell(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 620)
 
@@ -22,6 +23,7 @@ def prn(r: Array<U32> & U32, +tag: String) -> IO(Array<U32>):
   do IO<Array<U32>>:
     Unit <- IO.print(tag ++ " " ++ U32.show(v))
     IO.pure(Array<U32>, a)
+
 
 def depth_for(+size: U32) -> Nat:
   Nat.add(U32.log2(U32.sub(size, 1)), 1n)
@@ -78,6 +80,7 @@ def maxk(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
 
 # maxk writes its result into a scratch cell; `after_max` reads it and runs the
 # search. (A read can only be destructured by a callee whose parameter it is.)
+
 def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32,
               +dbg: U32) -> IO(Unit):
   (a, +pk) = p

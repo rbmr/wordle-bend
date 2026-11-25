@@ -47,7 +47,10 @@ def cap_fill(+maxk: U32, +c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
 # Phase 0: v = set[sb+m].  1: v = its feedback.  2: v = its count cell.
 # Phase 5: stop.
 def qcount(+cell: U32, +genb: U32) -> U32:
-  S.cellcnt(cell, genb)
+  U32.mul(U32.and(cell, 1023), A.eq01(U32.shrn(cell, 10n), genb))
+
+def qstamp(+genb: U32, +cnt: U32) -> U32:
+  U32.or(U32.shln(genb, 10n), cnt)
 
 def qresult(+a0: U32, +a1: U32, +n: U32) -> U32:
   +val = A.sel(a0, U32.sub(U32.mul(2, n), 1), U32.mul(2, n))
@@ -90,7 +93,7 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
           (a2, +x) = r
           +cnt = qcount(x, genb)
           a3 = Array.set(U32, a2, U32.add(G.off_qcnt(c, gg), si),
-                         S.stamp(genb, U32.inc(cnt)))
+                         qstamp(genb, U32.inc(cnt)))
           +coll2 = U32.add(coll, A.nz(cnt))
           +m2 = U32.inc(m)
           +gend = A.eq01(m2, n)

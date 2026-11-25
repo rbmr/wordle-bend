@@ -432,7 +432,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           +base = U32.add(G.off_tt(c, gg),
                           U32.mul(U32.and(bcur, ttmask()), 6))
           step(f, c, gg, 0, 103, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, g, cost, base, h2, lbk, cut, gen, ret, nst,
+               nt, ti, mode, g, base, bcur, h2, lbk, cut, gen, ret, nst,
                ngs, nht, npr, stk, Array.get(U32, a2, U32.add(base, 3)))
         case 103:
           (a2, +k1) = p

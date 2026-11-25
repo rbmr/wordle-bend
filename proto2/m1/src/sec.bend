@@ -41,29 +41,26 @@ def ent_at(+dep: U32, +c: U32, +gg: U32) -> U32:
 def cap_at(+k: U32, +n: U32, +c: U32, +gg: U32) -> U32:
   U32.add(U32.add(G.off_cap(c, gg), U32.mul(k, U32.inc(c))), n)
 
-# --------------------------------------------------------- generation stamps ---
+# ----------------------------------------------------------------- keepsakes ---
 #
-# A count cell is (gen << 10) | count. The gen of a scan comes from one global
-# counter in the state array, bumped by every scan. Two scans can never share a
-# gen, so a stale cell is recognised by equality (cell >> 10 == gen) and no
-# reset pass is needed. The counter lives in the array so it cannot be lost by a
-# caller that keeps an older gen in a register; `n` (a bucket size) must stay
-# below 1024.
-def gencell(+c: U32, +gg: U32) -> U32:
-  U32.add(G.off_qgen(c, gg), 720)
+# The count region (256 cells per depth) is reused by every scan at that depth.
+# Instead of stamping cells with a generation (which needs more bits than a
+# 32-bit cell can spare once a search does millions of scans), `cnt` clears the
+# cells its *previous* scan at the same depth touched: the distinct responses of
+# that scan are exactly `ne[0..t)`, and cell 255 of the count block holds the
+# number of them. So a scan starts from an all-zero count region without a
+# 256-cell clear pass, and no caller can leave the region dirty.
+
+# Per-depth counter of the count cells the previous scan touched (cell 255 of
+# the count block; responses are <= 242 so it is never used for a count).
+def dirty(+dep: U32, +c: U32, +gg: U32) -> U32:
+  U32.add(cnt_at(dep, c, gg), 255)
 
 def markgencell(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 722)
 
 def quickgencell(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 723)
-
-# The stamped count in `cell` for scan `gen` (0 when the cell is stale).
-def cellcnt(+cell: U32, +gen: U32) -> U32:
-  U32.mul(U32.and(cell, 1023), A.eq01(U32.shrn(cell, 10n), gen))
-
-def stamp(+gen: U32, +cnt: U32) -> U32:
-  U32.or(U32.shln(gen, 10n), cnt)
 
 # ------------------------------------------------------------------ counting ---
 
@@ -86,8 +83,8 @@ def sqcell(+c: U32, +gg: U32) -> U32:
 # ph 9: the pair holds the global gen counter.  ph 0: the pair holds set[sb+i].
 # ph 1: the pair holds fb[g][x].   ph 2: the pair holds cnt[r].
 # ph 3: stop (dummy read).
-def cnt_go(+fuel: Nat, +ph: U32, +gen: U32, +g: U32, +i: U32, +n: U32,
-           +sb: U32, +skip: U32, +dep: U32, +c: U32, +gg: U32,
+def cnt_go(+fuel: Nat, +ph: U32, +j: U32, +lim: U32, +g: U32, +i: U32,
+           +n: U32, +sb: U32, +skip: U32, +dep: U32, +c: U32, +gg: U32,
            +t: U32, +dup: U32, +hw: U32, +n3: U32, +sq: U32, +x: U32,
            +r: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -97,11 +94,23 @@ def cnt_go(+fuel: Nat, +ph: U32, +gen: U32, +g: U32, +i: U32, +n: U32,
     case 1n+p2:
       match ph:
         case 9:
+          # p holds the number of cells the previous scan left dirty.
           (a2, +v) = p
-          +gen2 = U32.inc(v)
-          a3 = Array.set(U32, a2, gencell(c, gg), gen2)
-          cnt_go(p2, 0, gen2, g, 0, n, sb, skip, dep, c, gg, 0, 0, 0, 0, 0,
-                 0, 0, Array.get(U32, a3, sb))
+          a3 = Array.set(U32, a2, dirty(dep, c, gg), 0)
+          +nb0 = ne_at(dep, c, gg)
+          +idx9 = A.sel(A.eq01(v, 0), sb, nb0)
+          cnt_go(p2, A.sel(A.eq01(v, 0), 0, 7), 0, v, g, 0, n, sb, skip, dep,
+                 c, gg, 0, 0, 0, 0, 0, 0, 0, Array.get(U32, a3, idx9))
+        case 7:
+          # p holds ne[j]: clear that response's count cell.
+          (a2, +r0) = p
+          a3 = Array.set(U32, a2, U32.add(cnt_at(dep, c, gg), r0), 0)
+          +j2 = U32.inc(j)
+          +last = A.eq01(j2, lim)
+          +nb = ne_at(dep, c, gg)
+          cnt_go(p2, A.sel(last, 0, 7), j2, lim, g, 0, n, sb, skip, dep, c,
+                 gg, 0, 0, 0, 0, 0, 0, 0,
+                 Array.get(U32, a3, A.sel(last, sb, U32.add(nb, j2))))
         case 0:
           (a2, +v) = p
           +i2 = U32.inc(i)
@@ -109,27 +118,26 @@ def cnt_go(+fuel: Nat, +ph: U32, +gen: U32, +g: U32, +i: U32, +n: U32,
           +sk = A.eq01(i, skip)
           +idx = A.sel(sk, A.sel(last, 0, U32.add(sb, i2)),
                        U32.add(U32.mul(g, c), v))
-          cnt_go(p2, A.sel(sk, A.sel(last, 3, 0), 1), gen, g, A.sel(sk, i2, i),
-                 n, sb, skip, dep, c, gg, t, dup, hw, n3, sq,
+          cnt_go(p2, A.sel(sk, A.sel(last, 3, 0), 1), j, lim, g,
+                 A.sel(sk, i2, i), n, sb, skip, dep, c, gg, t, dup, hw, n3, sq,
                  A.sel(sk, 0, v), r, Array.get(U32, a2, idx))
         case 1:
           (a2, +fb) = p
           +cb = cnt_at(dep, c, gg)
-          cnt_go(p2, 2, gen, g, i, n, sb, skip, dep, c, gg, t, dup, hw, n3, sq,
-                 x, fb, Array.get(U32, a2, U32.add(cb, fb)))
+          cnt_go(p2, 2, j, lim, g, i, n, sb, skip, dep, c, gg, t, dup, hw, n3,
+                 sq, x, fb, Array.get(U32, a2, U32.add(cb, fb)))
         case 2:
-          (a2, +cell) = p
-          +old = cellcnt(cell, gen)
+          (a2, +old) = p
           +new = A.eq01(old, 0)
           +cb = cnt_at(dep, c, gg)
           +nb = ne_at(dep, c, gg)
           +neidx = A.sel(new, U32.add(nb, t), U32.add(nb, 255))
-          a3 = Array.set(U32, a2, U32.add(cb, r), stamp(gen, U32.inc(old)))
+          a3 = Array.set(U32, a2, U32.add(cb, r), U32.inc(old))
           a4 = Array.set(U32, a3, neidx, r)
           +i2 = U32.inc(i)
           +last = A.eq01(i2, n)
           +idx = A.sel(last, 0, U32.add(sb, i2))
-          cnt_go(p2, A.sel(last, 3, 0), gen, g, i2, n, sb, skip, dep, c, gg,
+          cnt_go(p2, A.sel(last, 3, 0), j, lim, g, i2, n, sb, skip, dep, c, gg,
                  U32.add(t, new), U32.add(dup, U32.sub(1, new)),
                  U32.max(hw, A.eq01(r, 121)), U32.add(n3, A.eq01(old, 2)),
                  U32.add(sq, U32.inc(U32.mul(old, 2))), 0, 0,
@@ -140,13 +148,15 @@ def cnt_go(+fuel: Nat, +ph: U32, +gen: U32, +g: U32, +i: U32, +n: U32,
                          U32.add(U32.add(t, U32.mul(dup, 4096)),
                                  U32.mul(hw, 16777216)))
           a6 = Array.set(U32, a5, n3cell(c, gg), n3)
-          Array.set(U32, a6, sqcell(c, gg), sq)
+          a7 = Array.set(U32, a6, sqcell(c, gg), sq)
+          Array.set(U32, a7, dirty(dep, c, gg), t)
 
 def cnt(+g: U32, +sb: U32, +n: U32, +skip: U32, +dep: U32,
         +c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(n), 8n), 68n)
-  cnt_go(fuel, 9, 0, g, 0, n, sb, skip, dep, c, gg, 0, 0, 0, 0, 0, 0, 0,
-         Array.get(U32, a, gencell(c, gg)))
+  +fuel = Nat.add(Nat.add(Nat.mul(U32.to_nat(n), 8n), 68n),
+                  Nat.mul(U32.to_nat(n), 4n))
+  cnt_go(fuel, 9, 0, 0, g, 0, n, sb, skip, dep, c, gg, 0, 0, 0, 0, 0, 0, 0,
+         Array.get(U32, a, dirty(dep, c, gg)))
 
 # --------------------------------------------------------- stats from ne/cnt ---
 
@@ -186,11 +196,12 @@ def stats_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +c: U32,
           stats_go(p2, 1, j, t, dep, c, gg, pmk, lb, exp, gen, v, skipwin, v,
                    Array.get(U32, a2, U32.add(cb, v)))
         case 1:
-          (a2, +cell) = p
-          +k = cellcnt(cell, gen)
+          (a2, +k) = p
+          +cb = cnt_at(dep, c, gg)
+          a2a = Array.set(U32, a2, U32.add(cb, r), 0)
           +cp = cap_at(pmk, k, c, gg)
           stats_go(p2, 2, j, t, dep, c, gg, pmk, lb, exp, gen, k, skipwin, rw,
-                   Array.get(U32, a2, cp))
+                   Array.get(U32, a2a, cp))
         case 2:
           (a2, +cv) = p
           +j2 = U32.inc(j)
@@ -212,7 +223,7 @@ def stats(+j0: U32, +t: U32, +dep: U32, +c: U32, +gg: U32, +pmk: U32,
   +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 68n)
   +nb = ne_at(dep, c, gg)
   stats_go(fuel, 8, j0, t, dep, c, gg, pmk, lb0, exp0, 0, 0, skipwin, 0,
-           Array.get(U32, a, gencell(c, gg)))
+           Array.get(U32, a, dirty(dep, c, gg)))
 
 # ------------------------------------------------------------------ offsets ---
 
@@ -240,12 +251,13 @@ def offs_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +dst: U32,
           offs_go(p2, 1, j, t, dep, dst, cur, c, gg, gen, v,
                   Array.get(U32, a2, U32.add(cb, v)))
         case 1:
-          (a2, +cell) = p
-          +k = cellcnt(cell, gen)
+          (a2, +k) = p
+          +cb = cnt_at(dep, c, gg)
+          a2a = Array.set(U32, a2, U32.add(cb, r), 0)
           +ob = off_at(dep, c, gg)
           +ub = cur_at(dep, c, gg)
           +zb = ent_at(dep, c, gg)
-          a3 = Array.set(U32, a2, U32.add(ob, j), cur)
+          a3 = Array.set(U32, a2a, U32.add(ob, j), cur)
           a4 = Array.set(U32, a3, U32.add(zb, j), k)
           a5 = Array.set(U32, a4, U32.add(ub, r), cur)
           +j2 = U32.inc(j)
@@ -263,7 +275,7 @@ def offsets(+t: U32, +dep: U32, +dst: U32, +c: U32, +gg: U32,
   +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 68n)
   +nb = ne_at(dep, c, gg)
   offs_go(fuel, 8, 0, t, dep, dst, dst, c, gg, 0, 0,
-          Array.get(U32, a, gencell(c, gg)))
+          Array.get(U32, a, dirty(dep, c, gg)))
 
 # ------------------------------------------------------------------ scatter ---
 

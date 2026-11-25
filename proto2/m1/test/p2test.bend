@@ -32,7 +32,7 @@ def after(p: Array<U32> & U32, +c: U32, +gg: U32) -> IO(Unit):
     +sb : U32 = S.set_at(0, c, gg)
     a2 : Array<U32> = D.fill_ids(U32.to_nat(c), 0, sb,
                                  H.cap_fill(U32.max(mx, 2), c, gg, a))
-    a3 : Array<U32> = P.p2_scan(a2, sb, c, 347, U32.max(mx, 2), 0,
+    a3 : Array<U32> = P.p2_scan(a2, sb, c, 873, U32.max(mx, 2), 0,
                                 1048576, c, gg)
     +cm : U32 = G.off_qgen(c, gg)
     a4 : Array<U32> <- prn(Array.get(U32, a3, U32.add(cm, 700)), "p2best")
