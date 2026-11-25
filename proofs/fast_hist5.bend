@@ -9079,7 +9079,8 @@ def FH.mk_buf_tbl_depth_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +hg5: {SolveFast.all_len5(G) == True{} : Bool},
     +hc5: {SolveFast.all_len5(C) == True{} : Bool}) ->
   FH.BufOk(G, C, n, FH.mk_buf_has_depth(md), True{},
-    SolveFast.mk_buf_tbl_depth(G, C, U32.from_nat(Groups.len_words(G)), md)):
+    SolveFast.mk_buf_tbl_depth(G, C, Groups.len_words(G),
+      U32.from_nat(Groups.len_words(G)), md)):
   match md:
     case None{}:
       Unit{}

@@ -1266,14 +1266,13 @@ def fill_tbl_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +row: U32,
                               tbl
 
 def mk_buf_tbl_depth(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-                     +gcount: U32, md: Maybe<Nat>) -> Buf5:
+                     +gl: Nat, +gcount: U32, md: Maybe<Nat>) -> Buf5:
   match md:
     case None{}:
       NoBuf{}
     case Some{+d}:
       Buf5{Array.new(Nat, 10n, 0n), Array.new(+List<CWord>, 10n, Nil{}),
-           fill_tbl_go(G, C, 0, gcount, Array.new(U32, d, 0)), 1n,
-           U32.to_nat(gcount)}
+           fill_tbl_go(G, C, 0, gcount, Array.new(U32, d, 0)), 1n, gl}
 
 def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   +n: Nat) -> Buf5:
@@ -1282,7 +1281,7 @@ def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       NoBuf{}
     case True{}:
       +gl = Groups.len_words(G)
-      mk_buf_tbl_depth(G, C, U32.from_nat(gl), depth_for(Nat.mul(gl, n)))
+      mk_buf_tbl_depth(G, C, gl, U32.from_nat(gl), depth_for(Nat.mul(gl, n)))
 
 def mk_buf_tbl(+nodup: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                +n: Nat) -> Buf5:
@@ -1683,14 +1682,15 @@ def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
                   tbl: Array<U32>) -> CKRes:
   class_k_start_b(Nat.is_le(gn, 0n), ws, m, gn, tbl)
 
-def bigs_total(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
+# The depth bound `2 * len - 1` of a big class, as a function of its size.
+def bigs_depth(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
   match bigs:
     case Nil{}:
       acc
     case Con{bc, rest}:
       match bc:
-        case BigClass{fb, ws, len, +clb}:
-          bigs_total(rest, Nat.add(clb, acc))
+        case BigClass{fb, ws, +len, clb}:
+          bigs_depth(rest, Nat.add(Nat.sub(Nat.add(len, len), 1n), acc))
 
 # The class-independent part of the lower bound: `n` plus the class lower
 # bounds of the non-big items. A solved class of three candidates contributes
@@ -1803,8 +1803,9 @@ def cap_walk(+bs: +List<BigClass>, +phase: Nat, stop: Bool,
                 case False{}:
                   match st:
                     case CKRes{tbl, +k}:
-                      +clb2 = Nat.max(clb, capbound(len, k))
-                      +gain2 = Nat.add(gain, Nat.sub(clb2, clb))
+                      +dep = Nat.sub(Nat.add(len, len), 1n)
+                      +clb2 = Nat.max(dep, capbound(len, k))
+                      +gain2 = Nat.add(gain, Nat.sub(clb2, dep))
                       cap_walk(rest, 1n,
                         Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
                         BigClass{fb, ws, len, clb} <> acc, gain2, total0,
@@ -1822,7 +1823,7 @@ def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
 
 # The capacity walk runs only for nodes with at least 512 candidates: below
 # that the class scans cost more than the bound saves. `cap_base` is the
-# class-independent part of the lower bound and `bigs_total` adds the depth
+# class-independent part of the lower bound and `bigs_depth` adds the depth
 # bound of every big class, so `total0` is the walk's starting value.
 def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                 +gn: Nat, +n: Nat, +rem_lb: Nat, +items: +List<Item>,
@@ -1834,7 +1835,7 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
       finish_cap(cap_walk(bigs, 1n, False{}, Nil{}, 0n,
-                   bigs_total(bigs, cap_base(n, items, 0n)),
+                   Nat.add(bigs_depth(bigs, 0n), cap_base(n, items, 0n)),
                    best, gn, ck_cheap(0n, tbl3)),
         g, seen, gen2, gn, rem_lb, items, buckets3)
 
