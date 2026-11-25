@@ -27,6 +27,8 @@ import ./sat.bend as Sat
 import ./mainvalid.bend as MV
 import ./solvevalid.bend as SV
 import ./classbound_sum.bend as CBS
+import ./fast_perm.bend as FP
+import ./array.bend as Arr
 import ../src/solve_ref.bend as SolveRef
 import ../src/tree.bend as Tree
 import ./bestok.bend as BO
@@ -468,3 +470,240 @@ def CP.capbound_src_k_le(+n: Nat, +k1: Nat, +k2: Nat,
       Equal.sym(Nat, SolveFast.capbound(n, k2), CapProof.LB.capbound(n, k2),
         CP.capbound_eq(n, k2)),
       CP.capbound_k_le(n, k1, k2, h)))
+
+# The class bound fold is invariant under a permutation of the class list.
+def CP.cap_fold_perm(p: FP.FP.Perm, +G: +List<+List<Nat>>,
+    +xs: +List<Groups.Group>, +ys: +List<Groups.Group>,
+    +ok: FP.FP.PermOk(p, xs, ys)) ->
+  {FH.FH.cap_fold(G, xs) == FH.FH.cap_fold(G, ys) : Nat}:
+  match p:
+    case FP.PRefl{}:
+      Equal.cong(+List<Groups.Group>, Nat, gs => FH.FH.cap_fold(G, gs),
+        xs, ys, ok)
+    case FP.PSkip{pr}:
+      match xs:
+        case Nil{}:
+          Empty.absurd({0n == FH.FH.cap_fold(G, ys) : Nat}, ok)
+        case Con{hx, tx}:
+          match ys:
+            case Nil{}:
+              Empty.absurd({FH.FH.cap_fold(G, hx <> tx) == 0n : Nat}, ok)
+            case Con{hy, ty}:
+              match hy:
+                case Groups.Group{+fy, +wy}:
+                  +eh = Arr.Arr.dpair_l({hx == Groups.Group{fy, wy} : Groups.Group},
+                          FP.FP.PermOk(pr, tx, ty), ok)
+                  +et = Arr.Arr.dpair_r({hx == Groups.Group{fy, wy} : Groups.Group},
+                          FP.FP.PermOk(pr, tx, ty), ok)
+                  %Equal.sym(Groups.Group, hx, Groups.Group{fy, wy}, eh) : {FH.FH.cap_fold(G, _ <> tx) == FH.FH.cap_fold(G, Groups.Group{fy, wy} <> ty) : Nat}
+                  Equal.cong(Nat, Nat, z => Nat.add(FH.FH.cap_class(G, wy), z),
+                    FH.FH.cap_fold(G, tx), FH.FH.cap_fold(G, ty),
+                    CP.cap_fold_perm(pr, G, tx, ty, et))
+    case FP.PSwap{}:
+      match xs:
+        case Nil{}:
+          Empty.absurd({0n == FH.FH.cap_fold(G, ys) : Nat}, ok)
+        case Con{a, t1}:
+          match t1:
+            case Nil{}:
+              Empty.absurd({FH.FH.cap_fold(G, a <> Nil{}) == FH.FH.cap_fold(G, ys) : Nat}, ok)
+            case Con{b, tx}:
+              match ys:
+                case Nil{}:
+                  Empty.absurd({FH.FH.cap_fold(G, a <> (b <> tx)) == 0n : Nat}, ok)
+                case Con{c, t2}:
+                  match c:
+                    case Groups.Group{+fc, +wc}:
+                      match t2:
+                        case Nil{}:
+                          Empty.absurd({FH.FH.cap_fold(G, a <> (b <> tx)) == FH.FH.cap_fold(G, Groups.Group{fc, wc} <> Nil{}) : Nat}, ok)
+                        case Con{d, ty}:
+                          match d:
+                            case Groups.Group{+fd, +wd}:
+                              +ead = Arr.Arr.dpair_l({a == Groups.Group{fd, wd} : Groups.Group},
+                                       Arr.Arr.DPair<{b == Groups.Group{fc, wc} : Groups.Group},
+                                         {tx == ty : +List<Groups.Group>}>, ok)
+                              +r1 = Arr.Arr.dpair_r({a == Groups.Group{fd, wd} : Groups.Group},
+                                      Arr.Arr.DPair<{b == Groups.Group{fc, wc} : Groups.Group},
+                                        {tx == ty : +List<Groups.Group>}>, ok)
+                              +ebc = Arr.Arr.dpair_l({b == Groups.Group{fc, wc} : Groups.Group},
+                                       {tx == ty : +List<Groups.Group>}, r1)
+                              +et = Arr.Arr.dpair_r({b == Groups.Group{fc, wc} : Groups.Group},
+                                      {tx == ty : +List<Groups.Group>}, r1)
+                              %Equal.sym(Groups.Group, a, Groups.Group{fd, wd}, ead) : {FH.FH.cap_fold(G, _ <> (b <> tx)) == FH.FH.cap_fold(G, Groups.Group{fc, wc} <> (Groups.Group{fd, wd} <> ty)) : Nat}
+                              %Equal.sym(Groups.Group, b, Groups.Group{fc, wc}, ebc) : {FH.FH.cap_fold(G, Groups.Group{fd, wd} <> (_ <> tx)) == FH.FH.cap_fold(G, Groups.Group{fc, wc} <> (Groups.Group{fd, wd} <> ty)) : Nat}
+                              %Equal.sym(+List<Groups.Group>, tx, ty, et) : {FH.FH.cap_fold(G, Groups.Group{fd, wd} <> (Groups.Group{fc, wc} <> _)) == FH.FH.cap_fold(G, Groups.Group{fc, wc} <> (Groups.Group{fd, wd} <> ty)) : Nat}
+                              FP.FP.nat_add_swap(FH.FH.cap_class(G, wd),
+                                FH.FH.cap_class(G, wc),
+                                FH.FH.cap_fold(G, ty))
+    case FP.PTrans{+mid, p1, p2}:
+      +ok1 = Arr.Arr.dpair_l(FP.FP.PermOk(p1, xs, mid), FP.FP.PermOk(p2, mid, ys), ok)
+      +ok2 = Arr.Arr.dpair_r(FP.FP.PermOk(p1, xs, mid), FP.FP.PermOk(p2, mid, ys), ok)
+      Equal.trans(Nat, FH.FH.cap_fold(G, xs),
+        FH.FH.cap_fold(G, mid), FH.FH.cap_fold(G, ys),
+        CP.cap_fold_perm(p1, G, xs, mid, ok1),
+        CP.cap_fold_perm(p2, G, mid, ys, ok2))
+
+# ---------------------------------------------------------------------------
+# The self bound `capbound(n, n) = 2n - 1`
+# ---------------------------------------------------------------------------
+
+# `G` is monotone in the level.
+def CP.G_le_succ(+k: Nat, +j: Nat,
+    +hk: {Nat.is_le(1n, k) == True{} : Bool}) ->
+  {Nat.is_le(CapProof.LB.G(k, j), CapProof.LB.G(k, Nat.add(1n, j)))
+   == True{} : Bool}:
+  match k:
+    case 0n:
+      Empty.absurd(
+        {Nat.is_le(CapProof.LB.G(0n, j), CapProof.LB.G(0n, Nat.add(1n, j)))
+         == True{} : Bool}, Logic.Proof.false_ne_true(hk))
+    case 1n+q:
+      +h1 : {Nat.is_le(CapProof.LB.G(1n+q, j),
+                        Nat.mul(1n+q, CapProof.LB.G(1n+q, j))) == True{} : Bool} =
+        CBN.CB.is_le_add_self_r(CapProof.LB.G(1n+q, j),
+          Nat.mul(q, CapProof.LB.G(1n+q, j)))
+      +h2 : {Nat.is_le(Nat.mul(1n+q, CapProof.LB.G(1n+q, j)),
+                        Nat.add(1n, Nat.mul(1n+q, CapProof.LB.G(1n+q, j))))
+             == True{} : Bool} =
+        NatProof.Nat.is_le_add_self_l(1n,
+          Nat.mul(1n+q, CapProof.LB.G(1n+q, j)))
+      NatProof.Nat.is_le_trans(CapProof.LB.G(1n+q, j),
+        Nat.mul(1n+q, CapProof.LB.G(1n+q, j)),
+        Nat.add(1n, Nat.mul(1n+q, CapProof.LB.G(1n+q, j))), h1, h2)
+
+# Once a level cannot hold all `n` candidates, no later level can.
+def CP.capSum_zero(+n: Nat, +k: Nat, +fuel: Nat, +j: Nat,
+    +hk: {Nat.is_le(1n, k) == True{} : Bool},
+    +h: {Nat.is_le(n, CapProof.LB.G(k, j)) == True{} : Bool}) ->
+  {CapProof.LB.capSum(n, k, fuel, j) == 0n : Nat}:
+  match fuel:
+    case 0n:
+      {==}
+    case 1n+pf:
+      +hz : {Nat.sub(n, CapProof.LB.G(k, j)) == 0n : Nat} =
+        LBS.LBS.sub_eq_zero(n, CapProof.LB.G(k, j), h)
+      +hg : {Nat.is_le(CapProof.LB.G(k, j),
+                        CapProof.LB.G(k, Nat.add(1n, j))) == True{} : Bool} =
+        CP.G_le_succ(k, j, hk)
+      +h2 : {Nat.is_le(n, CapProof.LB.G(k, Nat.add(1n, j))) == True{} : Bool} =
+        NatProof.Nat.is_le_trans(n, CapProof.LB.G(k, j),
+          CapProof.LB.G(k, Nat.add(1n, j)), h, hg)
+      +ih : {CapProof.LB.capSum(n, k, pf, Nat.add(1n, j)) == 0n : Nat} =
+        CP.capSum_zero(n, k, pf, Nat.add(1n, j), hk, h2)
+      +e1 : {Nat.add(Nat.sub(n, CapProof.LB.G(k, j)),
+                     CapProof.LB.capSum(n, k, pf, Nat.add(1n, j)))
+             == Nat.add(0n, CapProof.LB.capSum(n, k, pf, Nat.add(1n, j)))
+             : Nat} =
+        Equal.cong(Nat, Nat,
+          x => Nat.add(x, CapProof.LB.capSum(n, k, pf, Nat.add(1n, j))),
+          Nat.sub(n, CapProof.LB.G(k, j)), 0n, hz)
+      Equal.trans(Nat,
+        Nat.add(Nat.sub(n, CapProof.LB.G(k, j)),
+          CapProof.LB.capSum(n, k, pf, Nat.add(1n, j))),
+        Nat.add(0n, CapProof.LB.capSum(n, k, pf, Nat.add(1n, j))),
+        0n, e1, ih)
+
+# `G(n, 2) = 1 + n`.
+def CP.g_two(+n: Nat) ->
+  {CapProof.LB.G(n, 2n) == Nat.add(1n, n) : Nat}:
+  Equal.trans(Nat, CapProof.LB.G(n, 2n),
+    Nat.add(1n, Nat.mul(n, Nat.add(1n, Nat.mul(n, 0n)))),
+    Nat.add(1n, n),
+    {==},
+    Equal.trans(Nat,
+      Nat.add(1n, Nat.mul(n, Nat.add(1n, Nat.mul(n, 0n)))),
+      Nat.add(1n, Nat.mul(n, 1n)),
+      Nat.add(1n, n),
+      Equal.cong(Nat, Nat, x => Nat.add(1n, Nat.mul(n, x)),
+        Nat.add(1n, Nat.mul(n, 0n)), 1n,
+        Equal.trans(Nat, Nat.add(1n, Nat.mul(n, 0n)), Nat.add(1n, 0n), 1n,
+          Equal.cong(Nat, Nat, x => Nat.add(1n, x), Nat.mul(n, 0n), 0n,
+            CBN.CB.mul_zero(n)),
+          NatProof.NatPrf.add_zero(1n))),
+      Equal.cong(Nat, Nat, x => Nat.add(1n, x), Nat.mul(n, 1n), n,
+        CBN.CB.mul_one(n))))
+
+# `1 + (m + m) == (1 + m) + m` under the predecessor.
+def CP.cap_self_arith(+m: Nat) ->
+  {Nat.add(Nat.add(1n, m), m)
+   == Nat.sub(Nat.add(Nat.add(1n, m), Nat.add(1n, m)), 1n) : Nat}:
+  Equal.trans(Nat, Nat.add(Nat.add(1n, m), m), Nat.add(m, Nat.add(1n, m)),
+    Nat.sub(Nat.add(Nat.add(1n, m), Nat.add(1n, m)), 1n),
+    Equal.trans(Nat, Nat.add(Nat.add(1n, m), m), Nat.add(1n, Nat.add(m, m)),
+      Nat.add(m, Nat.add(1n, m)),
+      {==},
+      Equal.sym(Nat, Nat.add(m, Nat.add(1n, m)), Nat.add(1n, Nat.add(m, m)),
+        NatProof.NatPrf.add_succ(m, m))),
+    Equal.sym(Nat, Nat.sub(Nat.add(m, Nat.add(1n, m)), 0n),
+      Nat.add(m, Nat.add(1n, m)),
+      FLB.FS.sub_zero(Nat.add(m, Nat.add(1n, m)))))
+
+# `capbound(n, n) = 2n - 1`: the truncated capacity sequence is already full
+# after the first level.
+def CP.capbound_self(+n: Nat) ->
+  {CapProof.LB.capbound(n, n) == Nat.sub(Nat.add(n, n), 1n) : Nat}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+m:
+      +hl : {CapProof.LB.G(1n+m, 1n) == 1n : Nat} = CP.g_one(1n+m)
+      +hr : {Nat.is_le(1n+m, CapProof.LB.G(1n+m, 2n)) == True{} : Bool} =
+        Equal.trans(Bool,
+          Nat.is_le(1n+m, CapProof.LB.G(1n+m, 2n)),
+          Nat.is_le(1n+m, Nat.add(1n, 1n+m)), True{},
+          Equal.cong(Nat, Bool, x => Nat.is_le(1n+m, x),
+            CapProof.LB.G(1n+m, 2n), Nat.add(1n, 1n+m), CP.g_two(1n+m)),
+          NatProof.Nat.is_le_of_lt(1n+m, Nat.add(1n, 1n+m),
+            NatProof.Nat.is_lt_succ_self(1n+m)))
+      +hz : {CapProof.LB.capSum(1n+m, 1n+m, m, 2n) == 0n : Nat} =
+        CP.capSum_zero(1n+m, 1n+m, m, 2n,
+          NatProof.Nat.is_le_zero_l(m), hr)
+      +e1 : {Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)) == m : Nat} =
+        Equal.trans(Nat, Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)),
+          Nat.sub(1n+m, 1n), m,
+          Equal.cong(Nat, Nat, x => Nat.sub(1n+m, x),
+            CapProof.LB.G(1n+m, 1n), 1n, hl),
+          FLB.FS.sub_zero(m))
+      Equal.trans(Nat, CapProof.LB.capbound(1n+m, 1n+m),
+        Nat.add(1n+m, Nat.add(Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)),
+          CapProof.LB.capSum(1n+m, 1n+m, m, 2n))),
+        Nat.sub(Nat.add(1n+m, 1n+m), 1n),
+        {==},
+        Equal.trans(Nat,
+          Nat.add(1n+m, Nat.add(Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)),
+            CapProof.LB.capSum(1n+m, 1n+m, m, 2n))),
+          Nat.add(1n+m, m),
+          Nat.sub(Nat.add(1n+m, 1n+m), 1n),
+          Equal.cong(Nat, Nat, x => Nat.add(1n+m, x),
+            Nat.add(Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)),
+              CapProof.LB.capSum(1n+m, 1n+m, m, 2n)),
+            m,
+            Equal.trans(Nat,
+              Nat.add(Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)),
+                CapProof.LB.capSum(1n+m, 1n+m, m, 2n)),
+              Nat.add(m, CapProof.LB.capSum(1n+m, 1n+m, m, 2n)),
+              m,
+              Equal.cong(Nat, Nat, x => Nat.add(x,
+                  CapProof.LB.capSum(1n+m, 1n+m, m, 2n)),
+                Nat.sub(1n+m, CapProof.LB.G(1n+m, 1n)), m, e1),
+              Equal.trans(Nat,
+                Nat.add(m, CapProof.LB.capSum(1n+m, 1n+m, m, 2n)),
+                Nat.add(m, 0n), m,
+                Equal.cong(Nat, Nat, x => Nat.add(m, x),
+                  CapProof.LB.capSum(1n+m, 1n+m, m, 2n), 0n, hz),
+                NatProof.NatPrf.add_zero(m)))),
+          CP.cap_self_arith(m)))
+
+# The solver's capped function agrees at `k = n`.
+def CP.capbound_src_self(+n: Nat) ->
+  {Nat.is_le(SolveFast.capbound(n, n), Nat.sub(Nat.add(n, n), 1n))
+   == True{} : Bool}:
+  NatProof.Nat.is_le_eq_l(Nat.sub(Nat.add(n, n), 1n),
+    CapProof.LB.capbound(n, n), SolveFast.capbound(n, n),
+    Equal.sym(Nat, SolveFast.capbound(n, n), CapProof.LB.capbound(n, n),
+      CP.capbound_eq(n, n)),
+    NatProof.Nat.is_le_eq_r(CapProof.LB.capbound(n, n),
+      CapProof.LB.capbound(n, n), Nat.sub(Nat.add(n, n), 1n),
+      CP.capbound_self(n),
+      NatProof.Nat.is_le_refl(CapProof.LB.capbound(n, n))))
