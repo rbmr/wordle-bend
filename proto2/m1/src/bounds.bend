@@ -214,3 +214,113 @@ def tight_capacity_bound(+n: Nat, +root_k: Nat, +max_k: Nat) -> Nat:
 def bucket_capacity_bound(+n: Nat, +root_k: Nat, +max_k: Nat) -> Nat:
   nat_min(tight_capacity_bound(n, root_k, max_k),
           phase2_capacity_bound(n, root_k, max_k))
+
+# --- min_k_for_target_bound -------------------------------------------------
+#
+# The smallest k in 2..=n.min(max_k) with tight_capacity_bound(n, k, max_k)
+# <= target, or n.min(max_k) + 1 when none exists. A match cannot scrutinise a
+# computed value and mutual recursion is not allowed, so each decision is a
+# Bool parameter of the same self-recursive def.
+
+def mktb_small(+n: Nat, +target: Nat, small: Bool) -> Nat:
+  match small:
+    case True{}:
+      Nat.add(n, 1n)
+    case False{}:
+      Nat.max(Nat.sub(Nat.sub(Nat.mul(3n, n), 1n), target), 2n)
+
+# ph 0: more = low + 1 < high. ph 1: le = tight(n, mid) <= target.
+def mktb_bs(+fuel: Nat, +low: Nat, +high: Nat, +n: Nat, +max_k: Nat,
+            +target: Nat, +ph: Nat, +mid: Nat, more: Bool, le: Bool) -> Nat:
+  match fuel:
+    case 0n:
+      high
+    case 1n+f:
+      match ph:
+        case 0n:
+          match more:
+            case True{}:
+              +mid2 = Nat.div(Nat.add(low, high), 2n)
+              mktb_bs(f, low, high, n, max_k, target, 1n, mid2, False{},
+                      Nat.is_le(tight_capacity_bound(n, mid2, max_k), target))
+            case False{}:
+              high
+        case 1n:
+          match le:
+            case True{}:
+              mktb_bs(f, low, mid, n, max_k, target, 0n, 0n, 
+                      Nat.is_lt(Nat.add(low, 1n), mid), False{})
+            case False{}:
+              mktb_bs(f, mid, high, n, max_k, target, 0n, 0n,
+                      Nat.is_lt(Nat.add(mid, 1n), high), False{})
+        case _:
+          high
+
+def mktb_bs_start(+n: Nat, +max_k: Nat, +target: Nat) -> Nat:
+  +lo : Nat = 2n
+  +hi : Nat = Nat.min(n, max_k)
+  mktb_bs(40n, lo, hi, n, max_k, target, 0n, 0n, Nat.is_lt(Nat.add(lo, 1n), hi),
+          False{})
+
+# ph 0 gate 1, ph 1 gate 2, ph 2 gate 3, ph 3 answer. `fuel` is the
+# decreasing argument for the termination check.
+def mktb_gate(+fuel: Nat, +n: Nat, +max_k: Nat, +target: Nat, +ph: Nat,
+              g1: Bool, g2: Bool, g3: Bool) -> Nat:
+  match fuel:
+    case 0n:
+      Nat.add(Nat.min(n, max_k), 1n)
+    case 1n+f:
+      match ph:
+        case 0n:
+          match g1:
+            case True{}:
+              Nat.add(Nat.min(n, max_k), 1n)
+            case False{}:
+              mktb_gate(f, n, max_k, target, 1n, False{},
+                        Nat.is_le(tight_capacity_bound(n, 2n, max_k), target),
+                        False{})
+        case 1n:
+          match g2:
+            case True{}:
+              2n
+            case False{}:
+              mktb_gate(f, n, max_k, target, 2n, False{}, False{},
+                        Nat.is_gt(tight_capacity_bound(n, Nat.min(n, max_k),
+                                                       max_k), target))
+        case 2n:
+          match g3:
+            case True{}:
+              Nat.add(Nat.min(n, max_k), 1n)
+            case False{}:
+              mktb_bs_start(n, max_k, target)
+        case _:
+          Nat.add(Nat.min(n, max_k), 1n)
+
+def mktb_big(+n: Nat, +max_k: Nat, +target: Nat) -> Nat:
+  mktb_gate(8n, n, max_k, target, 0n,
+            Nat.is_lt(target, capacity_bound(n, max_k)), False{}, False{})
+
+def mktb_sel(+fuel: Nat, +n: Nat, +max_k: Nat, +target: Nat, +ph: Nat,
+             ge3: Bool, le: Bool) -> Nat:
+  match fuel:
+    case 0n:
+      mktb_big(n, max_k, target)
+    case 1n+f:
+      match ph:
+        case 0n:
+          match ge3:
+            case True{}:
+              mktb_sel(f, n, max_k, target, 1n, False{}, Nat.is_le(n, max_k))
+            case False{}:
+              mktb_big(n, max_k, target)
+        case 1n:
+          match le:
+            case True{}:
+              mktb_small(n, target, False{})
+            case False{}:
+              mktb_big(n, max_k, target)
+        case _:
+          mktb_big(n, max_k, target)
+
+def min_k_for_target_bound(+n: Nat, +max_k: Nat, +target: Nat) -> Nat:
+  mktb_sel(4n, n, max_k, target, 0n, Nat.is_ge(n, 3n), False{})

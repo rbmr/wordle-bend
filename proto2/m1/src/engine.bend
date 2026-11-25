@@ -28,6 +28,7 @@ import ./heur.bend as H
 import ./sec.bend as S
 import ./bounds.bend as B
 import ./p12.bend as P
+import ./buck.bend as Be
 
 def noskip() -> U32:
   4294967295
@@ -121,7 +122,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           (a2, _) = p
           +isbase = U32.sub(1, A.ge01(n, 3))
           step(f, c, gg, A.sel(isbase, 0, 0), A.sel(isbase, 120, 90), ss, n, beta, pmk,
-               dep, best, 0, lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t,
+               dep, best, lb, lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t,
                lbk, cut, gen,
                A.sel(isbase, U32.div(U32.mul(n, U32.inc(n)), 2), ret), nst, ngs,
                nht, npr, stk, Array.get(U32, a2, 0))
@@ -391,7 +392,9 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           (a2, +v) = p
           stk2 : List<Fr> = Con{Sf{ss, n, beta, pmk, dep, best, lb, lmk, v1k,
                                    v2k, mv, nt, ti, mode, 173}, stk}
-          step(f, c, gg, 1, 300, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+          # Rust passes the state's local_max_k (the largest bucket seen in
+          # phase 1/2) to min_guess, which uses that row of the capacity table.
+          step(f, c, gg, 1, 300, ss, n, beta, lmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, v, 0, 0, 0, 0, best, gen, ret, nst, ngs, nht, npr,
                stk2, Array.get(U32, a2, 0))
         case 173:
@@ -587,9 +590,12 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 7:
           (a2, _) = p
           +doneb = A.ge01(bcur, t)
-          step(f, c, gg, 1, A.sel(doneb, 120, 80), ss, n, beta, pmk, dep, best, lb,
+          +over = A.ge01(cost, cut)
+          +stop = U32.max(doneb, over)
+          step(f, c, gg, 1, A.sel(stop, 120, 80), ss, n, beta, pmk, dep, best, lb,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
-               gen, A.sel(doneb, cost, ret), nst, ngs, nht, npr, stk,
+               gen, A.sel(stop, cost, ret), nst, ngs, nht,
+               U32.add(npr, U32.mul(over, U32.sub(1, doneb))), stk,
                Array.get(U32, a2, 0))
         case 80:
           (a2, _) = p
@@ -624,22 +630,56 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 84:
           (a2, +o) = p
           +k2 = ret
-          step(f, c, gg, 1, 85, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+          step(f, c, gg, 1, 85, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, cut,
                nt, ti, mode, g, cost, bcur, t, o, cut, gen, k2, nst,
                ngs, nht, npr, stk, Array.get(U32, a2, S.cap_at(pmk, k2, c, gg)))
         case 85:
           (a2, +cv) = p
           +k2 = ret
-          +cut2 = U32.sub(cut, U32.sub(cost, cv))
-          +cut3 = U32.max(cut2, cv)
-          stk2 : List<Fr> = Con{Gf{ss, n, beta, pmk, dep, cut, lb, g, cost,
-                                   U32.inc(bcur), t, cv}, stk}
-          a3 = S.hset(a2, lbk, k2, hsh1(U32.inc(dep), c, gg),
-                      hsh2(U32.inc(dep), c, gg), c, gg)
-          +pk2 = U32.max(U32.min(k2, pmk), 2)
-          step(f, c, gg, 0, 0, lbk, k2, cut3, pk2, U32.inc(dep), cut3, 0, 0, 0, 0,
-               4294967295, 0, 0, 0, 0, 0, 0, 0, 0, cut3, gen, ret, nst, ngs,
-               nht, npr, stk2, Array.get(U32, a3, 0))
+          a3 = Be.eval(a2, lbk, k2, cv, pmk, U32.inc(dep), c, gg)
+          step(f, c, gg, 1, 86, ss, n, beta, pmk, dep, best, lb, lmk, cv, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, k2, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, Be.res_used(c, gg)))
+        case 86:
+          (a2, +used) = p
+          +d = U32.sub(used, v1k)
+          step(f, c, gg, 1, 87, ss, n, beta, pmk, dep, best, lb, used, v1k,
+               d, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret,
+               nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, Be.res_ex(c, gg)))
+        case 87:
+          (a2, +pk) = p
+          +ex = U32.and(pk, 1)
+          +ck = U32.shrn(pk, 1n)
+          step(f, c, gg, 1, A.sel(ex, 7, 88), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, ck, ti, mode, g,
+               U32.add(cost, U32.mul(ex, v2k)),
+               A.sel(ex, U32.inc(bcur), bcur), t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 88:
+          (a2, _) = p
+          +b = U32.sub(cost, v1k)
+          +cut2 = G.sat_sub(cut, b)
+          +prune = A.ge01(lmk, cut2)
+          step(f, c, gg, 1, A.sel(prune, 133, 134), ss, n, beta, pmk, dep, best,
+               lb, lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk,
+               cut2, gen, ret, nst, ngs, nht, U32.add(npr, prune), stk,
+               Array.get(U32, a2, 0))
+        case 133:
+          (a2, _) = p
+          step(f, c, gg, 1, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k,
+               v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
+               U32.add(cost, v2k), nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, 0))
+        case 134:
+          (a2, _) = p
+          +k2 = ret
+          +known = U32.mul(A.ge01(16, k2), lmk)
+          stk2 : List<Fr> = Con{Gf{ss, n, beta, pmk, dep, mv, lb, g, cost,
+                                   U32.inc(bcur), t, v1k}, stk}
+          step(f, c, gg, 0, 0, lbk, k2, cut, nt, U32.inc(dep), cut, known, 0,
+               0, 0, 4294967295, 0, 0, 0, 0, 0, 0, 0, 0, cut, gen, ret, nst,
+               ngs, nht, npr, stk2, Array.get(U32, a2, 0))
         # ---------------------------------------------------- deliver ----
         case 120:
           # kind 0: pop a guess frame (or finish at the root); kind 1: pop a
