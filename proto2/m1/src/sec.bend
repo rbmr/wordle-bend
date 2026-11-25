@@ -43,8 +43,15 @@ def cap_at(+k: U32, +n: U32, +c: U32, +gg: U32) -> U32:
 
 # ------------------------------------------------------------------ counting ---
 
-type CR is Type:
-  CR{a: Array<U32>, pk: U32, n3: U32}
+# Result cells written by cnt: pk, n3, sq.
+def pkcell(+c: U32, +gg: U32) -> U32:
+  U32.add(U32.add(G.off_qgen(c, gg), 600), 0)
+
+def n3cell(+c: U32, +gg: U32) -> U32:
+  U32.add(U32.add(G.off_qgen(c, gg), 600), 1)
+
+def sqcell(+c: U32, +gg: U32) -> U32:
+  U32.add(U32.add(G.off_qgen(c, gg), 600), 11)
 
 # Count the responses of guess `g` over set[sb..sb+n), skipping set element
 # index `skip` (0xFFFFFFFF for none). Fills cnt[dep][r] = gen + count, appends
@@ -55,12 +62,12 @@ type CR is Type:
 # ph 2: the pair holds cnt[r].               ph 3: stop (dummy read).
 def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
            +skip: U32, +gen: U32, +dep: U32, +c: U32, +gg: U32,
-           +t: U32, +dup: U32, +hw: U32, +n3: U32, +x: U32, +r: U32,
-           p: Array<U32> & U32) -> CR:
+           +t: U32, +dup: U32, +hw: U32, +n3: U32, +sq: U32, +x: U32,
+           +r: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
     case 0n:
       (a2, _) = p
-      CR{a2, 0, 0}
+      a2
     case 1n+p2:
       match ph:
         case 0:
@@ -71,13 +78,13 @@ def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
           +idx = A.sel(sk, A.sel(last, 0, U32.add(sb, i2)),
                        U32.add(U32.mul(g, c), v))
           cnt_go(p2, A.sel(sk, A.sel(last, 3, 0), 1), g, A.sel(sk, i2, i), n,
-                 sb, skip, gen, dep, c, gg, t, dup, hw, n3, A.sel(sk, 0, v), r,
-                 Array.get(U32, a2, idx))
+                 sb, skip, gen, dep, c, gg, t, dup, hw, n3, sq,
+                 A.sel(sk, 0, v), r, Array.get(U32, a2, idx))
         case 1:
           (a2, +fb) = p
           +cb = cnt_at(dep, c, gg)
-          cnt_go(p2, 2, g, i, n, sb, skip, gen, dep, c, gg, t, dup, hw, n3, x,
-                 fb, Array.get(U32, a2, U32.add(cb, fb)))
+          cnt_go(p2, 2, g, i, n, sb, skip, gen, dep, c, gg, t, dup, hw, n3, sq,
+                 x, fb, Array.get(U32, a2, U32.add(cb, fb)))
         case 2:
           (a2, +cell) = p
           +diff = U32.sub(cell, gen)
@@ -94,65 +101,81 @@ def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
           +idx = A.sel(last, 0, U32.add(sb, i2))
           cnt_go(p2, A.sel(last, 3, 0), g, i2, n, sb, skip, gen, dep, c, gg,
                  U32.add(t, new), U32.add(dup, U32.sub(1, new)),
-                 U32.max(hw, A.eq01(r, 121)), U32.add(n3, A.eq01(old, 2)), 0, 0,
+                 U32.max(hw, A.eq01(r, 121)), U32.add(n3, A.eq01(old, 2)),
+                 U32.add(sq, U32.inc(U32.mul(old, 2))), 0, 0,
                  Array.get(U32, a4, idx))
         case _:
           (a2, _) = p
-          CR{a2, U32.add(U32.add(t, U32.mul(dup, 4096)), U32.mul(hw, 16777216)),
-             n3}
+          a5 = Array.set(U32, a2, pkcell(c, gg),
+                         U32.add(U32.add(t, U32.mul(dup, 4096)),
+                                 U32.mul(hw, 16777216)))
+          a6 = Array.set(U32, a5, n3cell(c, gg), n3)
+          Array.set(U32, a6, sqcell(c, gg), sq)
 
 def cnt(+g: U32, +sb: U32, +n: U32, +skip: U32, +gen: U32, +dep: U32,
-        +c: U32, +gg: U32, a: Array<U32>) -> CR:
+        +c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
   +fuel = Nat.add(Nat.mul(U32.to_nat(n), 8n), 64n)
-  cnt_go(fuel, 0, g, 0, n, sb, skip, gen, dep, c, gg, 0, 0, 0, 0, 0, 0,
+  cnt_go(fuel, 0, g, 0, n, sb, skip, gen, dep, c, gg, 0, 0, 0, 0, 0, 0, 0,
          Array.get(U32, a, sb))
 
 # --------------------------------------------------------- stats from ne/cnt ---
 
-type SR is Type:
-  SR{a: Array<U32>, lb: U32, exp: U32}
+def lbcell(+c: U32, +gg: U32) -> U32:
+  U32.add(U32.add(G.off_qgen(c, gg), 600), 2)
+
+def expcell(+c: U32, +gg: U32) -> U32:
+  U32.add(U32.add(G.off_qgen(c, gg), 600), 3)
+
+def write_stats(a: Array<U32>, +lb: U32, +exp: U32, +c: U32,
+                +gg: U32) -> Array<U32>:
+  a1 = Array.set(U32, a, lbcell(c, gg), lb)
+  Array.set(U32, a1, expcell(c, gg), exp)
+
 
 # lb = n + sum over distinct responses of cap[pmk][k]; exp = 1 + sum k*k.
 # ph 0: the pair holds ne[j].   ph 1: the pair holds cnt[r].
 # ph 2: the pair holds cap[pmk][k].   ph 3: stop.
 def stats_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +c: U32,
              +gg: U32, +pmk: U32, +lb: U32, +exp: U32, +gen: U32, +r: U32,
-             p: Array<U32> & U32) -> SR:
+             +skipwin: U32, +rw: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
     case 0n:
       (a2, _) = p
-      SR{a2, lb, exp}
+      write_stats(a2, lb, exp, c, gg)
     case 1n+p2:
       match ph:
         case 0:
           (a2, +v) = p
           +cb = cnt_at(dep, c, gg)
-          stats_go(p2, 1, j, t, dep, c, gg, pmk, lb, exp, gen, v,
+          stats_go(p2, 1, j, t, dep, c, gg, pmk, lb, exp, gen, v, skipwin, v,
                    Array.get(U32, a2, U32.add(cb, v)))
         case 1:
           (a2, +cell) = p
           +k = U32.sub(cell, gen)
           +cp = cap_at(pmk, k, c, gg)
-          stats_go(p2, 2, j, t, dep, c, gg, pmk, lb, exp, gen, k,
+          stats_go(p2, 2, j, t, dep, c, gg, pmk, lb, exp, gen, k, skipwin, rw,
                    Array.get(U32, a2, cp))
         case 2:
           (a2, +cv) = p
           +j2 = U32.inc(j)
           +last = A.eq01(j2, t)
           +nb = ne_at(dep, c, gg)
+          +keep = U32.sub(1, U32.mul(skipwin, A.eq01(rw, 121)))
           stats_go(p2, A.sel(last, 3, 0), j2, t, dep, c, gg, pmk,
-                   U32.add(lb, cv), U32.add(exp, U32.mul(r, r)), gen, r,
+                   U32.add(lb, U32.mul(cv, keep)),
+                   U32.add(exp, U32.mul(r, r)), gen, r, skipwin, rw,
                    Array.get(U32, a2, U32.add(nb, A.sel(last, 0, j2))))
         case _:
           (a2, _) = p
-          SR{a2, lb, exp}
+          write_stats(a2, lb, exp, c, gg)
 
 # j0 = starting index into ne, t = number of distinct responses to walk.
 def stats(+j0: U32, +t: U32, +dep: U32, +c: U32, +gg: U32, +pmk: U32,
-          +lb0: U32, +exp0: U32, +gen: U32, a: Array<U32>) -> SR:
+          +lb0: U32, +exp0: U32, +gen: U32, +skipwin: U32,
+          a: Array<U32>) -> Array<U32>:
   +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 64n)
   +nb = ne_at(dep, c, gg)
-  stats_go(fuel, 0, j0, t, dep, c, gg, pmk, lb0, exp0, gen, 0,
+  stats_go(fuel, 0, j0, t, dep, c, gg, pmk, lb0, exp0, gen, 0, skipwin, 0,
            Array.get(U32, a, U32.add(nb, j0)))
 
 # ------------------------------------------------------------------ offsets ---
@@ -179,14 +202,16 @@ def offs_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +dst: U32,
           +k = U32.sub(cell, gen)
           +ob = off_at(dep, c, gg)
           +ub = cur_at(dep, c, gg)
-          a3 = Array.set(U32, a2, U32.add(ob, r), cur)
-          a4 = Array.set(U32, a3, U32.add(ub, r), cur)
+          +zb = ent_at(dep, c, gg)
+          a3 = Array.set(U32, a2, U32.add(ob, j), cur)
+          a4 = Array.set(U32, a3, U32.add(zb, j), k)
+          a5 = Array.set(U32, a4, U32.add(ub, r), cur)
           +j2 = U32.inc(j)
           +last = A.eq01(j2, t)
           +nb = ne_at(dep, c, gg)
           offs_go(p2, A.sel(last, 2, 0), j2, t, dep, U32.add(dst, k),
                   U32.add(cur, k), c, gg, gen, r,
-                  Array.get(U32, a4, U32.add(nb, A.sel(last, 0, j2))))
+                  Array.get(U32, a5, U32.add(nb, A.sel(last, 0, j2))))
         case _:
           (a2, _) = p
           a2

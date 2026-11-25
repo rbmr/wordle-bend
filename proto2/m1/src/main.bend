@@ -64,6 +64,10 @@ def read_file(+path: String) -> IO(String):
 
 # ------------------------------------------------------------------ checks ---
 
+def prcell(r: Array<U32> & U32) -> IO(Unit):
+  (a, v) = r
+  IO.print(U32.show(v))
+
 # Sum of `n` cells from `base` modulo 2^32. One read per call: the next read is
 # the argument of the recursive call.
 def sum_go(fuel: Nat, +i: U32, +n: U32, +base: U32, +acc: U32,
@@ -105,8 +109,9 @@ def report_if(a: Array<U32>, +mode: U32, +qk: U32, +qn: U32, +b: U32,
       IO.print("mode=" ++ U32.show(mode) ++ " b=" ++ U32.show(b)
                ++ " n=" ++ U32.show(n) ++ " sum=" ++ U32.show(s))
     case 1:
-      +qs = H.run_quick(a, qk, qn, c, gg)
-      IO.print("mode=" ++ U32.show(mode) ++ " q=" ++ U32.show(qs))
+      +out = U32.add(G.off_qcnt(c, gg), 200)
+      a2 = H.run_quick(a, qk, qn, c, gg)
+      prcell(Array.get(U32, a2, out))
     case _:
       +s = region_sum(a, U32.sub(mode, 500), 1)
       IO.print("mode=" ++ U32.show(mode) ++ " cell=" ++ U32.show(s))

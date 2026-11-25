@@ -55,28 +55,28 @@ def qresult(+a0: U32, +a1: U32, +n: U32) -> U32:
 
 def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
           +a0: U32, +a1: U32, +genb: U32, +row: U32, +sb: U32, +n: U32,
-          +c: U32, +gg: U32, r: Array<U32> & U32) -> U32:
+          +c: U32, +gg: U32, +out: U32, r: Array<U32> & U32) -> Array<U32>:
   match fuel:
     case 0n:
       (a2, _) = r
-      qresult(a0, a1, n)
+      Array.set(U32, a2, out, qresult(a0, a1, n))
     case 1n+p:
       match ph:
         case 3:
           (a2, +x) = r
-          quick(p, 4, i, 0, x, 0, a0, a1, genb, row, sb, n, c, gg,
+          quick(p, 4, i, 0, x, 0, a0, a1, genb, row, sb, n, c, gg, out,
                 Array.get(U32, a2, U32.add(G.off_c2g(c, gg), x)))
         case 4:
           (a2, +x) = r
-          quick(p, 0, i, 0, 0, 0, a0, a1, genb, U32.mul(x, c), sb, n, c, gg,
+          quick(p, 0, i, 0, 0, 0, a0, a1, genb, U32.mul(x, c), sb, n, c, gg, out,
                 Array.get(U32, a2, U32.add(sb, 0)))
         case 0:
           (a2, +x) = r
-          quick(p, 1, i, m, x, coll, a0, a1, genb, row, sb, n, c, gg,
+          quick(p, 1, i, m, x, coll, a0, a1, genb, row, sb, n, c, gg, out,
                 Array.get(U32, a2, U32.add(row, x)))
         case 1:
           (a2, +x) = r
-          quick(p, 2, i, m, x, coll, a0, a1, genb, row, sb, n, c, gg,
+          quick(p, 2, i, m, x, coll, a0, a1, genb, row, sb, n, c, gg, out,
                 Array.get(U32, a2, U32.add(G.off_qcnt(c, gg), x)))
 
         case 2:
@@ -97,11 +97,11 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
                                       U32.add(sb, m2)))
           quick(p, A.sel(stop, 5, A.sel(gend, 3, 0)), i2,
                 A.sel(gend, 0, m2), si, A.sel(gend, 0, coll2), a0b, a1b,
-                U32.add(genb, U32.mul(gend, 256)), row, sb, n, c, gg,
+                U32.add(genb, U32.mul(gend, 256)), row, sb, n, c, gg, out,
                 Array.get(U32, a3, nxt))
         case _:
           (a2, _) = r
-          qresult(a0, a1, n)
+          Array.set(U32, a2, out, qresult(a0, a1, n))
 
 # ------------------------------------------------------------- test helpers ---
 def fill_set(+fuel: Nat, +i: U32, +n: U32, +k: U32, +base: U32,
@@ -114,10 +114,14 @@ def fill_set(+fuel: Nat, +i: U32, +n: U32, +k: U32, +base: U32,
       fill_set(p, U32.inc(i), n, k, base, a)
 
 # Quick-evaluate candidates k..k+n-1, which must be copied into the depth-0 set
-# region first.
-def run_quick(a: Array<U32>, +k: U32, +n: U32, +c: U32, +gg: U32) -> U32:
-  +sb = G.off_sets(c, gg)
+# region first. The packed result is written to cell `out`.
+def quick_at(a: Array<U32>, +sb: U32, +n: U32, +c: U32, +gg: U32,
+             +genb: U32, +out: U32) -> Array<U32>:
   +fuel = Nat.add(Nat.mul(U32.to_nat(n), Nat.mul(U32.to_nat(n), 8n)), 64n)
-  a1 = fill_set(U32.to_nat(n), 0, n, k, sb, a)
-  quick(fuel, 3, 0, 0, 0, 0, 0, 0, 0, 0, sb, n, c, gg,
-        Array.get(U32, a1, sb))
+  quick(fuel, 3, 0, 0, 0, 0, 0, 0, genb, 0, sb, n, c, gg, out,
+        Array.get(U32, a, sb))
+
+def run_quick(a: Array<U32>, +k: U32, +n: U32, +c: U32, +gg: U32) -> Array<U32>:
+  +sb = G.off_sets(c, gg)
+  +out = U32.add(G.off_qcnt(c, gg), 200)
+  quick_at(fill_set(U32.to_nat(n), 0, n, k, sb, a), sb, n, c, gg, 0, out)

@@ -11,7 +11,7 @@ def caprows() -> U32:
   256
 
 def depths() -> U32:
-  24
+  128
 
 def entn() -> U32:
   1024

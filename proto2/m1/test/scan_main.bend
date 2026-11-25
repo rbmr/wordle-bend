@@ -5,19 +5,18 @@ import ../src/tab.bend as T
 import ../src/sec.bend as S
 import ../src/arith.bend as A
 
-# Checksum test for the scan primitives: for each guess 0..n-1, count/offsets/
-# scatter the full candidate set and print a rolling hash of the distinct
-# response list (with its offsets and counts), a rolling hash of the scattered
-# bucket arena, and the packed counters.
-#
-# Hashes are written into scratch cells of the state array (there is no way to
-# return a second value), then printed by a one-cell read.
+# Checksum test for the scan primitives, one guess per line:
+#   g <g> t <t> hw <hw> n3 <n3> sq <sq> ne <hash> ar <hash>
+# The hashes are rolling (h = h*31 + v) over the distinct-response list and
+# over the scattered bucket arena.
 
-def scratch() -> U32:
-  512
+def hcell(+c: U32, +gg: U32) -> U32:
+  U32.add(G.off_qgen(c, gg), 500)
 
-# Rolling hash h = h*31 + v over [base, base+n), written to cell `out`.
-# ph 0: process the value just read.  ph 1: write and stop.
+def acell(+c: U32, +gg: U32) -> U32:
+  U32.add(G.off_qgen(c, gg), 501)
+
+# Rolling hash over [base, base+n), written to cell `out`.
 def hash_go(+fuel: Nat, +ph: U32, +i: U32, +n: U32, +base: U32, +h: U32,
             +out: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -38,14 +37,8 @@ def hash_go(+fuel: Nat, +ph: U32, +i: U32, +n: U32, +base: U32, +h: U32,
           Array.set(U32, a2, out, h)
 
 def hash(+base: U32, +n: U32, +out: U32, a: Array<U32>) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(n), 4n), 64n)
-  hash_go(fuel, 0, 0, n, base, 0, out, Array.get(U32, a, base))
-
-def prcell(r: Array<U32> & U32) -> IO(Array<U32>):
-  (a, v) = r
-  do IO<Array<U32>>:
-    Unit <- IO.print(U32.show(v))
-    IO.pure(Array<U32>, a)
+  hash_go(Nat.add(Nat.mul(U32.to_nat(n), 4n), 64n), 0, 0, n, base, 0, out,
+          Array.get(U32, a, base))
 
 def depth_for(+size: U32) -> Nat:
   Nat.add(U32.log2(U32.sub(size, 1)), 1n)
@@ -55,30 +48,63 @@ def fill_ids(+fuel: Nat, +i: U32, +base: U32, a: Array<U32>) -> Array<U32>:
     case 0n:
       a
     case 1n+p:
-      fill_ids(p, U32.inc(i), base,
-               Array.set(U32, a, U32.add(base, i), i))
+      fill_ids(p, U32.inc(i), base, Array.set(U32, a, U32.add(base, i), i))
 
-def one(st: S.CR, +g: U32, +c: U32, +gg: U32, +dep: U32) -> IO(Array<U32>):
-  match st:
-    case S.CR{a, +pk, +n3}:
-      do IO<Array<U32>>:
-        +t : U32 = U32.and(pk, 4095)
-        +nb : U32 = S.ne_at(dep, c, gg)
-        +dst : U32 = S.set_at(U32.inc(dep), c, gg)
-        +hcell : U32 = U32.add(G.off_qgen(c, gg), 512)
-        +acell : U32 = U32.add(hcell, 1)
-        +head : String = "g " ++ U32.show(g) ++ " pk " ++ U32.show(pk)
-                          ++ " n3 " ++ U32.show(n3) ++ " ne "
-        a1 : Array<U32> = S.offsets(t, dep, dst, c, gg, U32.mul(g, 1024), a)
-        a2 : Array<U32> = hash(nb, t, hcell, a1)
-        a3 : Array<U32> = S.scatter(g, S.set_at(dep, c, gg), c, dep, dst, c,
-                                    gg, a2)
-        a4 : Array<U32> = hash(dst, c, acell, a3)
-        Unit <- IO.print(head)
-        a5 : Array<U32> <- prcell(Array.get(U32, a4, hcell))
-        Unit <- IO.print("ar")
-        a6 : Array<U32> <- prcell(Array.get(U32, a5, acell))
-        IO.pure(Array<U32>, a6)
+# One scan, in phases, each step consuming the read pair `r`.
+def one(+fuel: Nat, +ph: U32, +g: U32, +c: U32, +gg: U32, +t: U32, +n3: U32,
+        +sq: U32, +pk: U32, r: Array<U32> & U32) -> IO(Array<U32>):
+  match fuel:
+    case 0n:
+      (a0, _) = r
+      IO.pure(Array<U32>, a0)
+    case 1n+fu:
+      match ph:
+        case 0:
+          (a, _) = r
+          a1 = S.cnt(g, S.set_at(0, c, gg), c, 4294967295, U32.mul(g, 1024),
+                     0, c, gg, a)
+          one(fu, 1, g, c, gg, t, n3, sq, pk,
+              Array.get(U32, a1, S.pkcell(c, gg)))
+        case 1:
+          (a, +v) = r
+          one(fu, 2, g, c, gg, U32.and(v, 4095), n3, sq, U32.shrn(v, 24n),
+              Array.get(U32, a, S.n3cell(c, gg)))
+        case 2:
+          (a, v) = r
+          one(fu, 3, g, c, gg, t, v, sq, pk,
+              Array.get(U32, a, S.sqcell(c, gg)))
+        case 3:
+          (a, v) = r
+          a1 = S.offsets(t, 0, S.set_at(1, c, gg), c, gg, U32.mul(g, 1024), a)
+          a2 = S.scatter(g, S.set_at(0, c, gg), c, 0, S.set_at(1, c, gg), c,
+                         gg, a1)
+          one(fu, 4, g, c, gg, t, n3, v, pk,
+              Array.get(U32, a2, S.ne_at(0, c, gg)))
+        case 4:
+          (a, v) = r
+          a1 = hash(S.ne_at(0, c, gg), t, hcell(c, gg), a)
+          one(fu, 5, g, c, gg, t, n3, sq, pk,
+              Array.get(U32, a1, S.set_at(1, c, gg)))
+        case 5:
+          (a, v) = r
+          a1 = hash(S.set_at(1, c, gg), c, acell(c, gg), a)
+          one(fu, 6, g, c, gg, t, n3, sq, pk,
+              Array.get(U32, a1, hcell(c, gg)))
+        case 6:
+          (a, _) = r
+          one(fu, 7, g, c, gg, t, n3, sq, pk,
+              Array.get(U32, a, acell(c, gg)))
+        case 7:
+          (a, v) = r
+          do IO<Array<U32>>:
+            Unit <- IO.print("g " ++ U32.show(g) ++ " t " ++ U32.show(t)
+                             ++ " hw " ++ U32.show(pk)
+                             ++ " n3 " ++ U32.show(n3) ++ " sq " ++ U32.show(sq)
+                             ++ " ar " ++ U32.show(v))
+            IO.pure(Array<U32>, a)
+        case _:
+          (a2, _) = r
+          IO.pure(Array<U32>, a2)
 
 def loop(+fuel: Nat, +g: U32, +c: U32, +gg: U32, a: Array<U32>) -> IO(Unit):
   match fuel:
@@ -86,9 +112,8 @@ def loop(+fuel: Nat, +g: U32, +c: U32, +gg: U32, a: Array<U32>) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case 1n+p:
       do IO<Unit>:
-        +sb : U32 = S.set_at(0, c, gg)
-        a2 : Array<U32> <- one(S.cnt(g, sb, c, 4294967295, U32.mul(g, 1024), 0, c, gg, a),
-                               g, c, gg, 0)
+        a2 : Array<U32> <- one(16n, 0, g, c, gg, 0, 0, 0, 0,
+                               Array.get(U32, a, 0))
         loop(p, U32.inc(g), c, gg, a2)
 
 def go(+gp: String, +cp: String, +n: U32) -> IO(Unit):
@@ -100,8 +125,7 @@ def go(+gp: String, +cp: String, +n: U32) -> IO(Unit):
     total : U32 = G.total_size(c, gg)
     a : Array<U32> = Array.new(U32, depth_for(total), 0)
     a0 : Array<U32> = M.build_all(c, gg, gtext, ctext, a)
-    +sb : U32 = S.set_at(0, c, gg)
-    a1 : Array<U32> = fill_ids(U32.to_nat(c), 0, sb, a0)
+    a1 : Array<U32> = fill_ids(U32.to_nat(c), 0, S.set_at(0, c, gg), a0)
     loop(Nat.add(U32.to_nat(n), 1n), 0, c, gg, a1)
 
 def go_m(m: Maybe<&2, U32>, +gp: String, +cp: String) -> IO(Unit):
