@@ -52,7 +52,7 @@ def ttmaskb() -> U32:
   U32.sub(G.ttb(), 1)
 
 def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
-       +pmk: U32, +h1: U32, +h2: U32, +k1: U32, +k2h: U32, +base: U32,
+       +pmk: U32, +pn: U32, +h1: U32, +h2: U32, +k1: U32, +k2h: U32, +base: U32,
        +used: U32, +ex: U32, +dep: U32, +c: U32, +gg: U32, +cand: U32,
        +val: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -63,15 +63,15 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
       match ph:
         case 0:
           (a2, _) = p
-          ev(f, 1, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 1, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              cand, val, Array.get(U32, a2, U32.add(o, j)))
         case 1:
           (a2, +v) = p
-          ev(f, 2, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 2, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              v, val, Array.get(U32, a2, U32.add(G.off_z1(c, gg), v)))
         case 2:
           (a2, +z) = p
-          ev(f, 3, j, o, k, cv, pmk, U32.xor(h1, z), h2, k1, k2h, base, used, ex,
+          ev(f, 3, j, o, k, cv, pmk, pn, U32.xor(h1, z), h2, k1, k2h, base, used, ex,
              dep, c, gg, cand, val,
              Array.get(U32, a2, U32.add(G.off_z2(c, gg), cand)))
         case 3:
@@ -80,7 +80,7 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           +j2 = U32.inc(j)
           +more = A.lt01(j2, k)
           +idx = A.sel(more, U32.add(o, j2), 0)
-          ev(f, A.sel(more, 1, 10), j2, o, k, cv, pmk, h1, h2b, k1, k2h, base,
+          ev(f, A.sel(more, 1, 10), j2, o, k, cv, pmk, pn, h1, h2b, k1, k2h, base,
              used, ex, dep, c, gg, cand, val, Array.get(U32, a2, idx))
         case 10:
           (a2, _) = p
@@ -90,18 +90,18 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           +cm1 = cmk1(dep, c, gg)
           a3 = Array.set(U32, a2, cm1, h1)
           a4 = Array.set(U32, a3, U32.inc(cm1), h2)
-          ev(f, 4, j, o, k, cv, pmk, h1, h2, k1b, h2, base0, used, ex, dep, c,
+          ev(f, 4, j, o, k, cv, pmk, pn, h1, h2, k1b, h2, base0, used, ex, dep, c,
              gg, cand, val, Array.get(U32, a4, U32.add(base0, 3)))
         case 4:
           (a2, +v) = p
           +hit = A.eq01(v, k1)
-          ev(f, A.sel(hit, 5, 7), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(hit, 5, 7), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, A.sel(hit, U32.add(base, 4), base)))
         case 5:
           (a2, +v) = p
           +hit = A.eq01(v, k2h)
-          ev(f, A.sel(hit, 6, 7), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(hit, 6, 7), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, A.sel(hit, U32.add(base, 5), base)))
         case 6:
@@ -113,18 +113,18 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           a3 = Array.set(U32, a2, res_used(c, gg), used0)
           a4 = Array.set(U32, a3, res_ck(c, gg), ck)
           a5 = Array.set(U32, a4, res_ex(c, gg), U32.add(ex0, U32.mul(ck, 2)))
-          ev(f, 14, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used0, ex0, dep, c,
+          ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used0, ex0, dep, c,
              gg, cand, val, Array.get(U32, a5, 0))
         case 7:
           (a2, +v) = p
           +hit = A.eq01(v, k1)
-          ev(f, A.sel(hit, 8, 12), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(hit, 8, 12), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, A.sel(hit, U32.add(base, 1), base)))
         case 8:
           (a2, +v) = p
           +hit = A.eq01(v, k2h)
-          ev(f, A.sel(hit, 9, 12), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(hit, 9, 12), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, A.sel(hit, U32.add(base, 2), base)))
         case 9:
@@ -136,31 +136,31 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           a3 = Array.set(U32, a2, res_used(c, gg), used0)
           a4 = Array.set(U32, a3, res_ck(c, gg), ck)
           a5 = Array.set(U32, a4, res_ex(c, gg), U32.add(ex0, U32.mul(ck, 2)))
-          ev(f, 14, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used0, ex0, dep, c,
+          ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used0, ex0, dep, c,
              gg, cand, val, Array.get(U32, a5, 0))
         case 12:
           (a2, _) = p
-          ev(f, A.sel(A.ge01(15, k), 16, 15), j, o, k, cv, pmk, h1, h2, k1, k2h,
+          ev(f, A.sel(A.ge01(15, k), 16, 15), j, o, k, cv, pmk, pn, h1, h2, k1, k2h,
              base, used, ex, dep, c, gg, cand, val, Array.get(U32, a2, 0))
         case 15:
           # Larger than 15: the branching-factor bound chain, then insert.
           (a2, _) = p
           a3 = Bg.eval(a2, o, k, cv, pmk, dep, c, gg)
-          ev(f, 18, j, o, k, cv, pmk, h1, h2, k1, k2h, base, cv, 0, dep, c,
+          ev(f, 18, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, cv, 0, dep, c,
              gg, cand, val, Array.get(U32, a3, res_used(c, gg)))
         case 18:
           (a2, +v) = p
-          ev(f, 19, j, o, k, cv, pmk, h1, h2, k1, k2h, base, v, 0, dep, c, gg,
+          ev(f, 19, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, v, 0, dep, c, gg,
              cand, val, Array.get(U32, a2, res_ck(c, gg)))
         case 19:
           (a2, +ck) = p
           a3 = Array.set(U32, a2, res_ex(c, gg), U32.mul(ck, 2))
-          ev(f, 20, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, 0, dep, c,
+          ev(f, 20, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, 0, dep, c,
              gg, cand, val, Array.get(U32, a3, 0))
         case 16:
           (a2, _) = p
           a3 = H.quick_at(a2, o, k, c, gg, res_out(c, gg))
-          ev(f, 17, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 17, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              cand, val, Array.get(U32, a3, res_out(c, gg)))
         case 17:
           (a2, +pk) = p
@@ -170,23 +170,23 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           a3 = Array.set(U32, a2, res_used(c, gg), used0)
           a4 = Array.set(U32, a3, res_ck(c, gg), ck)
           a5 = Array.set(U32, a4, res_ex(c, gg), U32.add(ex0, U32.mul(ck, 2)))
-          ev(f, 20, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used0, ex0, dep, c,
+          ev(f, 20, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used0, ex0, dep, c,
              gg, cand, val, Array.get(U32, a5, 0))
         # ------------------------------------------------ insert ------
         case 20:
           (a2, _) = p
-          ev(f, 21, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 21, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              cand, val, Array.get(U32, a2, U32.add(base, 3)))
         case 21:
           (a2, +v) = p
           +same = A.eq01(v, k1)
-          ev(f, A.sel(same, 22, 24), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(same, 22, 24), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, U32.add(base, A.sel(same, 4, 5))))
         case 22:
           (a2, +v) = p
           +same = A.eq01(v, k2h)
-          ev(f, A.sel(same, 23, 24), j, o, k, cv, pmk, h1, h2, k1, k2h, base,
+          ev(f, A.sel(same, 23, 24), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base,
              used, ex, dep, c, gg, cand, val,
              Array.get(U32, a2, U32.add(base, 5)))
         case 23:
@@ -201,26 +201,26 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           a3 = Array.set(U32, a2, i1, k1)
           a4 = Array.set(U32, a3, i2, k2h)
           a5 = Array.set(U32, a4, i3, pack_ex(used, ex))
-          ev(f, 14, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              cand, val, Array.get(U32, a5, 0))
         case 24:
           (a2, +v) = p
           +old = U32.and(v, 262143)
           +rep = A.ge01(used, old)
           +nb = A.sel(rep, 3, 0)
-          ev(f, A.sel(rep, 30, 25), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(rep, 30, 25), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, nb, val,
              Array.get(U32, a2, U32.add(base, A.sel(rep, 3, 0))))
         case 25:
           (a2, +v) = p
           +same = A.eq01(v, k1)
-          ev(f, A.sel(same, 26, 30), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(same, 26, 30), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, U32.add(base, A.sel(same, 1, 0))))
         case 26:
           (a2, +v) = p
           +same = A.eq01(v, k2h)
-          ev(f, A.sel(same, 27, 30), j, o, k, cv, pmk, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(same, 27, 30), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
              Array.get(U32, a2, U32.add(base, A.sel(same, 2, 0))))
         case 27:
@@ -235,7 +235,7 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           a3 = Array.set(U32, a2, i1, k1)
           a4 = Array.set(U32, a3, i2, k2h)
           a5 = Array.set(U32, a4, i3, pack_ex(used, ex))
-          ev(f, 14, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              cand, val, Array.get(U32, a5, 0))
         case 30:
           (a2, _) = p
@@ -243,7 +243,7 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           a4 = Array.set(U32, a3, U32.add(U32.add(base, cand), 1), k2h)
           a5 = Array.set(U32, a4, U32.add(U32.add(base, cand), 2),
                          pack_ex(used, ex))
-          ev(f, 14, j, o, k, cv, pmk, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+          ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
              cand, val, Array.get(U32, a5, 0))
         case 14:
           (a2, _) = p
@@ -252,8 +252,8 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           (a2, _) = p
           a2
 
-def eval(a: Array<U32>, +o: U32, +k: U32, +cv: U32, +pmk: U32, +dep: U32,
-         +c: U32, +gg: U32) -> Array<U32>:
+def eval(a: Array<U32>, +o: U32, +k: U32, +cv: U32, +pmk: U32, +pn: U32,
+         +dep: U32, +c: U32, +gg: U32) -> Array<U32>:
   +fuel = Nat.add(Nat.mul(U32.to_nat(k), 8n), 160n)
-  ev(fuel, 0, 0, o, k, cv, pmk, 0, 0, 0, 0, 0, cv, 0, dep, c, gg, 0, 0,
+  ev(fuel, 0, 0, o, k, cv, pmk, pn, 0, 0, 0, 0, 0, cv, 0, dep, c, gg, 0, 0,
      Array.get(U32, a, o))

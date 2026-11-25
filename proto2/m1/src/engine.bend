@@ -652,7 +652,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 85:
           (a2, +cv) = p
           +k2 = ret
-          a3 = Be.eval(a2, lbk, k2, cv, pmk, U32.inc(dep), c, gg)
+          a3 = Be.eval(a2, lbk, k2, cv, pmk, n, U32.inc(dep), c, gg)
           step(f, c, gg, 1, 86, ss, n, beta, pmk, dep, best, lb, lmk, cv, v2k,
                mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, k2, nst, ngs,
                nht, npr, stk, Array.get(U32, a3, Be.res_used(c, gg)))
@@ -690,7 +690,9 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 134:
           (a2, _) = p
           +k2 = ret
-          +known = U32.mul(A.ge01(15, k2), lmk)
+          # Rust passes the bucket's used value as known_quick unless the
+          # bucket took the c_len>16 split path (parent > 16 and bucket > 15).
+          +known = U32.mul(U32.max(A.ge01(15, k2), A.ge01(16, n)), lmk)
           stk2 : List<Fr> = Con{Gf{ss, n, beta, pmk, dep, mv, lb, g, cost,
                                    U32.inc(bcur), t, v1k}, stk}
           step(f, c, gg, 0, 0, lbk, k2, cut, nt, U32.inc(dep), cut, known, 0,
