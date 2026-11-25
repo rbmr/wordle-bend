@@ -221,6 +221,7 @@ def fill_zob(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
   zob_go(U32.to_nat(c), 0, c, gg, 12345, a)
 
 # ------------------------------------------------------------ feedback table ---
+# ------------------------------------------------------------ feedback table ---
 #
 # Phase 0: the value just read is the packed guess word of row `g`.
 # Phase 1: the value just read is the packed secret of candidate `i` of row `g`.
@@ -298,7 +299,9 @@ def hhash(+p: U32) -> U32:
   U32.and(U32.mul(p, 2654435761), 65535)
 
 # Phase 0: v is the packed word of guess `g`. Phase 1: v is the key at slot
-# `pos`. Phase 2: stop.
+# `pos`. Phase 2: v is unused; insert `g` at `pos`. Phase 3: stop.
+# The value cell is written only in phase 2, never while probing: a probe must
+# not disturb the entries it walks over.
 def hh_go(+fuel: Nat, +phase: U32, +g: U32, +pos: U32, +key: U32, +c: U32,
           +gg: U32, r: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -309,25 +312,29 @@ def hh_go(+fuel: Nat, +phase: U32, +g: U32, +pos: U32, +key: U32, +c: U32,
       match phase:
         case 0:
           (a2, +v) = r
-          +pos2 = hhash(v)
-          +idx = U32.add(G.off_hh(c, gg), U32.mul(2, pos2))
-          r2 = Array.get(U32, a2, idx)
-          hh_go(p, 1, g, pos2, v, c, gg, r2)
+          r2 = Array.get(U32, a2,
+                         U32.add(G.off_hh(c, gg),
+                                 U32.mul(2, hhash(v))))
+          hh_go(p, 1, g, hhash(v), v, c, gg, r2)
         case 1:
           (a2, +v) = r
           +empty = A.eq01(v, 4294967295)
-          +g2 = U32.inc(g)
-          +stop = A.eq01(g2, gg)
-          +widx = U32.add(G.off_hh(c, gg), U32.mul(2, pos))
-          a3 = Array.set(U32, a2, widx, A.sel(empty, key, v))
-          a4 = Array.set(U32, a3, U32.inc(widx), g)
           +pos2 = U32.and(U32.inc(pos), 65535)
-          +idx = A.sel(empty,
-                       U32.add(G.off_gpack(c, gg), A.sel(stop, 0, g2)),
+          +idx = A.sel(empty, U32.add(G.off_gpack(c, gg), g),
                        U32.add(G.off_hh(c, gg), U32.mul(2, pos2)))
-          r2 = Array.get(U32, a4, idx)
-          hh_go(p, A.sel(empty, A.sel(stop, 2, 0), 1), g2,
-                A.sel(empty, 0, pos2), key, c, gg, r2)
+          r2 = Array.get(U32, a2, idx)
+          hh_go(p, A.sel(empty, 2, 1), g, A.sel(empty, pos, pos2), key, c, gg,
+                r2)
+        case 2:
+          (a2, +v) = r
+          +g2 = U32.inc(g)
+          +widx = U32.add(G.off_hh(c, gg), U32.mul(2, pos))
+          a3 = Array.set(U32, a2, widx, key)
+          a4 = Array.set(U32, a3, U32.inc(widx), g)
+          +stop = A.eq01(g2, gg)
+          r2 = Array.get(U32, a4, U32.add(G.off_gpack(c, gg),
+                                          A.sel(stop, 0, g2)))
+          hh_go(p, A.sel(stop, 3, 0), g2, 0, 0, c, gg, r2)
         case _:
           (a2, _) = r
           a2
@@ -338,7 +345,8 @@ def fill_hh(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
         Array.get(U32, a, U32.add(G.off_gpack(c, gg), 0)))
 
 # Phase 0: v is the packed word of candidate `ic`. Phase 1: v is the key at slot
-# `pos`. Phase 2: v is the guess index stored at `pos`. Phase 3: stop.
+# `pos`. Phase 2: v is the guess index stored at `pos`. Phase 4: not found.
+# Phase 3: stop.
 def c2g_go(+fuel: Nat, +phase: U32, +ic: U32, +pos: U32, +key: U32, +c: U32,
            +gg: U32, r: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -349,31 +357,36 @@ def c2g_go(+fuel: Nat, +phase: U32, +ic: U32, +pos: U32, +key: U32, +c: U32,
       match phase:
         case 0:
           (a2, +v) = r
-          +pos2 = hhash(v)
           r2 = Array.get(U32, a2,
-                         U32.add(G.off_hh(c, gg), U32.mul(2, pos2)))
-          c2g_go(p, 1, ic, pos2, v, c, gg, r2)
+                         U32.add(G.off_hh(c, gg), U32.mul(2, hhash(v))))
+          c2g_go(p, 1, ic, hhash(v), v, c, gg, r2)
         case 1:
           (a2, +v) = r
           +found = A.eq01(v, key)
           +empty = A.eq01(v, 4294967295)
           +pos2 = U32.and(U32.inc(pos), 65535)
-          +widx = U32.add(G.off_c2g(c, gg), ic)
-          +vidx = U32.add(G.off_hh(c, gg), U32.inc(U32.mul(2, pos)))
-          a3 = Array.set(U32, a2, widx, A.sel(found, 0, 0))
-          +idx = A.sel(empty, U32.add(G.off_cpack(c, gg), ic),
-                       A.sel(found, vidx,
+          +idx = A.sel(empty, 0,
+                       A.sel(found,
+                             U32.add(G.off_hh(c, gg),
+                                     U32.inc(U32.mul(2, pos))),
                              U32.add(G.off_hh(c, gg), U32.mul(2, pos2))))
-          r2 = Array.get(U32, a3, idx)
-          c2g_go(p, A.sel(empty, 2, A.sel(found, 2, 1)), ic, pos2, key, c, gg, r2)
+          r2 = Array.get(U32, a2, idx)
+          c2g_go(p, A.sel(empty, 4, A.sel(found, 2, 1)), ic, pos2, key, c, gg,
+                 r2)
         case 2:
           (a2, +v) = r
           +ic2 = U32.inc(ic)
-          +stop = A.eq01(ic2, c)
           a3 = Array.set(U32, a2, U32.add(G.off_c2g(c, gg), ic), v)
           r2 = Array.get(U32, a3,
-                         U32.add(G.off_cpack(c, gg), A.sel(stop, 0, ic2)))
-          c2g_go(p, A.sel(stop, 3, 0), ic2, 0, 0, c, gg, r2)
+                         U32.add(G.off_cpack(c, gg), A.sel(A.eq01(ic2, c), 0,
+                                                           ic2)))
+          c2g_go(p, A.sel(A.eq01(ic2, c), 3, 0), ic2, 0, 0, c, gg, r2)
+        case 4:
+          (a2, _) = r
+          +ic2 = U32.inc(ic)
+          a3 = Array.set(U32, a2, U32.add(G.off_c2g(c, gg), ic), 0)
+          r2 = Array.get(U32, a3, U32.add(G.off_cpack(c, gg), ic2))
+          c2g_go(p, A.sel(A.eq01(ic2, c), 3, 0), ic2, 0, 0, c, gg, r2)
         case _:
           (a2, _) = r
           a2

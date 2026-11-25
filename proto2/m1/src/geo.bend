@@ -113,6 +113,13 @@ def gstk_size() -> U32:
 def off_gcnt(+c: U32, +g: U32) -> U32:
   U32.add(off_gstk(c, g), gstk_size())
 
+# MISC: 0..255 quick/k_cand count cells, 256..511 greedy count cells.
+def off_qcnt(+c: U32, +g: U32) -> U32:
+  off_gcnt(c, g)
+
+def off_qgen(+c: U32, +g: U32) -> U32:
+  U32.add(off_qcnt(c, g), 256)
+
 def total_size(+c: U32, +g: U32) -> U32:
   U32.add(off_gcnt(c, g), 1024)
 

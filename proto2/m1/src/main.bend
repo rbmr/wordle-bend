@@ -2,6 +2,7 @@ import Base
 import ./geo.bend as G
 import ./arith.bend as A
 import ./tab.bend as T
+import ./heur.bend as H
 
 # ------------------------------------------------------------------- input ---
 
@@ -95,6 +96,29 @@ def build_all(+c: U32, +gg: U32, +gtext: String, +ctext: String,
 def depth_for(+size: U32) -> Nat:
   Nat.add(U32.log2(U32.sub(size, 1)), 1n)
 
+def report_if(a: Array<U32>, +mode: U32, +qk: U32, +qn: U32, +b: U32,
+              +n: U32, +c: U32, +gg: U32, k: U32) -> IO(Unit):
+  match k:
+    case 0:
+      +s = region_sum(a, b, n)
+      IO.print("mode=" ++ U32.show(mode) ++ " b=" ++ U32.show(b)
+               ++ " n=" ++ U32.show(n) ++ " sum=" ++ U32.show(s))
+    case 1:
+      +qs = H.run_quick(a, qk, qn, c, gg)
+      IO.print("mode=" ++ U32.show(mode) ++ " q=" ++ U32.show(qs))
+    case _:
+      +s = region_sum(a, U32.sub(mode, 500), 1)
+      IO.print("mode=" ++ U32.show(mode) ++ " cell=" ++ U32.show(s))
+
+def report_go(a: Array<U32>, +mode: U32, +qk: U32, +qn: U32, +b: U32, +n: U32,
+              +c: U32, +gg: U32) -> IO(Unit):
+  +hi5 = A.ge01(mode, 500)
+  +hi4 = A.ge01(mode, 400)
+  +inner = A.sel(hi5, 2, 1)
+  +kind = A.sel(hi4, inner, 0)
+
+  report_if(a, mode, qk, qn, b, n, c, gg, kind)
+
 def mode_base(+mode: U32, +c: U32, +gg: U32) -> U32:
   +m2 = A.eq01(mode, 2)
   +m3 = A.eq01(mode, 3)
@@ -102,11 +126,13 @@ def mode_base(+mode: U32, +c: U32, +gg: U32) -> U32:
   +m5 = A.eq01(mode, 5)
   +m6 = A.eq01(mode, 6)
   +m7 = A.eq01(mode, 7)
-  +h3 = A.ge01(mode, 300)
+  +h5 = A.ge01(mode, 500)
+  +h3 = U32.mul(A.ge01(mode, 300), U32.sub(1, h5))
   +h2 = U32.mul(A.ge01(mode, 100), U32.sub(1, h3))
   +hf = U32.mul(h2, U32.sub(1, h3))
   +hi = U32.mul(A.ge01(mode, 8), U32.sub(1, A.ge01(mode, 100)))
-  U32.add(U32.mul(h3, G.off_gcnt(c, gg)),
+  U32.add(U32.mul(h5, U32.sub(mode, 500)),
+    U32.add(U32.mul(h3, G.off_gcnt(c, gg)),
     U32.add(U32.mul(hf, 0),
     U32.add(U32.mul(hi, U32.mul(U32.sub(mode, 8), c)),
     U32.add(U32.mul(m2, G.off_c2g(c, gg)),
@@ -114,7 +140,7 @@ def mode_base(+mode: U32, +c: U32, +gg: U32) -> U32:
         U32.add(U32.mul(m4, G.off_gpack(c, gg)),
           U32.add(U32.mul(m5, G.off_cpack(c, gg)),
             U32.add(U32.mul(m6, G.off_cmask(c, gg)),
-              U32.mul(m7, G.off_cat(c, gg))))))))))
+              U32.mul(m7, G.off_cat(c, gg)))))))))))
 
 def mode_n(+mode: U32, +c: U32, +gg: U32, +total: U32) -> U32:
   +m0 = A.eq01(mode, 0)
@@ -125,11 +151,13 @@ def mode_n(+mode: U32, +c: U32, +gg: U32, +total: U32) -> U32:
   +m5 = A.eq01(mode, 5)
   +m6 = A.eq01(mode, 6)
   +m7 = A.eq01(mode, 7)
-  +h3 = A.ge01(mode, 300)
+  +h5 = A.ge01(mode, 500)
+  +h3 = U32.mul(A.ge01(mode, 300), U32.sub(1, h5))
   +h2 = U32.mul(A.ge01(mode, 100), U32.sub(1, h3))
   +hf = U32.mul(h2, U32.sub(1, h3))
   +hi = U32.mul(A.ge01(mode, 8), U32.sub(1, A.ge01(mode, 100)))
-  U32.add(U32.mul(h3, U32.sub(mode, 300)),
+  U32.add(U32.mul(h5, 1),
+    U32.add(U32.mul(h3, U32.sub(mode, 300)),
     U32.add(U32.mul(hf, U32.sub(mode, 100)),
     U32.add(U32.mul(hi, c),
     U32.add(U32.mul(m0, total),
@@ -139,7 +167,7 @@ def mode_n(+mode: U32, +c: U32, +gg: U32, +total: U32) -> U32:
             U32.add(U32.mul(m4, gg),
               U32.add(U32.mul(m5, c),
                 U32.add(U32.mul(m6, c),
-                  U32.mul(m7, U32.mul(5, c))))))))))))
+                  U32.mul(m7, U32.mul(5, c)))))))))))))
 
 def run(+mode: U32, +c: U32, +gg: U32, +gtext: String, +ctext: String) -> IO(Unit):
   do IO<Unit>:
@@ -148,9 +176,11 @@ def run(+mode: U32, +c: U32, +gg: U32, +gtext: String, +ctext: String) -> IO(Uni
              ++ " cells=" ++ U32.show(total))
     a : Array<U32> = Array.new(U32, depth_for(total), 0)
     a1 : Array<U32> = build_all(c, gg, gtext, ctext, a)
+    +qk : U32 = U32.div(U32.sub(mode, 400), 32)
+    +qn : U32 = U32.mod(U32.sub(mode, 400), 32)
     +b : U32 = mode_base(mode, c, gg)
     +n : U32 = mode_n(mode, c, gg, total)
-    IO.print("mode=" ++ U32.show(mode) ++ " b=" ++ U32.show(b) ++ " n=" ++ U32.show(n) ++ " sum=" ++ U32.show(region_sum(a1, b, n)))
+    report_go(a1, mode, qk, qn, b, n, c, gg)
 
 def go5(+gtext: String, +ctext: String, +c: U32, +gg: U32,
         m: Maybe<&2, U32>) -> IO(Unit):
