@@ -1476,20 +1476,360 @@ def CW.slack_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
 
 # The walk specification as the model's hook: `CW.walk` at the initial state
 # (`ck_cheap 0`, phase one, empty accumulator, the class-independent base).
-def CW.hook(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
-  FH.FH.CapHookType(G, C):
-  gn => n_root => bigs0 => items0 => tbl0 => best => n => capv =>
-  hgn => hok => htbl => hb =>
-    CW.walk(
+
+# The class fold splits over list append.
+def CW.cap_fold_append(+G: +List<+List<Nat>>,
+    +xs: +List<Groups.Group>, +ys: +List<Groups.Group>) ->
+  {FH.FH.cap_fold(G, List.append(&2, Groups.Group, xs, ys))
+   == Nat.add(FH.FH.cap_fold(G, xs), FH.FH.cap_fold(G, ys)) : Nat}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{+fb, +ws}:
+          Equal.trans(Nat,
+            FH.FH.cap_fold(G, List.append(&2, Groups.Group,
+              Groups.Group{fb, ws} <> rest, ys)),
+            Nat.add(FH.FH.cap_class(G, ws),
+              FH.FH.cap_fold(G, List.append(&2, Groups.Group, rest, ys))),
+            Nat.add(FH.FH.cap_fold(G, Groups.Group{fb, ws} <> rest),
+              FH.FH.cap_fold(G, ys)),
+            {==},
+            Equal.trans(Nat,
+              Nat.add(FH.FH.cap_class(G, ws),
+                FH.FH.cap_fold(G, List.append(&2, Groups.Group, rest, ys))),
+              Nat.add(FH.FH.cap_class(G, ws),
+                Nat.add(FH.FH.cap_fold(G, rest), FH.FH.cap_fold(G, ys))),
+              Nat.add(Nat.add(FH.FH.cap_class(G, ws),
+                  FH.FH.cap_fold(G, rest)), FH.FH.cap_fold(G, ys)),
+              Equal.cong(Nat, Nat,
+                x => Nat.add(FH.FH.cap_class(G, ws), x),
+                FH.FH.cap_fold(G, List.append(&2, Groups.Group, rest, ys)),
+                Nat.add(FH.FH.cap_fold(G, rest), FH.FH.cap_fold(G, ys)),
+                CW.cap_fold_append(G, rest, ys)),
+              Equal.sym(Nat,
+                Nat.add(Nat.add(FH.FH.cap_class(G, ws),
+                    FH.FH.cap_fold(G, rest)), FH.FH.cap_fold(G, ys)),
+                Nat.add(FH.FH.cap_class(G, ws),
+                  Nat.add(FH.FH.cap_fold(G, rest), FH.FH.cap_fold(G, ys))),
+                NatProof.NatPrf.add_assoc(FH.FH.cap_class(G, ws),
+                  FH.FH.cap_fold(G, rest), FH.FH.cap_fold(G, ys)))))
+
+# The initial walk bound: the class-independent base plus the class slack is at
+# most the capacity bound of the guess.
+def CW.hb_init(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
+    +items3: +List<SolveFast.Item>, +bigs3: +List<SolveFast.BigClass>,
+    +ig: +List<Groups.Group>,
+    +p: FP.FP.Perm,
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bigs3) == True{} : Bool},
+    +hbm: FH.FH.BodyMatch(G, C, n_root, True{}, True{}, n, ig, items3),
+    +hperm: FP.FP.PermOk(p,
+      List.append(&2, Groups.Group, FH.FH.bigs_groups(bigs3), ig),
+      Groups.groups_build(g, S, Nil{}))) ->
+  {Nat.is_le(Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+       SolveFast.cap_base(n, items3)), 0n),
+       Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+         SolveFast.bigs_depth(bigs3))),
+     FH.FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{}))) == True{} : Bool}:
+  +hbl = CW.base_le(G, C, n_root, True{}, True{}, n, ig, items3, hbm)
+  +hds = CW.dsum_slack(G, C, n_root, bigs3, hok)
+  +hse = CW.slack_eq(G, C, n_root, bigs3, hok)
+  +hfa = CW.cap_fold_append(G, FH.FH.bigs_groups(bigs3), ig)
+  +hpe = CP.CP.cap_fold_perm(p, G,
+             List.append(&2, Groups.Group, FH.FH.bigs_groups(bigs3), ig),
+             Groups.groups_build(g, S, Nil{}), hperm)
+  +eds : {Nat.add(SolveFast.bigs_depth(bigs3),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)))
+          == FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)) : Nat} =
+    Equal.trans(Nat,
+      Nat.add(SolveFast.bigs_depth(bigs3),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Nat.add(SolveFast.bigs_depth(bigs3), CW.slack(G, bigs3)),
+      FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+      Equal.cong(Nat, Nat, x => Nat.add(SolveFast.bigs_depth(bigs3), x),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3)), CW.slack(G, bigs3),
+        Equal.sym(Nat, CW.slack(G, bigs3),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3)), hse)),
+      hds)
+  +hz : {Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+              SolveFast.cap_base(n, items3)), 0n),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)))
+          == Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+              SolveFast.cap_base(n, items3)),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3))) : Nat} =
+    Equal.cong(Nat, Nat,
+      x => Nat.add(x, Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        SolveFast.bigs_depth(bigs3))),
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+        SolveFast.cap_base(n, items3)), 0n),
+      Nat.add(SolveFast.bigs_depth(bigs3), SolveFast.cap_base(n, items3)),
+      NatProof.NatPrf.add_zero(Nat.add(SolveFast.bigs_depth(bigs3),
+        SolveFast.cap_base(n, items3))))
+  +h1a : {Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+              SolveFast.cap_base(n, items3)),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)))
+          == Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+              Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+                SolveFast.bigs_depth(bigs3))),
+            SolveFast.cap_base(n, items3)) : Nat} =
+    Equal.trans(Nat,
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          SolveFast.cap_base(n, items3)),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Nat.add(SolveFast.bigs_depth(bigs3),
+        Nat.add(SolveFast.cap_base(n, items3),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3)))),
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3))),
+        SolveFast.cap_base(n, items3)),
+      NatProof.NatPrf.add_assoc(SolveFast.bigs_depth(bigs3),
+        SolveFast.cap_base(n, items3),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Equal.trans(Nat,
+        Nat.add(SolveFast.bigs_depth(bigs3),
+          Nat.add(SolveFast.cap_base(n, items3),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)))),
+        Nat.add(SolveFast.bigs_depth(bigs3),
+          Nat.add(Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3)), SolveFast.cap_base(n, items3))),
+        Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3))),
+          SolveFast.cap_base(n, items3)),
+        Equal.cong(Nat, Nat,
+          x => Nat.add(SolveFast.bigs_depth(bigs3), x),
+          Nat.add(SolveFast.cap_base(n, items3),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3))),
+          Nat.add(Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3)), SolveFast.cap_base(n, items3)),
+          NatProof.NatPrf.add_comm(SolveFast.cap_base(n, items3),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)))),
+        Equal.sym(Nat,
+          Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+              Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+                SolveFast.bigs_depth(bigs3))), SolveFast.cap_base(n, items3)),
+          Nat.add(SolveFast.bigs_depth(bigs3),
+            Nat.add(Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)), SolveFast.cap_base(n, items3))),
+          NatProof.NatPrf.add_assoc(SolveFast.bigs_depth(bigs3),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)), SolveFast.cap_base(n, items3)))))
+  +h1 : {Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+              SolveFast.cap_base(n, items3)),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              SolveFast.bigs_depth(bigs3)))
+          == Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+               SolveFast.cap_base(n, items3)) : Nat} =
+    Equal.trans(Nat,
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          SolveFast.cap_base(n, items3)),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3))),
+        SolveFast.cap_base(n, items3)),
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        SolveFast.cap_base(n, items3)),
+      h1a,
+      Equal.cong(Nat, Nat,
+        x => Nat.add(x, SolveFast.cap_base(n, items3)),
+        Nat.add(SolveFast.bigs_depth(bigs3),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3))),
+        FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)), eds))
+  +h2 : {Nat.is_le(Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+               SolveFast.cap_base(n, items3)),
+             Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+               Nat.add(n, FH.FH.cap_fold(G, ig)))) == True{} : Bool} =
+    FT.FT.nat_add_le_add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+      FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+      SolveFast.cap_base(n, items3),
+      Nat.add(n, FH.FH.cap_fold(G, ig)),
+      NatProof.Nat.is_le_refl(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3))),
+      hbl)
+  +hA0 : {Nat.is_le(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+                SolveFast.cap_base(n, items3)),
+              Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+                SolveFast.bigs_depth(bigs3))),
+             Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+               Nat.add(n, FH.FH.cap_fold(G, ig)))) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_l(
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        Nat.add(n, FH.FH.cap_fold(G, ig))),
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        SolveFast.cap_base(n, items3)),
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          SolveFast.cap_base(n, items3)),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Equal.sym(Nat,
+        Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+            SolveFast.cap_base(n, items3)),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3))),
+        Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.cap_base(n, items3)), h1),
+      h2)
+  +hA : {Nat.is_le(Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+                SolveFast.cap_base(n, items3)), 0n),
+              Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+                SolveFast.bigs_depth(bigs3))),
+             Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+               Nat.add(n, FH.FH.cap_fold(G, ig)))) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_l(
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        Nat.add(n, FH.FH.cap_fold(G, ig))),
+      Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          SolveFast.cap_base(n, items3)),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+          SolveFast.cap_base(n, items3)), 0n),
+        Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          SolveFast.bigs_depth(bigs3))),
+      Equal.sym(Nat,
+        Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+            SolveFast.cap_base(n, items3)), 0n),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3))),
+        Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+            SolveFast.cap_base(n, items3)),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            SolveFast.bigs_depth(bigs3))), hz),
+      hA0)
+  +h3 : {Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+             Nat.add(n, FH.FH.cap_fold(G, ig)))
+         == Nat.add(n, FH.FH.cap_fold(G,
+              Groups.groups_build(g, S, Nil{})))
+         : Nat} =
+    Equal.trans(Nat,
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        Nat.add(n, FH.FH.cap_fold(G, ig))),
+      Nat.add(n, Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        FH.FH.cap_fold(G, ig))),
+      Nat.add(n, FH.FH.cap_fold(G, Groups.groups_build(g, S, Nil{}))),
+      CW.add3_shift(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)), n,
+        FH.FH.cap_fold(G, ig)),
+      Equal.cong(Nat, Nat, x => Nat.add(n, x),
+        Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+          FH.FH.cap_fold(G, ig)),
+        FH.FH.cap_fold(G, Groups.groups_build(g, S, Nil{})),
+        Equal.trans(Nat,
+          Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+            FH.FH.cap_fold(G, ig)),
+          FH.FH.cap_fold(G, List.append(&2, Groups.Group,
+            FH.FH.bigs_groups(bigs3), ig)),
+          FH.FH.cap_fold(G, Groups.groups_build(g, S, Nil{})),
+          Equal.sym(Nat,
+            FH.FH.cap_fold(G, List.append(&2, Groups.Group,
+              FH.FH.bigs_groups(bigs3), ig)),
+            Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+              FH.FH.cap_fold(G, ig)), hfa),
+          hpe)))
+  NatProof.Nat.is_le_trans(
+    Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs3),
+      SolveFast.cap_base(n, items3)), 0n),
+      Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        SolveFast.bigs_depth(bigs3))),
+    Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+      Nat.add(n, FH.FH.cap_fold(G, ig))),
+    FH.FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})),
+    hA,
+    NatProof.Nat.is_le_eq_r(
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        Nat.add(n, FH.FH.cap_fold(G, ig))),
+      Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        Nat.add(n, FH.FH.cap_fold(G, ig))),
+      Nat.add(n, FH.FH.cap_fold(G, Groups.groups_build(g, S, Nil{}))),
+      h3,
+      NatProof.Nat.is_le_refl(Nat.add(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs3)),
+        Nat.add(n, FH.FH.cap_fold(G, ig))))))
+
+# The walk's result predicate is a family in the result term.
+def CW.wit_transport(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +bs0: +List<SolveFast.BigClass>, +capv: Nat,
+    +best: SolveRef.Best,
+    -r1: SolveFast.CapRes, -r2: SolveFast.CapRes,
+    +e: {r2 == r1 : SolveFast.CapRes},
+    +h: FH.FH.CapWalkWit(G, C, n_root, bs0, capv, best, r1)) ->
+  FH.FH.CapWalkWit(G, C, n_root, bs0, capv, best, r2):
+  %Equal.sym(SolveFast.CapRes, r2, r1, e) :
+    FH.FH.CapWalkWit(G, C, n_root, bs0, capv, best, _)
+  h
+
+def CW.hook_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +n_root: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>,
+    +n: Nat, +bigs0: +List<SolveFast.BigClass>,
+    +items0: +List<SolveFast.Item>, -tbl0: Array<U32>,
+    dpt: FH.FH.TblDup(tbl0), +best: SolveRef.Best,
+    +ig: +List<Groups.Group>, p: FP.FP.Perm,
+    +hbm: FH.FH.BodyMatch(G, C, n_root, True{}, True{}, n, ig, items0),
+    +hperm: FP.FP.PermOk(p,
+      List.append(&2, Groups.Group, FH.FH.bigs_groups(bigs0), ig),
+      Groups.groups_build(g, S, Nil{})),
+    +hgn: {gn == Groups.len_words(G) : Nat},
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bigs0) == True{} : Bool},
+    +htbl: FT.FT.TblOk(G, C, n_root, tbl0),
+    -R: SolveFast.CapRes -> Data,
+    kont: FH.FH.CapKontType(R, G, C, n_root, bigs0,
+             FH.FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})), best)) ->
+  R(SolveFast.cap_walk(
       Nat.add(Nat.add(SolveFast.bigs_len(bigs0), SolveFast.bigs_len(bigs0)), 2n),
-      G, C, n_root, bigs0, capv, best, gn, bigs0, 1n,
+      bigs0, bigs0, 1n,
       Nat.is_le(SolveFast.best_cost(best),
         Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0))),
-      Nil{}, 0n,
-      Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0)),
-      hgn, hok,
-      NatProof.Nat.is_le_eq_l(
-        capv,
+      Nil{}, 0n, Nat.add(SolveFast.bigs_depth(bigs0),
+        SolveFast.cap_base(n, items0)), best, gn, SolveFast.ck_cheap(0n, tbl0))):
+  (t1, d2) = dpt
+  (t2, pe) = d2
+  (+e1, +e2) = pe
+  +capv = FH.FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{}))
+  +fuel = Nat.add(Nat.add(SolveFast.bigs_len(bigs0),
+             SolveFast.bigs_len(bigs0)), 2n)
+  +base = Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0))
+  +stop = Nat.is_le(SolveFast.best_cost(best), base)
+  +et : {t2 == tbl0 : Array<U32>} =
+    Equal.trans(Array<U32>, t2, t1, tbl0, e2, e1)
+  +htbl2 : FT.FT.TblOk(G, C, n_root, t2) =
+    FT.FT.tbl_ok_transport(G, C, n_root, tbl0, t2,
+      Equal.sym(Array<U32>, t2, tbl0, et), htbl)
+  +e_r : {SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t1)) == SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t2)) : SolveFast.CapRes} =
+    Equal.cong(Array<U32>, SolveFast.CapRes,
+      x => SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+        best, gn, SolveFast.ck_cheap(0n, x)),
+      t1, t2, Equal.sym(Array<U32>, t2, t1, e2))
+  +e_goal : {SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t1)) == SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{},
+               0n, base, best, gn, SolveFast.ck_cheap(0n, tbl0))
+             : SolveFast.CapRes} =
+    Equal.cong(Array<U32>, SolveFast.CapRes,
+      x => SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+        best, gn, SolveFast.ck_cheap(0n, x)),
+      t1, tbl0, e1)
+  +wit2 : FH.FH.CapWalkWit(G, C, n_root, bigs0, capv, best, SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t2))) =
+    CW.walk(fuel, G, C, n_root, bigs0, capv, best, gn, bigs0, 1n, stop,
+      Nil{}, 0n, base, hgn, hok,
+      NatProof.Nat.is_le_eq_l(capv,
         Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
           SolveFast.cap_base(n, items0)), 0n),
           Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs0)),
@@ -1505,17 +1845,26 @@ def CW.hook(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
             Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs0)),
               SolveFast.bigs_depth(bigs0)),
             CW.slack_eq(G, C, n_root, bigs0, hok))),
-        hb),
+        CW.hb_init(G, C, n_root, g, S, n, items0, bigs0, ig, p, hok, hbm,
+          hperm)),
       Equal.cong(Nat, Bool,
-        x => Nat.is_le(SolveFast.best_cost(best), x),
-        Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0)),
-        Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
-          SolveFast.cap_base(n, items0)), 0n),
-        Equal.sym(Nat, Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
-            SolveFast.cap_base(n, items0)), 0n),
-          Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0)),
-          NatProof.NatPrf.add_zero(
-            Nat.add(SolveFast.bigs_depth(bigs0),
-              SolveFast.cap_base(n, items0))))),
+        x => Nat.is_le(SolveFast.best_cost(best), x), base, Nat.add(base, 0n),
+        Equal.sym(Nat, Nat.add(base, 0n), base,
+          NatProof.NatPrf.add_zero(base))),
       {==},
-      SolveFast.ck_cheap(0n, tbl0), htbl, Unit{})
+      SolveFast.ck_cheap(0n, t2), htbl2, Unit{})
+  +wit1 : FH.FH.CapWalkWit(G, C, n_root, bigs0, capv, best, SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t1))) =
+    CW.wit_transport(G, C, n_root, bigs0, capv, best, SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t2)), SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t1)), e_r, wit2)
+  %e_goal : R(_)
+  kont(SolveFast.cap_walk(fuel, bigs0, bigs0, 1n, stop, Nil{}, 0n, base,
+             best, gn, SolveFast.ck_cheap(0n, t1)), wit1)
+
+def CW.hook(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
+  FH.FH.CapHookType(G, C):
+  gn => n_root => g => S => n => bigs0 => items0 => tbl0 => dpt => best =>
+  ig => p => hbm => hperm => hgn => hok => htbl => R => kont =>
+    CW.hook_go(G, C, gn, n_root, g, S, n, bigs0, items0, tbl0, dpt, best,
+      ig, p, hbm, hperm, hgn, hok, htbl, R, kont)
