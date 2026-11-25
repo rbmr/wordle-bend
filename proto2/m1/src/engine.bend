@@ -55,6 +55,15 @@ def noskip() -> U32:
 def qcell(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 604)
 
+def hsh1(+dep: U32, +c: U32, +gg: U32) -> U32:
+  U32.add(G.off_cmk(c, gg), U32.mul(dep, 1024))
+
+def hsh2(+dep: U32, +c: U32, +gg: U32) -> U32:
+  U32.add(U32.add(G.off_cmk(c, gg), U32.mul(dep, 1024)), 1)
+
+def ttmask() -> U32:
+  U32.sub(G.ttb(), 1)
+
 def cell_val(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 609)
 
@@ -69,6 +78,17 @@ def cell_nht(+c: U32, +gg: U32) -> U32:
 
 def cell_npr(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 613)
+
+# TT value cell: bit 18 exact, bits 0..17 value.
+def pack_val(+v: U32, +beta: U32) -> U32:
+  U32.add(U32.and(v, 262143), U32.mul(A.lt01(v, beta), 262144))
+
+# Same state: store unless the old entry is exact and the new one is only a
+# lower bound, or both are lower bounds and the old one is tighter.
+def upd_ok(+oex: U32, +old: U32, +v: U32, +beta: U32) -> U32:
+  +nex = A.lt01(v, beta)
+  +nlb = U32.sub(1, nex)
+  U32.sub(U32.sub(1, U32.mul(oex, nlb)), U32.mul(nlb, A.lt01(v, old)))
 
 # ------------------------------------------------------------------ frames ---
 
@@ -92,14 +112,87 @@ def step(+fuel: Nat, +ph: U32, +c: U32, +gg: U32, +sb: U32, +n: U32,
     case 1n+f:
       match ph:
         case 0:
-          # Enter a node: n <= 2 is exact, 3..15 tries the quick eval.
+          # Enter a node: n <= 2 is exact, everything else starts at the table.
           (a2, _) = p
           +isbase = U32.sub(1, A.ge01(n, 3))
-          +toq = U32.mul(A.ge01(n, 3), A.ge01(16, n))
-          step(f, A.sel(isbase, 20, A.sel(toq, 22, 24)), c, gg, sb, n, beta,
-               pmk, dep, best, lb, g, cost, bcur, t, lbk, gen,
+          step(f, A.sel(isbase, 20, 90), c, gg, sb, n, beta, pmk, dep, best, 0,
+               g, cost, bcur, t, lbk, gen,
                A.sel(isbase, U32.div(U32.mul(n, U32.inc(n)), 2), ret),
                U32.add(nst, U32.sub(1, isbase)), ngs, nht, npr, stk,
+               Array.get(U32, a2, 0))
+        case 90:
+          # Transposition table lookup: the node's hash pair, then slot 1.
+          (a2, _) = p
+          step(f, 91, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, hsh1(dep, c, gg)))
+        case 91:
+          (a2, +h1) = p
+          step(f, 92, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost,
+               U32.or(h1, 1), t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, hsh2(dep, c, gg)))
+        case 92:
+          (a2, +h2) = p
+          +base = U32.add(G.off_tt(c, gg),
+                          U32.mul(U32.and(bcur, ttmask()), 6))
+          step(f, 93, c, gg, sb, n, beta, pmk, dep, best, lb, g, base, bcur, h2,
+               lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, U32.add(base, 3)))
+        case 93:
+          # slot 1, first key word
+          (a2, +k1) = p
+          +hit1 = A.eq01(k1, bcur)
+          step(f, A.sel(hit1, 94, 95), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, A.sel(hit1, U32.add(cost, 4), cost)))
+        case 94:
+          # slot 1, second key word
+          (a2, +k2) = p
+          +hit2 = A.eq01(k2, t)
+          step(f, A.sel(hit2, 96, 95), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, A.sel(hit2, U32.add(cost, 5), cost)))
+        case 95:
+          # slot 0, first key word
+          (a2, +k1) = p
+          +hit1 = A.eq01(k1, bcur)
+          step(f, A.sel(hit1, 97, 98), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, A.sel(hit1, U32.add(cost, 1), 0)))
+        case 97:
+          (a2, +k2) = p
+          +hit2 = A.eq01(k2, t)
+          step(f, A.sel(hit2, 99, 98), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, A.sel(hit2, U32.add(cost, 2), 0)))
+        case 96:
+          (a2, +v) = p
+          +val = U32.and(v, 262143)
+          +ex = U32.and(U32.shrn(v, 18n), 1)
+          +take = U32.max(ex, A.ge01(val, beta))
+          step(f, A.sel(take, 20, 89), c, gg, sb, n, beta, pmk, dep, best,
+               U32.max(lb, val), g, cost, bcur, t, lbk, gen,
+               A.sel(take, val, ret), nst, ngs, U32.add(nht, 1), npr, stk,
+               Array.get(U32, a2, 0))
+        case 99:
+          (a2, +v) = p
+          +val = U32.and(v, 262143)
+          +ex = U32.and(U32.shrn(v, 18n), 1)
+          +take = U32.max(ex, A.ge01(val, beta))
+          step(f, A.sel(take, 20, 89), c, gg, sb, n, beta, pmk, dep, best,
+               U32.max(lb, val), g, cost, bcur, t, lbk, gen,
+               A.sel(take, val, ret), nst, ngs, U32.add(nht, 1), npr, stk,
+               Array.get(U32, a2, 0))
+        case 98:
+          (a2, _) = p
+          step(f, 89, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 89:
+          # The quick eval is only run when the table gave nothing.
+          (a2, _) = p
+          +useq = U32.mul(A.eq01(lb, 0), U32.mul(A.ge01(n, 3), A.ge01(16, n)))
+          step(f, A.sel(useq, 22, 24), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
                Array.get(U32, a2, 0))
         case 22:
           (a2, _) = p
@@ -126,7 +219,7 @@ def step(+fuel: Nat, +ph: U32, +c: U32, +gg: U32, +sb: U32, +n: U32,
           +lb2 = U32.max(lb, cv)
           +cut = A.ge01(lb2, beta)
           step(f, A.sel(cut, 20, 3), c, gg, sb, n, beta, pmk, dep,
-               A.sel(cut, best, beta), lb2, 0, cost, bcur, t, lbk, gen,
+               A.sel(cut, best, beta), lb2, 0, 0, 0, 0, lbk, gen,
                A.sel(cut, lb2, ret), nst, ngs, nht, npr, stk,
                Array.get(U32, a2, 0))
         case 3:
@@ -264,9 +357,12 @@ def step(+fuel: Nat, +ph: U32, +c: U32, +gg: U32, +sb: U32, +n: U32,
           +cut3 = U32.max(cut2, cv)
           stk2 : List<Fr> = Con{Fr{sb, n, beta, pmk, dep, best, lb, g, cost,
                                    U32.inc(bcur), t, cv}, stk}
-          step(f, 0, c, gg, lbk, k2, cut3, pmk, U32.inc(dep), cut3, 0, 0, 0,
+          +csb = lbk
+          a3 = S.hset(a2, csb, k2, hsh1(U32.inc(dep), c, gg),
+                      hsh2(U32.inc(dep), c, gg), c, gg)
+          step(f, 0, c, gg, csb, k2, cut3, pmk, U32.inc(dep), cut3, 0, 0, 0,
                0, 0, 0, gen, ret, nst, ngs, nht, npr, stk2,
-               Array.get(U32, a2, 0))
+               Array.get(U32, a3, 0))
         case 11:
           (a2, _) = p
           +better = U32.mul(A.lt01(ret, best), U32.sub(best, ret))
@@ -276,6 +372,116 @@ def step(+fuel: Nat, +ph: U32, +c: U32, +gg: U32, +sb: U32, +n: U32,
                U32.inc(g), cost, bcur, t, lbk, gen, A.sel(stop2, best2, ret),
                nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
         case 20:
+          # Store the node's value (Rust inserts for every real node), then
+          # deliver it.
+          (a2, _) = p
+          +doins = A.ge01(n, 3)
+          step(f, A.sel(doins, 100, 21), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, 0))
+        case 100:
+          (a2, _) = p
+          step(f, 101, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, hsh1(dep, c, gg)))
+        case 101:
+          (a2, +h1) = p
+          step(f, 102, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost,
+               U32.or(h1, 1), t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, hsh2(dep, c, gg)))
+        case 102:
+          (a2, +h2) = p
+          +base = U32.add(G.off_tt(c, gg),
+                          U32.mul(U32.and(bcur, ttmask()), 6))
+          step(f, 103, c, gg, sb, n, beta, pmk, dep, best, lb, g, base, bcur,
+               h2, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, U32.add(base, 3)))
+        case 103:
+          (a2, +k1) = p
+          +same = A.eq01(k1, bcur)
+          step(f, A.sel(same, 104, 105), c, gg, sb, n, beta, pmk, dep, best,
+               lb, g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, A.sel(same, U32.add(cost, 4), U32.add(cost, 5))))
+        case 104:
+          (a2, +k2) = p
+          +same = A.eq01(k2, t)
+          step(f, A.sel(same, 106, 105), c, gg, sb, n, beta, pmk, dep, best,
+               lb, g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, U32.add(cost, 5)))
+        case 105:
+          # Different state in slot 1: replace it when the new value is not
+          # smaller (Rust: depth-preferred), else fall through to slot 0.
+          (a2, +v1) = p
+          +old = U32.and(v1, 262143)
+          +go1 = A.ge01(ret, old)
+          +empty = A.eq01(bcur, 0)
+          +put = U32.max(go1, empty)
+          +sc = U32.add(G.off_qgen(c, gg), 640)
+          +i1 = A.sel(put, U32.add(cost, 3), sc)
+          +i2 = A.sel(put, U32.add(cost, 4), U32.add(sc, 1))
+          +i3 = A.sel(put, U32.add(cost, 5), U32.add(sc, 2))
+          a3 = Array.set(U32, a2, i1, bcur)
+          a4 = Array.set(U32, a3, i2, t)
+          a5 = Array.set(U32, a4, i3, pack_val(ret, beta))
+          step(f, A.sel(put, 21, 109), c, gg, sb, n, beta, pmk, dep, best, lb,
+               g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a5, 0))
+        case 106:
+          # Same state in slot 1: exact beats a lower bound, a tighter lower
+          # bound beats a looser one.
+          (a2, +v1) = p
+          +old = U32.and(v1, 262143)
+          +oex = U32.and(U32.shrn(v1, 18n), 1)
+          +upd = upd_ok(oex, old, ret, beta)
+          +sc = U32.add(G.off_qgen(c, gg), 640)
+          +i1 = A.sel(upd, U32.add(cost, 3), sc)
+          +i2 = A.sel(upd, U32.add(cost, 4), U32.add(sc, 1))
+          +i3 = A.sel(upd, U32.add(cost, 5), U32.add(sc, 2))
+          a3 = Array.set(U32, a2, i1, bcur)
+          a4 = Array.set(U32, a3, i2, t)
+          a5 = Array.set(U32, a4, i3, pack_val(ret, beta))
+          step(f, 21, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a5, 0))
+        case 109:
+          # Slot 0: always-replace, but keep a better entry for the same state.
+          (a2, _) = p
+          step(f, 110, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, cost))
+        case 110:
+          (a2, +k1) = p
+          +same = A.eq01(k1, bcur)
+          step(f, A.sel(same, 111, 112), c, gg, sb, n, beta, pmk, dep, best,
+               lb, g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, A.sel(same, U32.add(cost, 1), U32.add(cost, 0))))
+        case 111:
+          (a2, +k2) = p
+          +same = A.eq01(k2, t)
+          step(f, A.sel(same, 113, 112), c, gg, sb, n, beta, pmk, dep, best,
+               lb, g, cost, bcur, t, lbk, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, U32.add(cost, 2)))
+        case 113:
+          (a2, +v1) = p
+          +old = U32.and(v1, 262143)
+          +oex = U32.and(U32.shrn(v1, 18n), 1)
+          +upd = upd_ok(oex, old, ret, beta)
+          +sc = U32.add(G.off_qgen(c, gg), 640)
+          +i1 = A.sel(upd, cost, sc)
+          +i2 = A.sel(upd, U32.add(cost, 1), U32.add(sc, 1))
+          +i3 = A.sel(upd, U32.add(cost, 2), U32.add(sc, 2))
+          a3 = Array.set(U32, a2, i1, bcur)
+          a4 = Array.set(U32, a3, i2, t)
+          a5 = Array.set(U32, a4, i3, pack_val(ret, beta))
+          step(f, 21, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a5, 0))
+        case 112:
+          (a2, _) = p
+          a3 = Array.set(U32, a2, cost, bcur)
+          a4 = Array.set(U32, a3, U32.add(cost, 1), t)
+          a5 = Array.set(U32, a4, U32.add(cost, 2), pack_val(ret, beta))
+          step(f, 21, c, gg, sb, n, beta, pmk, dep, best, lb, g, cost, bcur, t,
+               lbk, gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a5, 0))
+        case 21:
           # Deliver a node value to the parent frame, or finish at the root.
           match stk:
             case Nil{}:

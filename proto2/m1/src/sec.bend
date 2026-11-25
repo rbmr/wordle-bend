@@ -265,3 +265,45 @@ def scatter(+g: U32, +sb: U32, +n: U32, +dep: U32, +dst: U32, +c: U32,
   +fuel = Nat.add(Nat.mul(U32.to_nat(n), 8n), 64n)
   sc_go(fuel, 0, 0, n, sb, g, dep, dst, c, gg, 0, 0,
         Array.get(U32, a, sb))
+
+# ------------------------------------------------------------ set hashing ---
+
+# One set hash: h1/h2 = xor of the two Zobrist words of every candidate in
+# set[base..base+n), written to cells o1/o2.
+# ph 0: the pair holds set[base+j].  ph 1: z1[cand].  ph 2: z2[cand].  ph 3: stop.
+def hset_go(+fuel: Nat, +ph: U32, +j: U32, +n: U32, +base: U32, +h1: U32,
+            +h2: U32, +o1: U32, +o2: U32, +cand: U32, +c: U32, +gg: U32,
+            p: Array<U32> & U32) -> Array<U32>:
+  match fuel:
+    case 0n:
+      (a2, _) = p
+      a2
+    case 1n+f:
+      match ph:
+        case 0:
+          (a2, +v) = p
+          +z = G.off_z1(c, gg)
+          hset_go(f, 1, j, n, base, h1, h2, o1, o2, v, c, gg,
+                  Array.get(U32, a2, U32.add(z, v)))
+        case 1:
+          (a2, +v) = p
+          +z = G.off_z2(c, gg)
+          hset_go(f, 2, j, n, base, U32.xor(h1, v), h2, o1, o2, cand, c, gg,
+                  Array.get(U32, a2, U32.add(z, cand)))
+        case 2:
+          (a2, +v) = p
+          +j2 = U32.inc(j)
+          +last = A.eq01(j2, n)
+          +idx = A.sel(last, 0, U32.add(base, j2))
+          hset_go(f, A.sel(last, 3, 0), j2, n, base, h1, U32.xor(h2, v), o1,
+                  o2, cand, c, gg, Array.get(U32, a2, idx))
+        case _:
+          (a2, _) = p
+          a3 = Array.set(U32, a2, o1, h1)
+          Array.set(U32, a3, o2, h2)
+
+def hset(a: Array<U32>, +base: U32, +n: U32, +o1: U32, +o2: U32, +c: U32,
+         +gg: U32) -> Array<U32>:
+  +fuel = Nat.add(Nat.mul(U32.to_nat(n), 16n), 64n)
+  hset_go(fuel, 0, 0, n, base, 0, 0, o1, o2, 0, c, gg,
+          Array.get(U32, a, base))
