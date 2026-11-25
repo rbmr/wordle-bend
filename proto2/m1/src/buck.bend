@@ -140,7 +140,7 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
              gg, cand, val, Array.get(U32, a5, 0))
         case 12:
           (a2, _) = p
-          ev(f, A.sel(A.ge01(16, k), 16, 15), j, o, k, cv, pmk, h1, h2, k1, k2h,
+          ev(f, A.sel(A.ge01(15, k), 16, 15), j, o, k, cv, pmk, h1, h2, k1, k2h,
              base, used, ex, dep, c, gg, cand, val, Array.get(U32, a2, 0))
         case 15:
           # Larger than 15: the branching-factor bound chain, then insert.

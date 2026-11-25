@@ -316,7 +316,8 @@ def mktb_sel(+fuel: Nat, +n: Nat, +max_k: Nat, +target: Nat, +ph: Nat,
         case 1n:
           match le:
             case True{}:
-              mktb_small(n, target, False{})
+              mktb_small(n, target,
+                         Nat.is_lt(target, Nat.sub(Nat.mul(2n, n), 1n)))
             case False{}:
               mktb_big(n, max_k, target)
         case _:

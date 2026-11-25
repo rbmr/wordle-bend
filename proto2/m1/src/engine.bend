@@ -347,7 +347,23 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                npr, stk, Array.get(U32, a2, S.cap_at(lmk, n, c, gg)))
         case 161:
           (a2, +v) = p
-          +lb2 = U32.max(lb, v)
+          # Rust's final local_lb: the base row cap[local_max_k][n] plus
+          # tight_capacity_bound / phase2_capacity_bound with the best
+          # branching factors found by phase 1 and phase 2.
+          +p1 = A.sel(A.nz(v1k),
+                      U32.from_nat(B.tight_capacity_bound(U32.to_nat(n),
+                                                          U32.to_nat(v1k),
+                                                          U32.to_nat(lmk))),
+                      4294967295)
+          +p2 = A.sel(A.nz(v2k),
+                      U32.from_nat(B.phase2_capacity_bound(U32.to_nat(n),
+                                                           U32.to_nat(v2k),
+                                                           U32.to_nat(lmk))),
+                      4294967295)
+          # tl == MAXU means "not available" (Rust skips it).
+          +tl = U32.min(p1, p2)
+          +lb2 = U32.max(U32.max(lb, v),
+                         U32.mul(tl, U32.sub(1, A.eq01(tl, 4294967295))))
           +walk = U32.and(A.lt01(lb2, best), A.ge01(nt, 1))
           step(f, c, gg, 0, A.sel(walk, 63, 70), ss, n, beta, pmk, dep, best, lb2,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
@@ -674,7 +690,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 134:
           (a2, _) = p
           +k2 = ret
-          +known = U32.mul(A.ge01(16, k2), lmk)
+          +known = U32.mul(A.ge01(15, k2), lmk)
           stk2 : List<Fr> = Con{Gf{ss, n, beta, pmk, dep, mv, lb, g, cost,
                                    U32.inc(bcur), t, v1k}, stk}
           step(f, c, gg, 0, 0, lbk, k2, cut, nt, U32.inc(dep), cut, known, 0,
