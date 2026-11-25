@@ -1696,26 +1696,26 @@ def bigs_depth(+bs: +List<BigClass>) -> Nat:
 # its depth bound `5`, not its exact tree cost (five or six), so this stays a
 # function of the class sizes and keeps the capacity walk's running total
 # comparable with the class list.
-def cap_base(+n: Nat, +items: +List<Item>, +acc: Nat) -> Nat:
+def cap_base(+n: Nat, +items: +List<Item>) -> Nat:
   match items:
     case Nil{}:
-      acc
+      0n
     case Con{it, rest}:
       match it:
         case Begin{g}:
-          cap_base(n, rest, acc)
+          cap_base(n, rest)
         case ClassItem{fb, cws, +wlen, tlb}:
-          cap_base(n, rest, Nat.add(Nat.sub(Nat.add(wlen, wlen), 1n), acc))
+          Nat.add(Nat.sub(Nat.add(wlen, wlen), 1n), cap_base(n, rest))
         case OneItem{fb, w}:
-          cap_base(n, rest, Nat.add(1n, acc))
+          Nat.add(1n, cap_base(n, rest))
         case TwoItem{fb, w1, w2}:
-          cap_base(n, rest, Nat.add(3n, acc))
+          Nat.add(3n, cap_base(n, rest))
         case DoneItem{fb, tree, cost}:
-          cap_base(n, rest, Nat.add(5n, acc))
+          Nat.add(5n, cap_base(n, rest))
         case Add{fb, tlb}:
-          cap_base(n, rest, acc)
+          cap_base(n, rest)
         case End{}:
-          Nat.add(n, acc)
+          Nat.add(n, cap_base(n, rest))
 
 type CapRes is Type:
   CapSkip{tbl: Array<U32>}
@@ -1845,7 +1845,7 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
-      +base = Nat.add(bigs_depth(bigs), cap_base(n, items, 0n))
+      +base = Nat.add(bigs_depth(bigs), cap_base(n, items))
       +fuel = Nat.add(Nat.add(bigs_len(bigs), bigs_len(bigs)), 2n)
       finish_cap(cap_walk(fuel, bigs, bigs, 1n,
                    Nat.is_le(best_cost(best), base),

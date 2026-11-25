@@ -21,6 +21,8 @@ import Base
 import ../src/solve_fast.bend as SolveFast
 import ../src/solve_ref.bend as SolveRef
 import ../src/groups.bend as Groups
+import ../src/tree.bend as Tree
+import ../src/feedback.bend as Feedback
 import ./fast_hist5.bend as FH
 import ./fast_tbl.bend as FT
 import ./class_k.bend as CK
@@ -1048,3 +1050,396 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                             SolveFast.BigClass{fb, ws, len, clb} <> acc,
                             gain2, total0, hgn, hrest, hinv2, {==}, hacc2,
                             SolveFast.CKRes{tbl, k}, htbl2, Unit{})
+
+# `a + (b + c) = b + (a + c)`.
+def CW.add3_shift(+a: Nat, +b: Nat, +c: Nat) ->
+  {Nat.add(a, Nat.add(b, c)) == Nat.add(b, Nat.add(a, c)) : Nat}:
+  Equal.trans(Nat, Nat.add(a, Nat.add(b, c)), Nat.add(Nat.add(a, b), c),
+    Nat.add(b, Nat.add(a, c)),
+    Equal.sym(Nat, Nat.add(Nat.add(a, b), c), Nat.add(a, Nat.add(b, c)),
+      NatProof.NatPrf.add_assoc(a, b, c)),
+    Equal.trans(Nat, Nat.add(Nat.add(a, b), c), Nat.add(Nat.add(b, a), c),
+      Nat.add(b, Nat.add(a, c)),
+      Equal.cong(Nat, Nat, x => Nat.add(x, c),
+        Nat.add(a, b), Nat.add(b, a), NatProof.NatPrf.add_comm(a, b)),
+      NatProof.NatPrf.add_assoc(b, a, c)))
+
+# A finished three-candidate class has exactly three words.
+def CW.done_three_len(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
+    +tree: Tree.Tree, +cost: Nat,
+    +hdws: {FH.FH.done_ws_ok_b(G, ws, tree, cost) == True{} : Bool}) ->
+  {Groups.len_words(ws) == 3n : Nat}:
+  match ws:
+    case Nil{}:
+      Empty.absurd({Groups.len_words(Nil{}) == 3n : Nat},
+        Logic.Proof.false_ne_true(hdws))
+    case Con{w1, t1}:
+      match t1:
+        case Nil{}:
+          Empty.absurd({Groups.len_words(Con{w1, Nil{}}) == 3n : Nat},
+            Logic.Proof.false_ne_true(hdws))
+        case Con{w2, t2}:
+          match t2:
+            case Nil{}:
+              Empty.absurd(
+                {Groups.len_words(Con{w1, Con{w2, Nil{}}}) == 3n : Nat},
+                Logic.Proof.false_ne_true(hdws))
+            case Con{w3, t3}:
+              match t3:
+                case Nil{}:
+                  {==}
+                case Con{w4, t4}:
+                  Empty.absurd(
+                    {Groups.len_words(
+                       Con{w1, Con{w2, Con{w3, Con{w4, t4}}}}) == 3n : Nat},
+                    Logic.Proof.false_ne_true(hdws))
+
+# The class-independent part of the bound, compared with the class fold: this
+# is the `hb` premise of `CW.walk` at the initial state.
+def CW.base_le(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +has_buf: Bool, +nodup: Bool, +n: Nat,
+    +ig: +List<Groups.Group>, +items: +List<SolveFast.Item>,
+    +hbm: FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, ig, items)) ->
+  {Nat.is_le(SolveFast.cap_base(n, items),
+     Nat.add(n, FH.FH.cap_fold(G, ig))) == True{} : Bool}:
+  match ig:
+    case Nil{}:
+      %Equal.sym(+List<SolveFast.Item>, items, SolveFast.End{} <> Nil{}, hbm) :
+        {Nat.is_le(SolveFast.cap_base(n, _),
+           Nat.add(n, FH.FH.cap_fold(G, Nil{}))) == True{} : Bool}
+      NatProof.Nat.is_le_refl(Nat.add(n, 0n))
+    case Con{gp, restg}:
+      match gp:
+        case Groups.Group{+fb, +ws}:
+          match items:
+            case Nil{}:
+              Empty.absurd(
+                {Nat.is_le(SolveFast.cap_base(n, Nil{}),
+                   Nat.add(n, FH.FH.cap_fold(G, Groups.Group{fb, ws} <> restg)))
+                 == True{} : Bool}, hbm)
+            case Con{it, restb}:
+              match it:
+                case SolveFast.Begin{g2}:
+                  Empty.absurd(
+                    {Nat.is_le(SolveFast.cap_base(n, SolveFast.Begin{g2} <> restb),
+                       Nat.add(n,
+                         FH.FH.cap_fold(G, Groups.Group{fb, ws} <> restg)))
+                     == True{} : Bool}, hbm)
+                case SolveFast.OneItem{+f, +w}:
+                  +hb1 = Arr.Arr.dpair_r({f == fb : +List<Feedback.Color>},
+                    Arr.Arr.DPair<{ws == w <> Nil{} : +List<+List<Nat>>},
+                      FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                        restb)>, hbm)
+                  +ews = Arr.Arr.dpair_l({ws == w <> Nil{} : +List<+List<Nat>>},
+                    FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                      restb), hb1)
+                  +hbm2 = Arr.Arr.dpair_r({ws == w <> Nil{} : +List<+List<Nat>>},
+                    FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                      restb), hb1)
+                  +ih = CW.base_le(G, C, n_root, has_buf, nodup, n, restg,
+                    restb, hbm2)
+                  +elw : {Groups.len_words(w <> Nil{}) == Groups.len_words(ws)
+                          : Nat} =
+                    Equal.cong(+List<+List<Nat>>, Nat, l => Groups.len_words(l),
+                      w <> Nil{}, ws, Equal.sym(+List<+List<Nat>>, ws,
+                        w <> Nil{}, ews))
+                  +hlen1 : {1n == Groups.len_words(ws) : Nat} =
+                    Equal.trans(Nat, 1n, Groups.len_words(w <> Nil{}),
+                      Groups.len_words(ws), {==}, elw)
+                  +hc : {Nat.is_le(1n, FH.FH.cap_class(G, ws)) == True{} : Bool} =
+                    CW.dep_le_class_eq(G, 1n, ws, hlen1)
+                  NatProof.Nat.is_le_eq_r(
+                    Nat.add(1n, SolveFast.cap_base(n, restb)),
+                    Nat.add(FH.FH.cap_class(G, ws),
+                      Nat.add(n, FH.FH.cap_fold(G, restg))),
+                    Nat.add(n,
+                      Nat.add(FH.FH.cap_class(G, ws),
+                        FH.FH.cap_fold(G, restg))),
+                    CW.add3_shift(FH.FH.cap_class(G, ws), n,
+                      FH.FH.cap_fold(G, restg)),
+                    FT.FT.nat_add_le_add(1n, FH.FH.cap_class(G, ws),
+                      SolveFast.cap_base(n, restb),
+                      Nat.add(n, FH.FH.cap_fold(G, restg)), hc, ih))
+                case SolveFast.TwoItem{+f, +w1, +w2}:
+                  +hb1 = Arr.Arr.dpair_r({nodup == True{} : Bool},
+                    Arr.Arr.DPair<{f == fb : +List<Feedback.Color>},
+                      Arr.Arr.DPair<
+                        {ws == w1 <> (w2 <> Nil{}) : +List<+List<Nat>>},
+                        FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                          restb)>>, hbm)
+                  +hb2 = Arr.Arr.dpair_r({f == fb : +List<Feedback.Color>},
+                    Arr.Arr.DPair<
+                      {ws == w1 <> (w2 <> Nil{}) : +List<+List<Nat>>},
+                      FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                        restb)>, hb1)
+                  +ews = Arr.Arr.dpair_l(
+                    {ws == w1 <> (w2 <> Nil{}) : +List<+List<Nat>>},
+                    FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                      restb), hb2)
+                  +hbm2 = Arr.Arr.dpair_r(
+                    {ws == w1 <> (w2 <> Nil{}) : +List<+List<Nat>>},
+                    FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                      restb), hb2)
+                  +ih = CW.base_le(G, C, n_root, has_buf, nodup, n, restg,
+                    restb, hbm2)
+                  +elw : {Groups.len_words(w1 <> (w2 <> Nil{}))
+                          == Groups.len_words(ws) : Nat} =
+                    Equal.cong(+List<+List<Nat>>, Nat, l => Groups.len_words(l),
+                      w1 <> (w2 <> Nil{}), ws,
+                      Equal.sym(+List<+List<Nat>>, ws, w1 <> (w2 <> Nil{}), ews))
+                  +hlen2 : {2n == Groups.len_words(ws) : Nat} =
+                    Equal.trans(Nat, 2n, Groups.len_words(w1 <> (w2 <> Nil{})),
+                      Groups.len_words(ws), {==}, elw)
+                  +hc : {Nat.is_le(3n, FH.FH.cap_class(G, ws)) == True{} : Bool} =
+                    CW.dep_le_class_eq(G, 2n, ws, hlen2)
+                  NatProof.Nat.is_le_eq_r(
+                    Nat.add(3n, SolveFast.cap_base(n, restb)),
+                    Nat.add(FH.FH.cap_class(G, ws),
+                      Nat.add(n, FH.FH.cap_fold(G, restg))),
+                    Nat.add(n,
+                      Nat.add(FH.FH.cap_class(G, ws),
+                        FH.FH.cap_fold(G, restg))),
+                    CW.add3_shift(FH.FH.cap_class(G, ws), n,
+                      FH.FH.cap_fold(G, restg)),
+                    FT.FT.nat_add_le_add(3n, FH.FH.cap_class(G, ws),
+                      SolveFast.cap_base(n, restb),
+                      Nat.add(n, FH.FH.cap_fold(G, restg)), hc, ih))
+                case SolveFast.DoneItem{+f, +tree, +cost}:
+                  +hb1 = Arr.Arr.dpair_r({nodup == True{} : Bool},
+                    Arr.Arr.DPair<{f == fb : +List<Feedback.Color>},
+                      Arr.Arr.DPair<
+                        {FH.FH.done_ws_ok_b(G, ws, tree, cost) == True{} : Bool},
+                        FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                          restb)>>, hbm)
+                  +hb2 = Arr.Arr.dpair_r({f == fb : +List<Feedback.Color>},
+                    Arr.Arr.DPair<
+                      {FH.FH.done_ws_ok_b(G, ws, tree, cost) == True{} : Bool},
+                      FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                        restb)>, hb1)
+                  +hdws = Arr.Arr.dpair_l(
+                    {FH.FH.done_ws_ok_b(G, ws, tree, cost) == True{} : Bool},
+                    FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                      restb), hb2)
+                  +hbm2 = Arr.Arr.dpair_r(
+                    {FH.FH.done_ws_ok_b(G, ws, tree, cost) == True{} : Bool},
+                    FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n, restg,
+                      restb), hb2)
+                  +ih = CW.base_le(G, C, n_root, has_buf, nodup, n, restg,
+                    restb, hbm2)
+                  +hlw : {Groups.len_words(ws) == 3n : Nat} =
+                    CW.done_three_len(G, ws, tree, cost, hdws)
+                  +hc : {Nat.is_le(5n, FH.FH.cap_class(G, ws)) == True{} : Bool} =
+                    CW.dep_le_class_eq(G, 3n, ws,
+                      Equal.sym(Nat, Groups.len_words(ws), 3n, hlw))
+                  NatProof.Nat.is_le_eq_r(
+                    Nat.add(5n, SolveFast.cap_base(n, restb)),
+                    Nat.add(FH.FH.cap_class(G, ws),
+                      Nat.add(n, FH.FH.cap_fold(G, restg))),
+                    Nat.add(n,
+                      Nat.add(FH.FH.cap_class(G, ws),
+                        FH.FH.cap_fold(G, restg))),
+                    CW.add3_shift(FH.FH.cap_class(G, ws), n,
+                      FH.FH.cap_fold(G, restg)),
+                    FT.FT.nat_add_le_add(5n, FH.FH.cap_class(G, ws),
+                      SolveFast.cap_base(n, restb),
+                      Nat.add(n, FH.FH.cap_fold(G, restg)), hc, ih))
+                case SolveFast.ClassItem{+f, +cws, +wlen, +tlb}:
+                  match restb:
+                    case Nil{}:
+                      Empty.absurd(
+                        {Nat.is_le(
+                           SolveFast.cap_base(n,
+                             SolveFast.ClassItem{f, cws, wlen, tlb} <> Nil{}),
+                           Nat.add(n,
+                             FH.FH.cap_fold(G, Groups.Group{fb, ws} <> restg)))
+                         == True{} : Bool}, hbm)
+                    case Con{it2, restb2}:
+                      match it2:
+                        case SolveFast.Add{+f2, +tlb2}:
+                          +hb1 = Arr.Arr.dpair_r(
+                            {f == fb : +List<Feedback.Color>},
+                            Arr.Arr.DPair<{f2 == fb : +List<Feedback.Color>},
+                              Arr.Arr.DPair<
+                                {SolveFast.cwords_words(cws) == ws
+                                 : +List<+List<Nat>>},
+                                Arr.Arr.DPair<
+                                  {wlen == Groups.len_words(ws) : Nat},
+                                  Arr.Arr.DPair<
+                                    {FH.FH.cwords_ok_if(has_buf, G, C, n_root,
+                                       cws) == True{} : Bool},
+                                    Arr.Arr.DPair<
+                                      {tlb == FH.FH.body_lb(nodup, n, restb2)
+                                       : Nat},
+                                      Arr.Arr.DPair<
+                                        {tlb2 == tlb : Nat},
+                                        FH.FH.BodyMatch(G, C, n_root, has_buf,
+                                          nodup, n, restg, restb2)>>>>>>, hbm)
+                          +hb2 = Arr.Arr.dpair_r(
+                            {f2 == fb : +List<Feedback.Color>},
+                            Arr.Arr.DPair<
+                              {SolveFast.cwords_words(cws) == ws
+                               : +List<+List<Nat>>},
+                              Arr.Arr.DPair<
+                                {wlen == Groups.len_words(ws) : Nat},
+                                Arr.Arr.DPair<
+                                  {FH.FH.cwords_ok_if(has_buf, G, C, n_root,
+                                     cws) == True{} : Bool},
+                                  Arr.Arr.DPair<
+                                    {tlb == FH.FH.body_lb(nodup, n, restb2)
+                                     : Nat},
+                                    Arr.Arr.DPair<
+                                      {tlb2 == tlb : Nat},
+                                      FH.FH.BodyMatch(G, C, n_root, has_buf,
+                                        nodup, n, restg, restb2)>>>>>, hb1)
+                          +hb3 = Arr.Arr.dpair_r(
+                            {SolveFast.cwords_words(cws) == ws
+                             : +List<+List<Nat>>},
+                            Arr.Arr.DPair<
+                              {wlen == Groups.len_words(ws) : Nat},
+                              Arr.Arr.DPair<
+                                {FH.FH.cwords_ok_if(has_buf, G, C, n_root, cws)
+                                 == True{} : Bool},
+                                Arr.Arr.DPair<
+                                  {tlb == FH.FH.body_lb(nodup, n, restb2)
+                                   : Nat},
+                                  Arr.Arr.DPair<
+                                    {tlb2 == tlb : Nat},
+                                    FH.FH.BodyMatch(G, C, n_root, has_buf,
+                                      nodup, n, restg, restb2)>>>>, hb2)
+                          +hwlen = Arr.Arr.dpair_l(
+                            {wlen == Groups.len_words(ws) : Nat},
+                            Arr.Arr.DPair<
+                              {FH.FH.cwords_ok_if(has_buf, G, C, n_root, cws)
+                               == True{} : Bool},
+                              Arr.Arr.DPair<
+                                {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                Arr.Arr.DPair<
+                                  {tlb2 == tlb : Nat},
+                                  FH.FH.BodyMatch(G, C, n_root, has_buf,
+                                    nodup, n, restg, restb2)>>>, hb3)
+                          +hb4 = Arr.Arr.dpair_r(
+                            {wlen == Groups.len_words(ws) : Nat},
+                            Arr.Arr.DPair<
+                              {FH.FH.cwords_ok_if(has_buf, G, C, n_root, cws)
+                               == True{} : Bool},
+                              Arr.Arr.DPair<
+                                {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                Arr.Arr.DPair<
+                                  {tlb2 == tlb : Nat},
+                                  FH.FH.BodyMatch(G, C, n_root, has_buf,
+                                    nodup, n, restg, restb2)>>>, hb3)
+                          +hb5 = Arr.Arr.dpair_r(
+                            {FH.FH.cwords_ok_if(has_buf, G, C, n_root, cws)
+                             == True{} : Bool},
+                            Arr.Arr.DPair<
+                              {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                              Arr.Arr.DPair<
+                                {tlb2 == tlb : Nat},
+                                FH.FH.BodyMatch(G, C, n_root, has_buf,
+                                  nodup, n, restg, restb2)>>, hb4)
+                          +hb6 = Arr.Arr.dpair_r(
+                            {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                            Arr.Arr.DPair<{tlb2 == tlb : Nat},
+                              FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n,
+                                restg, restb2)>, hb5)
+                          +hbm2 = Arr.Arr.dpair_r(
+                            {tlb2 == tlb : Nat},
+                            FH.FH.BodyMatch(G, C, n_root, has_buf, nodup, n,
+                              restg, restb2), hb6)
+                          +ih = CW.base_le(G, C, n_root, has_buf, nodup, n,
+                            restg, restb2, hbm2)
+                          +hc : {Nat.is_le(CW.dep(wlen),
+                                   FH.FH.cap_class(G, ws))
+                                 == True{} : Bool} =
+                            CW.dep_le_class_eq(G, wlen, ws, hwlen)
+                          +elhs : {Nat.add(CW.dep(wlen),
+                                     SolveFast.cap_base(n, restb2))
+                                   == SolveFast.cap_base(n, it <> restb) : Nat} =
+                            {==}
+                          %elhs :
+                            {Nat.is_le(_,
+                               Nat.add(n, FH.FH.cap_fold(G,
+                                 Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}
+                          NatProof.Nat.is_le_eq_r(
+                            Nat.add(CW.dep(wlen),
+                              SolveFast.cap_base(n, restb2)),
+                            Nat.add(FH.FH.cap_class(G, ws),
+                              Nat.add(n, FH.FH.cap_fold(G, restg))),
+                            Nat.add(n,
+                              Nat.add(FH.FH.cap_class(G, ws),
+                                FH.FH.cap_fold(G, restg))),
+                            CW.add3_shift(FH.FH.cap_class(G, ws), n,
+                              FH.FH.cap_fold(G, restg)),
+                            FT.FT.nat_add_le_add(CW.dep(wlen),
+                              FH.FH.cap_class(G, ws),
+                              SolveFast.cap_base(n, restb2),
+                              Nat.add(n, FH.FH.cap_fold(G, restg)), hc, ih))
+                        case SolveFast.Begin{g2}:
+                          Empty.absurd(
+                            {Nat.is_le(
+                               SolveFast.cap_base(n,
+                                 SolveFast.ClassItem{f, cws, wlen, tlb}
+                                 <> (SolveFast.Begin{g2} <> restb2)),
+                               Nat.add(n,
+                                 FH.FH.cap_fold(G,
+                                   Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}, hbm)
+                        case SolveFast.ClassItem{_, _, _, _}:
+                          Empty.absurd(
+                            {Nat.is_le(
+                               SolveFast.cap_base(n,
+                                 SolveFast.ClassItem{f, cws, wlen, tlb} <> restb),
+                               Nat.add(n,
+                                 FH.FH.cap_fold(G,
+                                   Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}, hbm)
+                        case SolveFast.OneItem{_, _}:
+                          Empty.absurd(
+                            {Nat.is_le(
+                               SolveFast.cap_base(n,
+                                 SolveFast.ClassItem{f, cws, wlen, tlb} <> restb),
+                               Nat.add(n,
+                                 FH.FH.cap_fold(G,
+                                   Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}, hbm)
+                        case SolveFast.TwoItem{_, _, _}:
+                          Empty.absurd(
+                            {Nat.is_le(
+                               SolveFast.cap_base(n,
+                                 SolveFast.ClassItem{f, cws, wlen, tlb} <> restb),
+                               Nat.add(n,
+                                 FH.FH.cap_fold(G,
+                                   Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}, hbm)
+                        case SolveFast.DoneItem{_, _, _}:
+                          Empty.absurd(
+                            {Nat.is_le(
+                               SolveFast.cap_base(n,
+                                 SolveFast.ClassItem{f, cws, wlen, tlb} <> restb),
+                               Nat.add(n,
+                                 FH.FH.cap_fold(G,
+                                   Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}, hbm)
+                        case SolveFast.End{}:
+                          Empty.absurd(
+                            {Nat.is_le(
+                               SolveFast.cap_base(n,
+                                 SolveFast.ClassItem{f, cws, wlen, tlb}
+                                 <> (SolveFast.End{} <> restb2)),
+                               Nat.add(n,
+                                 FH.FH.cap_fold(G,
+                                   Groups.Group{fb, ws} <> restg)))
+                             == True{} : Bool}, hbm)
+                case SolveFast.Add{_, _}:
+                  Empty.absurd(
+                    {Nat.is_le(SolveFast.cap_base(n, it <> restb),
+                       Nat.add(n,
+                         FH.FH.cap_fold(G, Groups.Group{fb, ws} <> restg)))
+                     == True{} : Bool}, hbm)
+                case SolveFast.End{}:
+                  Empty.absurd(
+                    {Nat.is_le(SolveFast.cap_base(n, it <> restb),
+                       Nat.add(n,
+                         FH.FH.cap_fold(G, Groups.Group{fb, ws} <> restg)))
+                     == True{} : Bool}, hbm)
