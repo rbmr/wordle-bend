@@ -7269,10 +7269,10 @@ def FH.rev_codes_append(+fg: +List<SolveFast.FGroup>, +acc: +List<U32>) ->
                   List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                   FH.rev_codes_append(rest, c <> Nil{})))))
 
-def FH.drain5_go_append(+gn: Nat, +ts1: +List<U32>, +ts2: +List<U32>,
+def FH.drain5_go_append(+ts1: +List<U32>, +ts2: +List<U32>,
     st: SolveFast.Drain5State) ->
-  {SolveFast.drain5_go(gn, List.append(&2, U32, ts1, ts2), st)
-   == SolveFast.drain5_go(gn, ts2, SolveFast.drain5_go(gn, ts1, st))
+  {SolveFast.drain5_go(List.append(&2, U32, ts1, ts2), st)
+   == SolveFast.drain5_go(ts2, SolveFast.drain5_go(ts1, st))
    : SolveFast.Drain5State}:
   match ts1:
     case Nil{}:
@@ -7280,7 +7280,7 @@ def FH.drain5_go_append(+gn: Nat, +ts1: +List<U32>, +ts2: +List<U32>,
     case Con{+code, +rest}:
       match st:
         case SolveFast.Drain5State{bkts, tbl, +rem_lb, +items, +bigs}:
-          FH.drain5_go_append(gn, rest, ts2,
+          FH.drain5_go_append(rest, ts2,
             SolveFast.drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<SolveFast.CWord>, bkts, code, Nil{})))
 
@@ -7389,7 +7389,7 @@ def FH.disjoint_codes_snoc(+pre: +List<SolveFast.FGroup>,
 
 def FH.big_group(bc: SolveFast.BigClass) -> Groups.Group:
   match bc:
-    case SolveFast.BigClass{fb, ws, len, _}:
+    case SolveFast.BigClass{fb, ws, len}:
       Groups.Group{fb, SolveFast.cwords_words(ws)}
 
 def FH.bigs_groups(+bs: +List<SolveFast.BigClass>) -> +List<Groups.Group>:
@@ -7402,7 +7402,7 @@ def FH.bigs_groups(+bs: +List<SolveFast.BigClass>) -> +List<Groups.Group>:
 def FH.big_ok_b(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
     bc: SolveFast.BigClass) -> Bool:
   match bc:
-    case SolveFast.BigClass{fb, +ws, len, _}:
+    case SolveFast.BigClass{fb, +ws, len}:
       Bool.and(FT.FT.cwords_ok_b(G, C, n_root, ws),
         Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))))
 
@@ -7576,9 +7576,9 @@ def FH.emit_bigs_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       hbm
     case Con{bc, +rest}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, _}:
+        case SolveFast.BigClass{+fb, +ws, +len}:
           +bcv : SolveFast.BigClass =
-            SolveFast.BigClass{fb, ws, len, Nat.sub(Nat.add(len, len), 1n)}
+            SolveFast.BigClass{fb, ws, len}
           +hbc = Logic.Proof.and_true_l(
                    FH.big_ok_b(G, C, n_root, bcv),
                    FH.bigs_ok_b(G, C, n_root, rest), hbs)
@@ -7787,8 +7787,7 @@ def FH.drain5_add_ge4_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         case DWit{+ig1, +perm1, +hok_bigs1, +hbm1, +elb1, +hperm1}:
           +fdec = SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f))
           +bc : SolveFast.BigClass =
-            SolveFast.BigClass{fdec, ws, rlen,
-              Nat.sub(Nat.add(rlen, rlen), 1n)}
+            SolveFast.BigClass{fdec, ws, rlen}
           +le0 = SolveFast.next_big_le(rlen, bigs2)
           +bigs3 = SolveFast.insert_big(bc, rlen, bigs2, le0)
           +hbc : {FH.big_ok_b(G, C, n_root, bc) == True{} : Bool} =
@@ -8644,7 +8643,7 @@ def FH.drain5_cons_step(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
              rest, n_orig, ig0, bigs0, tbl0, dr1)) ->
   FH.DrainSpec(G, C, n_root, pre, SolveFast.FGroup{f, len, rws} <> rest,
     n_orig, ig0, bigs0, tbl0,
-    SolveFast.drain5_go(gn, FF5.FF5.encode_fb5_list(f) <> Nil{}, dr1)):
+    SolveFast.drain5_go(FF5.FF5.encode_fb5_list(f) <> Nil{}, dr1)):
   match dr1:
     case SolveFast.Drain5State{bkts2, tbl2, +lb2, +items2, +bigs2}:
       +gp : SolveFast.FGroup = SolveFast.FGroup{f, len, rws}
@@ -8707,12 +8706,11 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           List.append(&2, SolveFast.FGroup, pre,
             SolveFast.FGroup{f, len, rws} <> Nil{}),
           rest, n_orig, ig0, bigs0, t4,
-          SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+          SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}))) ->
   FH.DrainSpec(G, C, n_root, pre, SolveFast.FGroup{f, len, rws} <> rest,
     n_orig, ig0, bigs0, tbl,
-    SolveFast.drain5_go(gn, 
-      FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
+    SolveFast.drain5_go(FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
       SolveFast.Drain5State{bkts, tbl, lb0, items0, bigs0})):
   (b3, dpb3) = dpb2
   (b4, peb2) = dpb3
@@ -8740,137 +8738,126 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   +hdr4 = ih(b4, t4, hb4, ht4)
   +hdr_tb = FH.drain_spec_transport_tbl(G, C, n_root, pre2, rest, n_orig, ig0,
               bigs0, t4, tbl,
-              SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+              SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                 SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}),
               et4_tb, hdr4)
-  +eq_41 : {SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+  +eq_41 : {SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
               SolveFast.Drain5State{b4, t4, lb0, items0, bigs0})
-            == SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+            == SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                  SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})
             : SolveFast.Drain5State} =
     Equal.trans(SolveFast.Drain5State,
-      SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+      SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
         SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}),
-      SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+      SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
         SolveFast.Drain5State{b1, t4, lb0, items0, bigs0}),
-      SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+      SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
         SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
       Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Drain5State,
-        x => SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+        x => SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                SolveFast.Drain5State{x, t4, lb0, items0, bigs0}),
         b4, b1, eb4_b1),
       Equal.cong(Array<U32>, SolveFast.Drain5State,
-        y => SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+        y => SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                SolveFast.Drain5State{b1, y, lb0, items0, bigs0}),
         t4, t1, et4_t1))
   +hdr1 = FH.drain_spec_transport(G, C, n_root, pre2, rest, n_orig, ig0, bigs0,
             tbl,
-            SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+            SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
               SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}),
-            SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+            SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
               SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
             eq_41, hdr_tb)
-  +eapp : {SolveFast.drain5_go(gn, 
-             List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+  +eapp : {SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
              SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})
-           == SolveFast.drain5_go(gn, c <> Nil{},
-                SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+           == SolveFast.drain5_go(c <> Nil{},
+                SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                   SolveFast.Drain5State{b3, t3, lb0, items0, bigs0}))
            : SolveFast.Drain5State} =
-    FH.drain5_go_append(gn, FH.rev_codes(rest, Nil{}), c <> Nil{},
+    FH.drain5_go_append(FH.rev_codes(rest, Nil{}), c <> Nil{},
       SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})
-  +eapp_1 : {SolveFast.drain5_go(gn, 
-               List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+  +eapp_1 : {SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})
-             == SolveFast.drain5_go(gn, c <> Nil{},
-                  SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+             == SolveFast.drain5_go(c <> Nil{},
+                  SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                     SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}))
              : SolveFast.Drain5State} =
     Equal.trans(SolveFast.Drain5State,
-      SolveFast.drain5_go(gn, 
-        List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+      SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
         SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
-      SolveFast.drain5_go(gn, c <> Nil{},
-        SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+      SolveFast.drain5_go(c <> Nil{},
+        SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
           SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})),
-      SolveFast.drain5_go(gn, c <> Nil{},
-        SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+      SolveFast.drain5_go(c <> Nil{},
+        SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
           SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})),
       Equal.trans(SolveFast.Drain5State,
-        SolveFast.drain5_go(gn, 
-          List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+        SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
           SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
-        SolveFast.drain5_go(gn, 
-          List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+        SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
           SolveFast.Drain5State{b3, t3, lb0, items0, bigs0}),
-        SolveFast.drain5_go(gn, c <> Nil{},
-          SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+        SolveFast.drain5_go(c <> Nil{},
+          SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})),
         Equal.trans(SolveFast.Drain5State,
-          SolveFast.drain5_go(gn, 
-            List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+          SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
             SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
-          SolveFast.drain5_go(gn, 
-            List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+          SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
             SolveFast.Drain5State{b3, t1, lb0, items0, bigs0}),
-          SolveFast.drain5_go(gn, 
-            List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+          SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
             SolveFast.Drain5State{b3, t3, lb0, items0, bigs0}),
           Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Drain5State,
-            x => SolveFast.drain5_go(gn, 
-                   List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+            x => SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                    SolveFast.Drain5State{x, t1, lb0, items0, bigs0}),
             b1, b3, Equal.sym(Array<+List<SolveFast.CWord>>, b3, b1, eb3_b1)),
           Equal.cong(Array<U32>, SolveFast.Drain5State,
-            y => SolveFast.drain5_go(gn, 
-                   List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+            y => SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                    SolveFast.Drain5State{b3, y, lb0, items0, bigs0}),
             t1, t3, Equal.sym(Array<U32>, t3, t1, et3_t1))),
         eapp),
       Equal.trans(SolveFast.Drain5State,
-        SolveFast.drain5_go(gn, c <> Nil{},
-          SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+        SolveFast.drain5_go(c <> Nil{},
+          SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})),
-        SolveFast.drain5_go(gn, c <> Nil{},
-          SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+        SolveFast.drain5_go(c <> Nil{},
+          SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b1, t3, lb0, items0, bigs0})),
-        SolveFast.drain5_go(gn, c <> Nil{},
-          SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+        SolveFast.drain5_go(c <> Nil{},
+          SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})),
         Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Drain5State,
-          x => SolveFast.drain5_go(gn, c <> Nil{},
-                 SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+          x => SolveFast.drain5_go(c <> Nil{},
+                 SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                    SolveFast.Drain5State{x, t3, lb0, items0, bigs0})),
           b3, b1, eb3_b1),
         Equal.cong(Array<U32>, SolveFast.Drain5State,
-          y => SolveFast.drain5_go(gn, c <> Nil{},
-                 SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+          y => SolveFast.drain5_go(c <> Nil{},
+                 SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                    SolveFast.Drain5State{b1, y, lb0, items0, bigs0})),
           t3, t1, et3_t1)))
   %eb1 : FH.DrainSpec(G, C, n_root, pre, gp <> rest, n_orig, ig0, bigs0, tbl,
-           SolveFast.drain5_go(gn, FH.rev_codes(rest, c <> Nil{}),
+           SolveFast.drain5_go(FH.rev_codes(rest, c <> Nil{}),
              SolveFast.Drain5State{_, tbl, lb0, items0, bigs0}))
   %et1 : FH.DrainSpec(G, C, n_root, pre, gp <> rest, n_orig, ig0, bigs0, tbl,
-           SolveFast.drain5_go(gn, FH.rev_codes(rest, c <> Nil{}),
+           SolveFast.drain5_go(FH.rev_codes(rest, c <> Nil{}),
              SolveFast.Drain5State{b1, _, lb0, items0, bigs0}))
   %Equal.sym(+List<U32>,
      FH.rev_codes(rest, c <> Nil{}),
      List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
      FH.rev_codes_append(rest, c <> Nil{})) :
     FH.DrainSpec(G, C, n_root, pre, gp <> rest, n_orig, ig0, bigs0, tbl,
-      SolveFast.drain5_go(gn, _, SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}))
+      SolveFast.drain5_go(_, SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}))
   %Equal.sym(SolveFast.Drain5State,
-     SolveFast.drain5_go(gn, 
-       List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+     SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
        SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
-     SolveFast.drain5_go(gn, c <> Nil{},
-       SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+     SolveFast.drain5_go(c <> Nil{},
+       SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
          SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})),
      eapp_1) :
     FH.DrainSpec(G, C, n_root, pre, gp <> rest, n_orig, ig0, bigs0, tbl, _)
   FH.drain5_cons_step(G, C, gn, n_root, pre, f, len, rws, rest, n_orig, ig0,
     bigs0, tbl, htbl,
-    SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+    SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
       SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
     hf5, hnd_gp, hnh, hdr1)
 
@@ -8903,12 +8890,11 @@ def FH.drain5_go_cons_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           List.append(&2, SolveFast.FGroup, pre,
             SolveFast.FGroup{f, len, rws} <> Nil{}),
           rest, n_orig, ig0, bigs0, t4,
-          SolveFast.drain5_go(gn, FH.rev_codes(rest, Nil{}),
+          SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}))) ->
   FH.DrainSpec(G, C, n_root, pre, SolveFast.FGroup{f, len, rws} <> rest,
     n_orig, ig0, bigs0, tbl,
-    SolveFast.drain5_go(gn, 
-      FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
+    SolveFast.drain5_go(FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
       SolveFast.Drain5State{bkts, tbl, lb0, items0, bigs0})):
   (b1, dpb2) = dpb
   (b2, peb) = dpb2
@@ -8937,7 +8923,7 @@ def FH.drain5_go_spec(+fg: +List<SolveFast.FGroup>, +G: +List<+List<Nat>>,
            List.append(&2, SolveFast.FGroup, pre, fg)),
     +htbl: FT.FT.TblOk(G, C, n_root, tbl)) ->
   FH.DrainSpec(G, C, n_root, pre, fg, n_orig, ig0, bigs0, tbl,
-    SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+    SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
       SolveFast.Drain5State{bkts, tbl, lb0, items0, bigs0})):
   match fg:
     case Nil{}:
@@ -9540,7 +9526,9 @@ def FH.finish_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     hook: FH.CapHookType(G, C),
     +n_root: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat, +floor: Nat,
     +best: SolveRef.Best, -seen: Array<Nat>, -tbl0: Array<U32>, +gen2: Nat,
-    bnode: Bool, +ebnode: {bnode == Nat.is_le(512n, n) : Bool},
+    bnode: Bool,
+    +ebnode: {bnode == Bool.and(Nat.is_le(512n, n),
+                 Nat.is_le(Nat.add(gn, gn), Nat.mul(5n, n))) : Bool},
     dr: SolveFast.Drain5State,
     +hus: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
            == True{} : Bool},
@@ -9637,7 +9625,7 @@ def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
          {t1 == tbl2 : Array<U32>} & {t2 == t1 : Array<U32>}) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
     SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
-      SolveFast.drain5_go(gn, touched,
+      SolveFast.drain5_go(touched,
         SolveFast.Drain5State{bkts2, tbl2, n, SolveFast.End{} <> Nil{}, Nil{}}))):
   (b1, dpb2) = dpb
   (b2, peb) = dpb2
@@ -9671,52 +9659,53 @@ def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             hnd_fg, {==}, {==}, {==}, hb_b2, ht_t2)
   +hdr_t0 = FH.drain_spec_transport_tbl(G, C, n_root, Nil{}, fg, n, Nil{}, Nil{},
               t2, tbl0,
-              SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+              SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
                 SolveFast.Drain5State{b2, t2, n, SolveFast.End{} <> Nil{}, Nil{}}),
               et2_t0, hdr2)
-  +eq_12 : {SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+  +eq_12 : {SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
               SolveFast.Drain5State{b2, t2, n, SolveFast.End{} <> Nil{}, Nil{}})
-            == SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+            == SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
                  SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}})
             : SolveFast.Drain5State} =
     Equal.trans(SolveFast.Drain5State,
-      SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+      SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
         SolveFast.Drain5State{b2, t2, n, SolveFast.End{} <> Nil{}, Nil{}}),
-      SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+      SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
         SolveFast.Drain5State{b1, t2, n, SolveFast.End{} <> Nil{}, Nil{}}),
-      SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+      SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
         SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}}),
       Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Drain5State,
-        x => SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+        x => SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
                SolveFast.Drain5State{x, t2, n, SolveFast.End{} <> Nil{}, Nil{}}),
         b2, b1, eb2),
       Equal.cong(Array<U32>, SolveFast.Drain5State,
-        y => SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+        y => SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
                SolveFast.Drain5State{b1, y, n, SolveFast.End{} <> Nil{}, Nil{}}),
         t2, t1, et2))
   +hdr1 = FH.drain_spec_transport(G, C, n_root, Nil{}, fg, n, Nil{}, Nil{},
             tbl0,
-            SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+            SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
               SolveFast.Drain5State{b2, t2, n, SolveFast.End{} <> Nil{}, Nil{}}),
-            SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+            SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
               SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}}),
             eq_12, hdr_t0)
   %eb1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
            SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
-             SolveFast.drain5_go(gn, touched,
+             SolveFast.drain5_go(touched,
                SolveFast.Drain5State{_, tbl2, n, SolveFast.End{} <> Nil{}, Nil{}})))
   %et1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
            SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
-             SolveFast.drain5_go(gn, touched,
+             SolveFast.drain5_go(touched,
                SolveFast.Drain5State{b1, _, n, SolveFast.End{} <> Nil{}, Nil{}})))
   %Equal.sym(+List<U32>, touched, FH.rev_codes(fg, Nil{}), etouched) :
     FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
       SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
-        SolveFast.drain5_go(gn, _,
+        SolveFast.drain5_go(_,
           SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}})))
   FH.finish_drain5_spec(G, C, gn, hgn, hook, n_root, g, S, n, floor, best, seen, tbl0, gen2,
-    Nat.is_le(512n, n), {==},
-    SolveFast.drain5_go(gn, FH.rev_codes(fg, Nil{}),
+    Bool.and(Nat.is_le(512n, n),
+      Nat.is_le(Nat.add(gn, gn), Nat.mul(5n, n))), {==},
+    SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
       SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}}),
     hus, hs, htbl0, hdr1)
 

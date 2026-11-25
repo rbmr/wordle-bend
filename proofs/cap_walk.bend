@@ -55,7 +55,7 @@ def CW.slack(+G: +List<+List<Nat>>, +bs: +List<SolveFast.BigClass>) -> Nat:
       0n
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{fb, ws, +len, clb}:
+        case SolveFast.BigClass{fb, ws, +len}:
           Nat.add(CW.slk(G, len, ws), CW.slack(G, rest))
 
 # `x <= x + y`.
@@ -183,8 +183,8 @@ def CW.dsum_slack(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       {==}
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, clb}:
-          +bcp : SolveFast.BigClass = SolveFast.BigClass{fb, ws, len, clb}
+        case SolveFast.BigClass{+fb, +ws, +len}:
+          +bcp : SolveFast.BigClass = SolveFast.BigClass{fb, ws, len}
           +hh : {FH.FH.big_ok_b(G, C, n_root, bcp) == True{} : Bool} =
             Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root, bcp),
               FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
@@ -301,7 +301,7 @@ def CW.Prend(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
           Unit
         case Con{bc, rest}:
           match bc:
-            case SolveFast.BigClass{fb, ws, +len, clb}:
+            case SolveFast.BigClass{fb, ws, +len}:
               match st:
                 case SolveFast.CKRes{tbl, +k}:
                   Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
@@ -441,7 +441,7 @@ def CW.head_ws(+bs: +List<SolveFast.BigClass>) -> +List<SolveFast.CWord>:
       Nil{}
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{fb, ws, len, clb}:
+        case SolveFast.BigClass{fb, ws, len}:
           ws
 
 def CW.head_len(+bs: +List<SolveFast.BigClass>) -> Nat:
@@ -450,7 +450,7 @@ def CW.head_len(+bs: +List<SolveFast.BigClass>) -> Nat:
       0n
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{fb, ws, len, clb}:
+        case SolveFast.BigClass{fb, ws, len}:
           len
 
 # A valid scan state for the head class is exactly the phase-zero predicate:
@@ -468,13 +468,13 @@ def CW.prend_of_loop(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Unit{}
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+        case SolveFast.BigClass{+fb, +ws, +len}:
           match st:
             case SolveFast.CKRes{tbl, +k}:
               +hh : {FH.FH.big_ok_b(G, C, n_root,
-                       SolveFast.BigClass{fb, ws, len, clb}) == True{} : Bool} =
+                       SolveFast.BigClass{fb, ws, len}) == True{} : Bool} =
                 Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
-                    SolveFast.BigClass{fb, ws, len, clb}),
+                    SolveFast.BigClass{fb, ws, len}),
                   FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
               +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws))
                        : Nat} =
@@ -528,11 +528,11 @@ def CW.prend_cheap(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Unit{}
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+        case SolveFast.BigClass{+fb, +ws, +len}:
           +hh : {FH.FH.big_ok_b(G, C, n_root,
-                   SolveFast.BigClass{fb, ws, len, clb}) == True{} : Bool} =
+                   SolveFast.BigClass{fb, ws, len}) == True{} : Bool} =
             Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
-                SolveFast.BigClass{fb, ws, len, clb}),
+                SolveFast.BigClass{fb, ws, len}),
               FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
           +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws)) : Nat} =
             NatProof.NatPrf.is_eq_true(len,
@@ -597,13 +597,13 @@ def CW.facts_of_state(-R: SolveFast.CKRes -> Data,
           kont(SolveFast.CKRes{tbl, k}, htb, Unit{})
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+        case SolveFast.BigClass{+fb, +ws, +len}:
           match st:
             case SolveFast.CKRes{tbl, +k}:
               +hh : {FH.FH.big_ok_b(G, C, n_root,
-                       SolveFast.BigClass{fb, ws, len, clb}) == True{} : Bool} =
+                       SolveFast.BigClass{fb, ws, len}) == True{} : Bool} =
                 Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
-                    SolveFast.BigClass{fb, ws, len, clb}),
+                    SolveFast.BigClass{fb, ws, len}),
                   FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
               +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws))
                        : Nat} =
@@ -666,7 +666,7 @@ def CW.scan_step(-R: SolveFast.CKRes -> Data,
   match big:
     case True{}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+        case SolveFast.BigClass{+fb, +ws, +len}:
           (t1, d2) = dpt
           (t2, pe) = d2
           (+e1, +e2) = pe
@@ -718,7 +718,7 @@ def CW.scan_step(-R: SolveFast.CKRes -> Data,
             SolveFast.class_k_start(ws, len, gn, t1), hloop1, kont)
     case False{}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+        case SolveFast.BigClass{+fb, +ws, +len}:
           (t1, d2) = dpt
           (t2, pe) = d2
           (+e1, +e2) = pe
@@ -918,7 +918,7 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                       Arr.DPair{hacc, htbl}
         case Con{bc, rest}:
           match bc:
-            case SolveFast.BigClass{+fb, +ws, +len, clb}:
+            case SolveFast.BigClass{+fb, +ws, +len}:
               match phase:
                 case 1n+hp:
                   match stop:
@@ -940,17 +940,17 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                           +stop2 = Nat.is_le(SolveFast.best_cost(best),
                             Nat.add(total0, gain))
                           +hh : {FH.FH.big_ok_b(G, C, n_root,
-                                   SolveFast.BigClass{fb, ws, len, clb})
+                                   SolveFast.BigClass{fb, ws, len})
                                  == True{} : Bool} =
                             Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
-                                SolveFast.BigClass{fb, ws, len, clb}),
+                                SolveFast.BigClass{fb, ws, len}),
                               FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
                           CW.scan_step(
                             st2 => FH.FH.CapWalkWit(G, C, n_root, bs0, capv, best,
                               SolveFast.cap_walk(f, bs0, bs, 0n, stop2, acc,
                                 gain, total0, best, gn, st2)),
                             G, C, n_root, big,
-                            SolveFast.BigClass{fb, ws, len, clb}, rest, gn,
+                            SolveFast.BigClass{fb, ws, len}, rest, gn,
                             hgn, hh, hok, tbl, Arr.Arr.dup(U32, tbl), htbl,
                             st2 => htbl2 => hpref2 =>
                               CW.walk(f, G, C, n_root, bs0, capv, best, gn,
@@ -987,10 +987,10 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                                    SolveFast.cwords_words(ws)))
                                == True{} : Bool}, hpref)
                           +hh0 : {FH.FH.big_ok_b(G, C, n_root,
-                                    SolveFast.BigClass{fb, ws, len, clb})
+                                    SolveFast.BigClass{fb, ws, len})
                                   == True{} : Bool} =
                             Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
-                                SolveFast.BigClass{fb, ws, len, clb}),
+                                SolveFast.BigClass{fb, ws, len}),
                               FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
                           +hlen : {len == Groups.len_words(
                                      SolveFast.cwords_words(ws)) : Nat} =
@@ -1011,21 +1011,21 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                           +hrest : {FH.FH.bigs_ok_b(G, C, n_root, rest)
                                     == True{} : Bool} =
                             Logic.Proof.and_true_r(FH.FH.big_ok_b(G, C, n_root,
-                                SolveFast.BigClass{fb, ws, len, clb}),
+                                SolveFast.BigClass{fb, ws, len}),
                               FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
                           +hacc2 : {SolveFast.rev_bigs(
-                                      SolveFast.BigClass{fb, ws, len, clb}
+                                      SolveFast.BigClass{fb, ws, len}
                                       <> acc, rest) == bs0
                                     : List<&2, SolveFast.BigClass>} =
                             Equal.trans(List<&2, SolveFast.BigClass>,
                               SolveFast.rev_bigs(
-                                SolveFast.BigClass{fb, ws, len, clb} <> acc,
+                                SolveFast.BigClass{fb, ws, len} <> acc,
                                 rest),
                               SolveFast.rev_bigs(acc,
-                                SolveFast.BigClass{fb, ws, len, clb} <> rest),
+                                SolveFast.BigClass{fb, ws, len} <> rest),
                               bs0,
                               CW.rev_bigs_shift(acc,
-                                SolveFast.BigClass{fb, ws, len, clb}, rest),
+                                SolveFast.BigClass{fb, ws, len}, rest),
                               hacc)
                           +htbl2 : CW.TblOf(G, C, n_root,
                               SolveFast.CKRes{tbl, k}) =
@@ -1037,7 +1037,7 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                                == True{} : Bool}, hpref)
                           CW.walk(f, G, C, n_root, bs0, capv, best, gn,
                             rest, 1n, stop2,
-                            SolveFast.BigClass{fb, ws, len, clb} <> acc,
+                            SolveFast.BigClass{fb, ws, len} <> acc,
                             gain2, total0, hgn, hrest, hinv2, {==}, hacc2,
                             SolveFast.CKRes{tbl, k}, htbl2, Unit{})
 

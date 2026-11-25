@@ -1415,7 +1415,7 @@ def rev_cwords_len(+xs: +List<CWord>, +acc: +List<CWord>,
       rev_cwords_len(t, cw <> acc, Nat.add(1n, len))
 
 type BigClass is Data:
-  BigClass{fb: +List<Feedback.Color>, ws: +List<CWord>, len: Nat, clb: Nat}
+  BigClass{fb: +List<Feedback.Color>, ws: +List<CWord>, len: Nat}
 
 def next_big_le(+len: Nat, +bs: +List<BigClass>) -> Bool:
   match bs:
@@ -1423,7 +1423,7 @@ def next_big_le(+len: Nat, +bs: +List<BigClass>) -> Bool:
       True{}
     case Con{h, t}:
       match h:
-        case BigClass{fb2, ws2, len2, clb2}:
+        case BigClass{fb2, ws2, len2}:
           Nat.is_le(len, len2)
 
 def insert_big(+bc: BigClass, +len: Nat, +bs: +List<BigClass>,
@@ -1444,7 +1444,7 @@ def emit_bigs(+bs: +List<BigClass>, +rem_lb: Nat, +acc: +List<Item>) -> +List<It
       acc
     case Con{bc, rest}:
       match bc:
-        case BigClass{+fb, +ws, +len, +clb}:
+        case BigClass{+fb, +ws, +len}:
           +clb2 = Nat.sub(Nat.add(len, len), 1n)
           emit_bigs(rest, Nat.add(clb2, rem_lb),
             ClassItem{fb, ws, len, rem_lb} <> (Add{fb, rem_lb} <> acc))
@@ -1558,9 +1558,9 @@ type Drain5State is Type:
 def drain5_ge2_emit(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                     +items: +List<Item>, +bigs: +List<BigClass>,
                     buckets: Array<+List<CWord>>, tbl: Array<U32>,
-                    +len: Nat, +ws: +List<CWord>, +clb: Nat) -> Drain5State:
+                    +len: Nat, +ws: +List<CWord>) -> Drain5State:
   Drain5State{buckets, tbl, rem_lb, items,
-    insert_big(BigClass{fb, ws, len, clb}, len, bigs, next_big_le(len, bigs))}
+    insert_big(BigClass{fb, ws, len}, len, bigs, next_big_le(len, bigs))}
 
 def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                    +items: +List<Item>, +bigs: +List<BigClass>,
@@ -1568,8 +1568,7 @@ def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                    rl: RevCWordsLen) -> Drain5State:
   match rl:
     case RevCWordsLen{+len, +ws}:
-      drain5_ge2_emit(fb, rem_lb, items, bigs, buckets, tbl, len, ws,
-        Nat.sub(Nat.add(len, len), 1n))
+      drain5_ge2_emit(fb, rem_lb, items, bigs, buckets, tbl, len, ws)
 
 def drain5_add_three(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                      +items: +List<Item>, +bigs: +List<BigClass>,
@@ -1619,14 +1618,14 @@ def drain5_swap(+code: U32, +rem_lb: Nat, +items: +List<Item>,
   (b2, +rws) = r
   drain5_add(code, rem_lb, items, bigs, b2, tbl, rws)
 
-def drain5_go(+gn: Nat, +touched: +List<U32>, st: Drain5State) -> Drain5State:
+def drain5_go(+touched: +List<U32>, st: Drain5State) -> Drain5State:
   match touched:
     case Nil{}:
       st
     case Con{+code, +rest}:
       match st:
         case Drain5State{buckets, tbl, +rem_lb, +items, +bigs}:
-          drain5_go(gn, rest,
+          drain5_go(rest,
             drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<CWord>, buckets, code, Nil{})))
 
@@ -1688,7 +1687,7 @@ def bigs_depth(+bs: +List<BigClass>) -> Nat:
       0n
     case Con{bc, rest}:
       match bc:
-        case BigClass{fb, ws, +len, clb}:
+        case BigClass{fb, ws, +len}:
           Nat.add(Nat.sub(Nat.add(len, len), 1n), bigs_depth(rest))
 
 # The class-independent part of the lower bound: `n` plus the class lower
@@ -1753,8 +1752,7 @@ def class_k_opt(big: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
 # class list, which is the same tree but without the skip, so the fuel only
 # costs time, never correctness. `stop` is checked on entry, so the walk ends as
 # soon as the running capacity gain reaches the best cost. The rebuilt list
-# keeps the input order and the input `clb` fields, because `emit_bigs`
-# recomputes the class bound.
+# keeps the input order.
 def cap_walk(+fuel: Nat, +bs0: +List<BigClass>, +bs: +List<BigClass>,
              +phase: Nat, stop: Bool, +acc: +List<BigClass>, +gain: Nat,
              +total0: Nat, +best: SolveRef.Best, +gn: Nat,
@@ -1790,7 +1788,7 @@ def cap_walk(+fuel: Nat, +bs0: +List<BigClass>, +bs: +List<BigClass>,
                       CapOk{rev_bigs(acc, Nil{}), tbl}
         case Con{bc, rest}:
           match bc:
-            case BigClass{+fb, +ws, +len, +clb}:
+            case BigClass{+fb, +ws, +len}:
               match phase:
                 case 1n+hp:
                   match stop:
@@ -1819,7 +1817,7 @@ def cap_walk(+fuel: Nat, +bs0: +List<BigClass>, +bs: +List<BigClass>,
                           +gain2 = Nat.add(gain, Nat.sub(clb2, dep))
                           cap_walk(f, bs0, rest, 1n,
                             Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
-                            BigClass{fb, ws, len, clb} <> acc, gain2, total0,
+                            BigClass{fb, ws, len} <> acc, gain2, total0,
                             best, gn, CKRes{tbl, k})
 
 def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
@@ -1832,10 +1830,13 @@ def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs2, rem_lb, items),
                Buf5{seen, buckets3, tbl, gen2, gn}}
 
-# The capacity walk runs only for nodes with at least 512 candidates: below
-# that the class scans cost more than the bound saves. `cap_base` is the
-# class-independent part of the lower bound and `bigs_total` adds the depth
-# bound of every big class, so `total0` is the walk's starting value.
+# The capacity walk runs only when its class scans can pay for themselves: the
+# node needs at least 512 candidates, and the guess list may be at most two and
+# a half times the node's candidate count. A class scan costs one pass over the
+# class per guess, so a long guess list next to a small node makes the walk lose.
+# `cap_base` is the class-independent part of the lower bound and `bigs_depth`
+# adds the depth bound of every big class, so `base` is the walk's starting
+# value.
 def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                 +gn: Nat, +n: Nat, +rem_lb: Nat, +items: +List<Item>,
                 +bigs: +List<BigClass>, buckets3: Array<+List<CWord>>,
@@ -1856,7 +1857,8 @@ def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
                   +best: SolveRef.Best, +n: Nat, dr: Drain5State) -> GuessRes:
   match dr:
     case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
-      finish_node(Nat.is_le(512n, n),
+      finish_node(Bool.and(Nat.is_le(512n, n),
+          Nat.is_le(Nat.add(gn, gn), Nat.mul(5n, n))),
         g, seen, gen2, gn, n, rem_lb, items, bigs, buckets3, tbl3, best)
 
 def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
@@ -1864,7 +1866,7 @@ def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
   match fs:
     case Fill5State{buckets2, tbl2, +touched}:
       finish_drain5(g, seen, gen2, gn, best, n,
-        drain5_go(gn, touched,
+        drain5_go(touched,
           Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
 
 def schedule5_lb(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,

@@ -732,20 +732,21 @@ def CP.cap_sum(+bs: +List<SolveFast.BigClass>, +gn: Nat,
       0n
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{fb, ws, +len, +clb}:
+        case SolveFast.BigClass{fb, ws, +len}:
           match st:
             case SolveFast.CKRes{tbl, k}:
-              Nat.add(Nat.max(clb, SolveFast.capbound(len, k)),
+              +dep = Nat.sub(Nat.add(len, len), 1n)
+              Nat.add(Nat.max(dep, SolveFast.capbound(len, k)),
                 CP.cap_sum(rest, gn,
                   SolveFast.class_k_opt(Nat.is_le(16n, len), ws, len, gn,
                     tbl)))
 
 # After the head's scan, the head's raised bound plus the tail.
 def CP.cap_sum_step(+rest: +List<SolveFast.BigClass>, +gn: Nat,
-    +clb: Nat, +len: Nat, st: SolveFast.CKRes) -> Nat:
+    +dep: Nat, +len: Nat, st: SolveFast.CKRes) -> Nat:
   match st:
     case SolveFast.CKRes{tbl, +k}:
-      Nat.add(Nat.max(clb, SolveFast.capbound(len, k)),
+      Nat.add(Nat.max(dep, SolveFast.capbound(len, k)),
         CP.cap_sum(rest, gn, st))
 
 # The part of the walk's remaining total at a given phase: at phase zero the
@@ -757,9 +758,10 @@ def CP.pending(+bs: +List<SolveFast.BigClass>, +gn: Nat, +phase: Nat,
       0n
     case Con{bc, rest}:
       match bc:
-        case SolveFast.BigClass{fb, ws, +len, +clb}:
+        case SolveFast.BigClass{fb, ws, +len}:
           match phase:
             case 0n:
-              CP.cap_sum_step(rest, gn, clb, len, st)
+              +dep = Nat.sub(Nat.add(len, len), 1n)
+              CP.cap_sum_step(rest, gn, dep, len, st)
             case 1n+q:
               CP.cap_sum(bs, gn, st)
