@@ -149,8 +149,39 @@ def probe_cost(+G: +List<+List<Nat>>, +cs: +List<SolveFast.CWord>,
         SolveFast.is_floor_hit(True{}, fl, SolveFast.dummy_inf(inf)),
         SolveFast.GuessRes{Nil{}, SolveFast.mk_buf_tbl(True{}, G, cwS, n)})))
 
-def solve_chunked(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
+# Deal the root guess list into even and odd positions before the chunk split.
+# The cheap guesses are spread over the dictionary, so dealing balances the two
+# chunks better than two contiguous halves; the only effect is on the order of
+# evaluation (any order returns an optimal tree).
+type Deal is Data:
+  Deal{ev: +List<+List<Nat>>, od: +List<+List<Nat>>}
+
+def deal_go(+G: +List<+List<Nat>>, even: Bool, d: Deal) -> Deal:
+  match G:
+    case Nil{}:
+      d
+    case Con{+w, +rest}:
+      match even:
+        case True{}:
+          match d:
+            case Deal{+ev, +od}:
+              deal_go(rest, False{}, Deal{Con{w, ev}, od})
+        case False{}:
+          match d:
+            case Deal{+ev, +od}:
+              deal_go(rest, True{}, Deal{ev, Con{w, od}})
+
+def deal_done(d: Deal) -> +List<+List<Nat>>:
+  match d:
+    case Deal{+ev, +od}:
+      SolveFast.rev_words(ev, SolveFast.rev_words(od, Nil{}))
+
+def deal(+G: +List<+List<Nat>>) -> +List<+List<Nat>>:
+  deal_done(deal_go(G, True{}, Deal{Nil{}, Nil{}}))
+
+def solve_chunked(+G0: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
                   +d: Nat) -> Maybe<Tree.Tree>:
+  +G : +List<+List<Nat>> = deal(G0)
   +n : Nat = Groups.len_words(cs)
   +gcount : U32 = U32.from_nat(Groups.len_words(G))
   +inf : Nat = SolveRef.inf_of(n)
