@@ -420,3 +420,20 @@ def CW.k_of(r: SolveFast.CKRes) -> Nat:
   match r:
     case SolveFast.CKRes{tbl, k}:
       k
+
+# ---------------------------------------------------------------------------
+# The walk
+# ---------------------------------------------------------------------------
+
+# `c <= capv` from the stop test, the running invariant and the bound.
+def CW.skip_le(+c: Nat, +x: Nat, +bound: Nat, +capv: Nat, +slack: Nat,
+    +hbest: {Nat.is_le(c, x) == True{} : Bool},
+    +hinv: {Nat.is_le(Nat.add(x, slack), bound) == True{} : Bool},
+    +hb: {Nat.is_le(bound, capv) == True{} : Bool}) ->
+  {Nat.is_le(c, capv) == True{} : Bool}:
+  NatProof.Nat.is_le_trans(c, bound, capv,
+    NatProof.Nat.is_le_trans(c, x, bound, hbest,
+      NatProof.Nat.is_le_trans(x, Nat.add(x, slack), bound,
+        CW.le_add_r(x, slack), hinv)),
+    hb)
+
