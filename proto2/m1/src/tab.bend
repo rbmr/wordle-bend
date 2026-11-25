@@ -65,19 +65,33 @@ def resp(+q01: U32, +q02: U32, +q03: U32, +q04: U32, +q12: U32, +q13: U32,
                            U32.add(A.eq01(fld(sp, 15n), g4),
                                    U32.add(A.eq01(fld(sp, 10n), g4),
                                            A.eq01(fld(sp, 5n), g4)))))
-  +gc1 = U32.add(e1, U32.mul(e0, q01))
-  +gc2 = U32.add(e2, U32.add(U32.mul(e0, q02), U32.mul(e1, q12)))
-  +gc3 = U32.add(e3, U32.add(U32.add(U32.mul(e0, q03), U32.mul(e1, q13)),
-                            U32.mul(e2, q23)))
-  +gc4 = U32.add(e4, U32.add(U32.add(U32.mul(e0, q04), U32.mul(e1, q14)),
-                            U32.add(U32.mul(e2, q24), U32.mul(e3, q34))))
+  +gc0 = U32.add(e0, U32.add(U32.mul(e1, q01),
+                            U32.add(U32.mul(e2, q02),
+                                    U32.add(U32.mul(e3, q03),
+                                            U32.mul(e4, q04)))))
+  +gc1 = U32.add(e1, U32.add(U32.mul(e0, q01),
+                            U32.add(U32.mul(e2, q12),
+                                    U32.add(U32.mul(e3, q13),
+                                            U32.mul(e4, q14)))))
+  +gc2 = U32.add(e2, U32.add(U32.mul(e0, q02),
+                            U32.add(U32.mul(e1, q12),
+                                    U32.add(U32.mul(e3, q23),
+                                            U32.mul(e4, q24)))))
+  +gc3 = U32.add(e3, U32.add(U32.mul(e0, q03),
+                            U32.add(U32.mul(e1, q13),
+                                    U32.add(U32.mul(e2, q23),
+                                            U32.mul(e4, q34)))))
+  +gc4 = U32.add(e4, U32.add(U32.mul(e0, q04),
+                            U32.add(U32.mul(e1, q14),
+                                    U32.add(U32.mul(e2, q24),
+                                            U32.mul(e3, q34)))))
   +b1 = U32.mul(n0, q01)
   +b2 = U32.add(U32.mul(n0, q02), U32.mul(n1, q12))
   +b3 = U32.add(U32.add(U32.mul(n0, q03), U32.mul(n1, q13)),
                 U32.mul(n2, q23))
   +b4 = U32.add(U32.add(U32.mul(n0, q04), U32.mul(n1, q14)),
                 U32.add(U32.mul(n2, q24), U32.mul(n3, q34)))
-  +y0 = U32.mul(n0, gt01(U32.sub(c0, e0), 0))
+  +y0 = U32.mul(n0, gt01(U32.sub(c0, gc0), 0))
   +y1 = U32.mul(n1, gt01(U32.sub(c1, gc1), b1))
   +y2 = U32.mul(n2, gt01(U32.sub(c2, gc2), b2))
   +y3 = U32.mul(n3, gt01(U32.sub(c3, gc3), b3))
