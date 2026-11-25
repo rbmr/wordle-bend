@@ -1692,6 +1692,32 @@ def bigs_total(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
         case BigClass{fb, ws, len, +clb}:
           bigs_total(rest, Nat.add(clb, acc))
 
+# The class-independent part of the lower bound: `n` plus the class lower
+# bounds of the non-big items. A solved class of three candidates contributes
+# its depth bound `5`, not its exact tree cost (five or six), so this stays a
+# function of the class sizes and keeps the capacity walk's running total
+# comparable with the class list.
+def cap_base(+n: Nat, +items: +List<Item>, +acc: Nat) -> Nat:
+  match items:
+    case Nil{}:
+      acc
+    case Con{it, rest}:
+      match it:
+        case Begin{g}:
+          cap_base(n, rest, acc)
+        case ClassItem{fb, cws, +wlen, tlb}:
+          cap_base(n, rest, Nat.add(Nat.sub(Nat.add(wlen, wlen), 1n), acc))
+        case OneItem{fb, w}:
+          cap_base(n, rest, Nat.add(1n, acc))
+        case TwoItem{fb, w1, w2}:
+          cap_base(n, rest, Nat.add(3n, acc))
+        case DoneItem{fb, tree, cost}:
+          cap_base(n, rest, Nat.add(5n, acc))
+        case Add{fb, tlb}:
+          cap_base(n, rest, acc)
+        case End{}:
+          Nat.add(n, acc)
+
 type CapRes is Type:
   CapSkip{tbl: Array<U32>}
   CapOk{bigs: +List<BigClass>, tbl: Array<U32>}
@@ -1795,8 +1821,9 @@ def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                Buf5{seen, buckets3, tbl, gen2, gn}}
 
 # The capacity walk runs only for nodes with at least 512 candidates: below
-# that the class scans cost more than the bound saves. `bigs_total` is the
-# lower bound the walk can only raise, so `total0` is its starting value.
+# that the class scans cost more than the bound saves. `cap_base` is the
+# class-independent part of the lower bound and `bigs_total` adds the depth
+# bound of every big class, so `total0` is the walk's starting value.
 def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                 +gn: Nat, +rem_lb: Nat, +items: +List<Item>,
                 +bigs: +List<BigClass>, buckets3: Array<+List<CWord>>,
@@ -1806,7 +1833,8 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
-      finish_cap(cap_walk(bigs, 1n, False{}, Nil{}, 0n, bigs_total(bigs, rem_lb),
+      finish_cap(cap_walk(bigs, 1n, False{}, Nil{}, 0n,
+                   bigs_total(bigs, cap_base(n, items, 0n)),
                    best, gn, ck_cheap(0n, tbl3)),
         g, seen, gen2, gn, rem_lb, items, buckets3)
 

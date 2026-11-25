@@ -54,6 +54,7 @@ import ./proofs/lb_class_cap.bend as LBProof9
 import ./proofs/class_k.bend as CKProof
 import ./proofs/class_sub.bend as CSProof
 import ./proofs/class_wid.bend as WKProof
+import ./proofs/cap_lb.bend as CPProof
 import ./src/solve_k.bend as SolveK
 import ./proofs/par_chunk.bend as ParChunk
 

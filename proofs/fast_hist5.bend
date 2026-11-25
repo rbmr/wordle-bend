@@ -36,6 +36,7 @@ import ./fast_fb5.bend as FF5
 import ./fast_perm.bend as FP
 import ./fast_tbl.bend as FT
 import ./fast_three.bend as FT3
+import ./lb_capacity.bend as CapProof
 
 # ---------------------------------------------------------------------------
 # Small Nat and Bool helpers
@@ -3229,6 +3230,43 @@ def FH.body_lb(+nodup: Bool, +n: Nat, +body: +List<SolveFast.Item>) -> Nat:
           FH.body_lb(nodup, n, rest)
         case SolveFast.End{}:
           n
+
+# The number of feedback groups of `g` on the class `ws`. It is the same count
+# the class scan produces (`CK.count` in `proofs/class_k.bend`).
+def FH.cap_count(+g: +List<Nat>, +ws: +List<+List<Nat>>) -> Nat:
+  FH.fgroups_count(SolveFast.fgroups_build_fast(g, ws, Nil{}))
+
+# The largest count over the first `i` guesses of the guess list.
+def FH.prefmax(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>, +i: Nat) -> Nat:
+  match i:
+    case 0n:
+      0n
+    case 1n+p:
+      Nat.max(FH.cap_count(FT.FT.nth_word(G, p), ws), FH.prefmax(G, ws, p))
+
+# The capacity lower bound of one class: the depth bound, or the capacity bound
+# at the class's branching factor over the whole guess list, whichever is
+# larger.
+def FH.cap_class(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>) -> Nat:
+  Nat.max(SolveFast.class_lb(ws),
+    CapProof.LB.capbound(Groups.len_words(ws),
+      FH.prefmax(G, ws, Groups.len_words(G))))
+
+# The class bounds of a class list, added up.
+def FH.cap_fold(+G: +List<+List<Nat>>, +groups: +List<Groups.Group>) -> Nat:
+  match groups:
+    case Nil{}:
+      0n
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          Nat.add(FH.cap_class(G, ws), FH.cap_fold(G, rest))
+
+# The capacity lower bound of a guess: one per candidate plus one class bound
+# per feedback class.
+def FH.cap_lb(+G: +List<+List<Nat>>, +n: Nat,
+              +groups: +List<Groups.Group>) -> Nat:
+  Nat.add(n, FH.cap_fold(G, groups))
 
 def FH.done_ws_ok_b(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
     +tree: Tree.Tree, +cost: Nat) -> Bool:
