@@ -636,7 +636,8 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                                    U32.inc(bcur), t, cv}, stk}
           a3 = S.hset(a2, lbk, k2, hsh1(U32.inc(dep), c, gg),
                       hsh2(U32.inc(dep), c, gg), c, gg)
-          step(f, c, gg, 0, 0, lbk, k2, cut3, pmk, U32.inc(dep), cut3, 0, 0, 0, 0,
+          +pk2 = U32.max(U32.min(k2, pmk), 2)
+          step(f, c, gg, 0, 0, lbk, k2, cut3, pk2, U32.inc(dep), cut3, 0, 0, 0, 0,
                4294967295, 0, 0, 0, 0, 0, 0, 0, 0, cut3, gen, ret, nst, ngs,
                nht, npr, stk2, Array.get(U32, a3, 0))
         # ---------------------------------------------------- deliver ----
