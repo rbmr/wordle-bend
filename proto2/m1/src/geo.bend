@@ -98,8 +98,11 @@ def off_p1t(+c: U32, +g: U32) -> U32:
 def off_p2t(+c: U32, +g: U32) -> U32:
   U32.add(off_p1t(c, g), U32.mul(depths(), U32.mul(c, 3)))
 
+def off_sset(+c: U32, +g: U32) -> U32:
+  U32.add(off_p2t(c, g), U32.mul(depths(), g))
+
 def off_gset(+c: U32, +g: U32) -> U32:
-  U32.add(off_p2t(c, g), U32.mul(depths(), U32.mul(g, 3)))
+  U32.add(off_sset(c, g), U32.mul(depths(), g))
 
 def gset_size(+c: U32) -> U32:
   U32.mul(8, c)

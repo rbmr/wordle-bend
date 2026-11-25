@@ -94,11 +94,12 @@ def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32) -> IO(Unit):
                                H.cap_fill(U32.max(mx, 2), c, gg, a))
     a2h : Array<U32> = S.hset(a2, sb, c, E.hsh1(0, c, gg), E.hsh2(0, c, gg),
                               c, gg)
-    a2b : Array<U32> = E.step(Nat.add(Nat.mul(U32.to_nat(c), 8192n),
-                                      Nat.mul(U32.to_nat(gg), 4096n)),
-                              0, c, gg, sb, c, beta2, U32.max(mx, 2), 0, beta2,
-                              0, 0, 0, 0, 0, 0, U32.mul(gg, 1024), 0, 0, 0, 0,
-                              0, Nil{}, Array.get(U32, a2h, 0))
+    a2b : Array<U32> = E.step(Nat.add(Nat.mul(U32.to_nat(c), 65536n),
+                                      Nat.mul(U32.to_nat(gg), 16384n)),
+                              c, gg, 0, 0, sb, c, beta2, U32.max(mx, 2), 0,
+                              beta2, 0, 0, 0, 0, 4294967295, 0, 0, 0, 0, 0, 0,
+                              0, 0, beta2, U32.mul(gg, 1024), 0, 0, 0, 0, 0,
+                              Nil{}, Array.get(U32, a2h, 0))
     +cm : U32 = G.off_qgen(c, gg)
     a3 : Array<U32> <- prn(Array.get(U32, a2b, U32.add(cm, 609)), "cost")
     a3b : Array<U32> <- prn(Array.get(U32, a3, U32.add(cm, 610)), "states")
