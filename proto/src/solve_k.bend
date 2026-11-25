@@ -53,9 +53,9 @@ def depth_of(+k: Nat) -> Nat:
 def chunk_best(+fuel: Nat, +seg: +List<+List<Nat>>, +off: U32,
                +G: +List<+List<Nat>>, +glist_G: SolveFast.GList,
                +cs: +List<SolveFast.CWord>, +S: +List<+List<Nat>>, +n: Nat,
-               +nodup: Bool, +floor: Nat, +inf: Nat,
+               +nodup: Bool, +floor: Nat, +inf: Nat, +bnd: Nat,
                buf: SolveFast.Buf5) -> SolveRef.Best:
-  +b0 = SolveFast.dummy_inf(inf)
+  +b0 = SolveFast.dummy_inf(bnd)
   SolveFast.step_res_best(
     SolveFast.step(fuel, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{},
       glist_G, cs, n, nodup, floor, inf, Nil{}, Nil{}, 0n, b0,
@@ -92,10 +92,10 @@ def half(+n: Nat) -> Nat:
 def par_chunks(+d: Nat, +seg: +List<+List<Nat>>, +off: U32,
                +fuel: Nat, +G: +List<+List<Nat>>, +glist_G: SolveFast.GList,
                +cs: +List<SolveFast.CWord>, +S: +List<+List<Nat>>, +n: Nat,
-               +nodup: Bool, +floor: Nat, +inf: Nat) -> +List<SolveRef.Best>:
+               +nodup: Bool, +floor: Nat, +inf: Nat, +bnd: Nat) -> +List<SolveRef.Best>:
   match d:
     case 0n:
-      chunk_best(fuel, seg, off, G, glist_G, cs, S, n, nodup, floor, inf,
+      chunk_best(fuel, seg, off, G, glist_G, cs, S, n, nodup, floor, inf, bnd,
         SolveFast.mk_buf_tbl(nodup, G, S, n)) <> Nil{}
     case 1n+p:
       match seg:
@@ -105,7 +105,7 @@ def par_chunks(+d: Nat, +seg: +List<+List<Nat>>, +off: U32,
           match rest:
             case Nil{}:
               chunk_best(fuel, seg, off, G, glist_G, cs, S, n, nodup, floor,
-                inf, SolveFast.mk_buf_tbl(nodup, G, S, n)) <> Nil{}
+                inf, bnd, SolveFast.mk_buf_tbl(nodup, G, S, n)) <> Nil{}
             case Con{w2, rest2}:
               +len : Nat = Groups.len_words(seg)
               +mid : Nat = half(len)
@@ -113,8 +113,8 @@ def par_chunks(+d: Nat, +seg: +List<+List<Nat>>, +off: U32,
               +right : +List<+List<Nat>> = List.drop(&2, +List<Nat>, seg, mid)
               +off2 : U32 = U32.add(off, U32.from_nat(mid))
               ra rb = par_chunks(p, left, off, fuel, G, glist_G, cs, S, n,
-                nodup, floor, inf) par_chunks(p, right, off2, fuel, G, glist_G,
-                cs, S, n, nodup, floor, inf)
+                nodup, floor, inf, bnd) par_chunks(p, right, off2, fuel, G, glist_G,
+                cs, S, n, nodup, floor, inf, bnd)
               List.append(&2, SolveRef.Best, ra, rb)
 
 # Fold the chunk results in guess order: a strictly cheaper result replaces the
@@ -132,18 +132,36 @@ def fold_results(+rs: +List<SolveRef.Best>, best: SolveRef.Best) -> SolveRef.Bes
 # The chunked root for a candidate list of at least three words whose words are
 # all guesses. The table, the candidate wrappers and the floor are the ones the
 # sequential root uses; only the root guess list is split.
+# The exact cost of the tree the same search finds when only candidate guesses
+# are allowed. It is a valid complete tree there, so its cost is an initial
+# upper bound for the full search too (Rust `greedy_solve`, with the probe
+# standing in for the greedy policy). Cheap: the guess list is the candidates.
+def probe_cost(+G: +List<+List<Nat>>, +cs: +List<SolveFast.CWord>,
+               +n: Nat, +inf: Nat) -> Nat:
+  +cwS = SolveFast.cwords_words(cs)
+  +gC = SolveFast.glist_of_cwords(cs, SolveFast.GEnd{})
+  +fl = SolveFast.init_floor(n)
+  SolveFast.best_cost(
+    SolveFast.step_res_best(
+      SolveFast.step(n, gC, 0n, Nil{}, gC, cs, n, True{}, fl, inf,
+        Nil{}, Nil{}, 0n, SolveFast.dummy_inf(inf),
+        SolveFast.dummy_step_zero(), False{},
+        SolveFast.is_floor_hit(True{}, fl, SolveFast.dummy_inf(inf)),
+        SolveFast.GuessRes{Nil{}, SolveFast.mk_buf_tbl(True{}, G, cwS, n)})))
+
 def solve_chunked(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
                   +d: Nat) -> Maybe<Tree.Tree>:
   +n : Nat = Groups.len_words(cs)
   +gcount : U32 = U32.from_nat(Groups.len_words(G))
   +inf : Nat = SolveRef.inf_of(n)
   +nd : Bool = SolveFast.no_dup_fast(cs)
-  +b0 : SolveRef.Best = SolveFast.dummy_inf(inf)
   +fl : Nat = SolveFast.init_floor(n)
   +gG : SolveFast.GList = SolveFast.glist_of_guesses(G, 0, 1)
   +cwS : +List<SolveFast.CWord> = SolveFast.build_cwords(cs, G, 0, gcount)
+  +bnd : Nat = probe_cost(G, cwS, n, inf)
+  +b0 : SolveRef.Best = SolveFast.dummy_inf(bnd)
   +rs : +List<SolveRef.Best> =
-    par_chunks(d, G, 0, n, G, gG, cwS, cs, n, nd, fl, inf)
+    par_chunks(d, G, 0, n, G, gG, cwS, cs, n, nd, fl, inf, bnd)
   SolveRef.best_to_maybe(inf, fold_results(rs, b0))
 
 # A candidate list too short to have classes keeps the direct path: it has no
