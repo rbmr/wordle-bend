@@ -1791,7 +1791,9 @@ def cap_walk(+bs: +List<BigClass>, +phase: Nat, stop: Bool,
                 case False{}:
                   match st:
                     case CKRes{tbl, k}:
-                      cap_walk(bs, hp, False{}, acc, gain, total0, best, gn,
+                      cap_walk(bs, hp,
+                        Nat.is_le(best_cost(best), Nat.add(total0, gain)),
+                        acc, gain, total0, best, gn,
                         class_k_opt(Nat.is_le(16n, len), ws, len, gn, tbl))
             case 0n:
               match stop:
@@ -1833,9 +1835,10 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
       GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
-      finish_cap(cap_walk(bigs, 1n, False{}, Nil{}, 0n,
-                   Nat.add(bigs_depth(bigs), cap_base(n, items, 0n)),
-                   best, gn, ck_cheap(0n, tbl3)),
+      +base = Nat.add(bigs_depth(bigs), cap_base(n, items, 0n))
+      finish_cap(cap_walk(bigs, 1n,
+                   Nat.is_le(best_cost(best), base),
+                   Nil{}, 0n, base, best, gn, ck_cheap(0n, tbl3)),
         g, seen, gen2, gn, rem_lb, items, buckets3)
 
 def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
