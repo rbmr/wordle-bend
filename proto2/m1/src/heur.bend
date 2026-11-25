@@ -87,8 +87,10 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
           +coll2 = U32.add(coll, A.nz(cnt))
           +m2 = U32.inc(m)
           +gend = A.eq01(m2, n)
-          +a0b = U32.add(a0, U32.mul(U32.sub(1, a0), A.eq01(coll2, 0)))
-          +a1b = U32.add(a1, U32.mul(U32.sub(1, a1), A.eq01(coll2, 1)))
+          +a0b = U32.add(a0, U32.mul(gend, U32.mul(U32.sub(1, a0),
+                                                   A.eq01(coll2, 0))))
+          +a1b = U32.add(a1, U32.mul(gend, U32.mul(U32.sub(1, a1),
+                                                   A.eq01(coll2, 1))))
           +i2 = U32.add(i, gend)
           +stop = U32.mul(gend, U32.max(a0b, A.eq01(i2, n)))
           +nxt = A.sel(stop, 0, A.sel(gend, U32.add(sb, i2),
