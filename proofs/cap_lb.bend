@@ -707,3 +707,49 @@ def CP.capbound_src_self(+n: Nat) ->
       CapProof.LB.capbound(n, n), Nat.sub(Nat.add(n, n), 1n),
       CP.capbound_self(n),
       NatProof.Nat.is_le_refl(CapProof.LB.capbound(n, n))))
+
+# ---------------------------------------------------------------------------
+# The never-stopping walk total
+# ---------------------------------------------------------------------------
+
+# `cap_sum(bs, gn, st)` is the sum of the raised class bounds the capacity walk
+# would reach if it never stopped, from state `(bs, st)` where `st` is the state
+# before the head has been scanned.
+def CP.cap_sum(+bs: +List<SolveFast.BigClass>, +gn: Nat,
+    st: SolveFast.CKRes) -> Nat:
+  match bs:
+    case Nil{}:
+      0n
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{fb, ws, +len, +clb}:
+          match st:
+            case SolveFast.CKRes{tbl, k}:
+              Nat.add(Nat.max(clb, SolveFast.capbound(len, k)),
+                CP.cap_sum(rest, gn,
+                  SolveFast.class_k_opt(Nat.is_le(16n, len), ws, len, gn,
+                    tbl)))
+
+# After the head's scan, the head's raised bound plus the tail.
+def CP.cap_sum_step(+rest: +List<SolveFast.BigClass>, +gn: Nat,
+    +clb: Nat, +len: Nat, st: SolveFast.CKRes) -> Nat:
+  match st:
+    case SolveFast.CKRes{tbl, +k}:
+      Nat.add(Nat.max(clb, SolveFast.capbound(len, k)),
+        CP.cap_sum(rest, gn, st))
+
+# The part of the walk's remaining total at a given phase: at phase zero the
+# head has been scanned (its `k` is in `st`), at a positive phase it has not.
+def CP.pending(+bs: +List<SolveFast.BigClass>, +gn: Nat, +phase: Nat,
+    st: SolveFast.CKRes) -> Nat:
+  match bs:
+    case Nil{}:
+      0n
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{fb, ws, +len, +clb}:
+          match phase:
+            case 0n:
+              CP.cap_sum_step(rest, gn, clb, len, st)
+            case 1n+q:
+              CP.cap_sum(bs, gn, st)
