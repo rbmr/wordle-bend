@@ -26,6 +26,7 @@ import ./fast_tbl.bend as FT
 import ./class_k.bend as CK
 import ./cap_lb.bend as CP
 import ./lb_capacity.bend as CapProof
+import ./lb_capacity_sound.bend as LBS
 import ./fast_cutoff.bend as FC
 import ./nat.bend as NatProof
 import ./array.bend as Arr
@@ -289,16 +290,16 @@ def CW.dsum_slack(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
 # phase zero it has: the state's table is valid and its raised bound is within
 # the class bound.
 def CW.Prend(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
-    +bs: +List<SolveFast.BigClass>, +phase: Nat,
+    +phase: Nat, +bs: +List<SolveFast.BigClass>,
     st: SolveFast.CKRes) -> Data:
-  match bs:
-    case Nil{}:
-      Unit
-    case Con{bc, rest}:
-      match bc:
-        case SolveFast.BigClass{fb, ws, +len, clb}:
-          match phase:
-            case 0n:
+  match phase:
+    case 0n:
+      match bs:
+        case Nil{}:
+          Unit
+        case Con{bc, rest}:
+          match bc:
+            case SolveFast.BigClass{fb, ws, +len, clb}:
               match st:
                 case SolveFast.CKRes{tbl, +k}:
                   Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
@@ -306,8 +307,8 @@ def CW.Prend(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
                         SolveFast.capbound(len, k)),
                        FH.FH.cap_class(G, SolveFast.cwords_words(ws)))
                      == True{} : Bool}>
-            case 1n+p:
-              Unit
+    case 1n+p:
+      Unit
 
 # The state's table is valid.
 def CW.TblOf(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
@@ -437,3 +438,613 @@ def CW.skip_le(+c: Nat, +x: Nat, +bound: Nat, +capv: Nat, +slack: Nat,
         CW.le_add_r(x, slack), hinv)),
     hb)
 
+
+# ---------------------------------------------------------------------------
+# The head of a class list
+# ---------------------------------------------------------------------------
+
+def CW.head_ws(+bs: +List<SolveFast.BigClass>) -> +List<SolveFast.CWord>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{fb, ws, len, clb}:
+          ws
+
+def CW.head_len(+bs: +List<SolveFast.BigClass>) -> Nat:
+  match bs:
+    case Nil{}:
+      0n
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{fb, ws, len, clb}:
+          len
+
+# A valid scan state for the head class is exactly the phase-zero predicate:
+# the table is valid and the scanned `k` covers the class bound.
+def CW.prend_of_loop(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +bs: +List<SolveFast.BigClass>, +gn: Nat,
+    +hgn: {gn == Groups.len_words(G) : Nat},
+    st: SolveFast.CKRes,
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bs) == True{} : Bool},
+    +hloop: CK.CK.LoopOk(G, C, n_root,
+      SolveFast.cwords_words(CW.head_ws(bs)), gn, st)) ->
+  CW.Prend(G, C, n_root, 0n, bs, st):
+  match bs:
+    case Nil{}:
+      Unit{}
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+          match st:
+            case SolveFast.CKRes{tbl, +k}:
+              +hh : {FH.FH.big_ok_b(G, C, n_root,
+                       SolveFast.BigClass{fb, ws, len, clb}) == True{} : Bool} =
+                Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
+                    SolveFast.BigClass{fb, ws, len, clb}),
+                  FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
+              +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws))
+                       : Nat} =
+                NatProof.NatPrf.is_eq_true(len,
+                  Groups.len_words(SolveFast.cwords_words(ws)),
+                  Logic.Proof.and_true_r(FT.FT.cwords_ok_b(G, C, n_root, ws),
+                    Nat.is_eq(len,
+                      Groups.len_words(SolveFast.cwords_words(ws))), hh))
+              +htbl : FT.FT.TblOk(G, C, n_root, tbl) =
+                Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl),
+                  {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+                   == True{} : Bool}, hloop)
+              +hck : {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+                       k) == True{} : Bool} =
+                Arr.Arr.dpair_r(FT.FT.TblOk(G, C, n_root, tbl),
+                  {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+                   == True{} : Bool}, hloop)
+              +epf : {FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                         Groups.len_words(G))
+                      == CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn) : Nat} =
+                Equal.trans(Nat,
+                  FH.FH.prefmax(G, SolveFast.cwords_words(ws), Groups.len_words(G)),
+                  FH.FH.prefmax(G, SolveFast.cwords_words(ws), gn),
+                  CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+                  Equal.cong(Nat, Nat,
+                    x => FH.FH.prefmax(G, SolveFast.cwords_words(ws), x),
+                    Groups.len_words(G), gn,
+                    Equal.sym(Nat, gn, Groups.len_words(G), hgn)),
+                  CP.CP.prefmax_eq(G, SolveFast.cwords_words(ws), gn))
+              +hk : {Nat.is_le(FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                         Groups.len_words(G)), k) == True{} : Bool} =
+                NatProof.Nat.is_le_eq_l(k,
+                  CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+                  FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                    Groups.len_words(G)),
+                  Equal.sym(Nat,
+                    FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                      Groups.len_words(G)),
+                    CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), epf), hck)
+              Arr.DPair{htbl, CW.step_le(G, len, ws, k, hlen, hk)}
+
+# The cheap scan (`k = len`) satisfies the phase-zero predicate.
+def CW.prend_cheap(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +bs: +List<SolveFast.BigClass>,
+    -tbl: Array<U32>,
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bs) == True{} : Bool},
+    +htbl: FT.FT.TblOk(G, C, n_root, tbl)) ->
+  CW.Prend(G, C, n_root, 0n, bs, SolveFast.ck_cheap(CW.head_len(bs), tbl)):
+  match bs:
+    case Nil{}:
+      Unit{}
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+          +hh : {FH.FH.big_ok_b(G, C, n_root,
+                   SolveFast.BigClass{fb, ws, len, clb}) == True{} : Bool} =
+            Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
+                SolveFast.BigClass{fb, ws, len, clb}),
+              FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
+          +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws)) : Nat} =
+            NatProof.NatPrf.is_eq_true(len,
+              Groups.len_words(SolveFast.cwords_words(ws)),
+              Logic.Proof.and_true_r(FT.FT.cwords_ok_b(G, C, n_root, ws),
+                Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))),
+                hh))
+          Arr.DPair{htbl, CW.step_le_cheap(G, len, ws, hlen)}
+
+# The valid table of a scan state, from the scan's specification.
+def CW.tbl_of_loop(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +ws: +List<+List<Nat>>, +gn: Nat, st: SolveFast.CKRes,
+    +hloop: CK.CK.LoopOk(G, C, n_root, ws, gn, st)) ->
+  CW.TblOf(G, C, n_root, st):
+  match st:
+    case SolveFast.CKRes{tbl, k}:
+      Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl),
+        {Nat.is_le(CK.CK.prefmax(G, ws, gn), k) == True{} : Bool}, hloop)
+
+# Transport the phase-zero predicate and the table predicate along an equality
+# of states.
+def CW.prend_transport(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +bs: +List<SolveFast.BigClass>, +phase: Nat,
+    -st1: SolveFast.CKRes, -st2: SolveFast.CKRes,
+    +e: {st2 == st1 : SolveFast.CKRes},
+    +h: CW.Prend(G, C, n_root, phase, bs, st1)) ->
+  CW.Prend(G, C, n_root, phase, bs, st2):
+  %Equal.sym(SolveFast.CKRes, st2, st1, e) : CW.Prend(G, C, n_root, phase, bs, _)
+  h
+
+def CW.tbl_transport(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, -st1: SolveFast.CKRes, -st2: SolveFast.CKRes,
+    +e: {st2 == st1 : SolveFast.CKRes},
+    +h: CW.TblOf(G, C, n_root, st1)) -> CW.TblOf(G, C, n_root, st2):
+  %Equal.sym(SolveFast.CKRes, st2, st1, e) : CW.TblOf(G, C, n_root, _)
+  h
+
+# One scan step with the table duplicated: the fact is built on the first
+# copy, the walk's next state on the second. The continuation receives the
+
+# Build the phase-zero predicate and the table predicate about an already
+# matched scan state, then hand the state to a continuation (so that the state
+# is consumed exactly once).
+def CW.facts_of_state(-R: SolveFast.CKRes -> Data,
+    +G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +bs: +List<SolveFast.BigClass>, +gn: Nat,
+    +hgn: {gn == Groups.len_words(G) : Nat},
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bs) == True{} : Bool},
+    st: SolveFast.CKRes,
+    +hloop: CK.CK.LoopOk(G, C, n_root,
+      SolveFast.cwords_words(CW.head_ws(bs)), gn, st),
+    kont: @s: SolveFast.CKRes -> CW.TblOf(G, C, n_root, s) ->
+          CW.Prend(G, C, n_root, 0n, bs, s) -> R(s)) -> R(st):
+  match bs:
+    case Nil{}:
+      match st:
+        case SolveFast.CKRes{tbl, +k}:
+          +htb : FT.FT.TblOk(G, C, n_root, tbl) =
+            Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl),
+              {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(Nil{}), gn), k)
+               == True{} : Bool}, hloop)
+          kont(SolveFast.CKRes{tbl, k}, htb, Unit{})
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+          match st:
+            case SolveFast.CKRes{tbl, +k}:
+              +hh : {FH.FH.big_ok_b(G, C, n_root,
+                       SolveFast.BigClass{fb, ws, len, clb}) == True{} : Bool} =
+                Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
+                    SolveFast.BigClass{fb, ws, len, clb}),
+                  FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
+              +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws))
+                       : Nat} =
+                NatProof.NatPrf.is_eq_true(len,
+                  Groups.len_words(SolveFast.cwords_words(ws)),
+                  Logic.Proof.and_true_r(FT.FT.cwords_ok_b(G, C, n_root, ws),
+                    Nat.is_eq(len,
+                      Groups.len_words(SolveFast.cwords_words(ws))), hh))
+              +htbl : FT.FT.TblOk(G, C, n_root, tbl) =
+                Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl),
+                  {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+                   == True{} : Bool}, hloop)
+              +hck : {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+                       k) == True{} : Bool} =
+                Arr.Arr.dpair_r(FT.FT.TblOk(G, C, n_root, tbl),
+                  {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+                   == True{} : Bool}, hloop)
+              +epf : {FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                         Groups.len_words(G))
+                      == CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn) : Nat} =
+                Equal.trans(Nat,
+                  FH.FH.prefmax(G, SolveFast.cwords_words(ws), Groups.len_words(G)),
+                  FH.FH.prefmax(G, SolveFast.cwords_words(ws), gn),
+                  CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+                  Equal.cong(Nat, Nat,
+                    x => FH.FH.prefmax(G, SolveFast.cwords_words(ws), x),
+                    Groups.len_words(G), gn,
+                    Equal.sym(Nat, gn, Groups.len_words(G), hgn)),
+                  CP.CP.prefmax_eq(G, SolveFast.cwords_words(ws), gn))
+              +hk : {Nat.is_le(FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                         Groups.len_words(G)), k) == True{} : Bool} =
+                NatProof.Nat.is_le_eq_l(k,
+                  CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+                  FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                    Groups.len_words(G)),
+                  Equal.sym(Nat,
+                    FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                      Groups.len_words(G)),
+                    CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), epf), hck)
+              kont(SolveFast.CKRes{tbl, k}, htbl,
+                Arr.DPair{htbl, CW.step_le(G, len, ws, k, hlen, hk)})
+
+# One scan step with the table duplicated: the second copy is the scan's input,
+# the first is the walk's next state. No proof state mentions the scratch array.
+def CW.scan_step(-R: SolveFast.CKRes -> Data,
+    +G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    big: Bool, +bc: SolveFast.BigClass, +rest: +List<SolveFast.BigClass>,
+    +gn: Nat,
+    +hgn: {gn == Groups.len_words(G) : Nat},
+    +hh: {FH.FH.big_ok_b(G, C, n_root, bc) == True{} : Bool},
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, Con{bc, rest}) == True{} : Bool},
+    -tbl: Array<U32>,
+    dpt: &t1: Array<U32> -> &t2: Array<U32> ->
+         {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>},
+    +htbl: FT.FT.TblOk(G, C, n_root, tbl),
+    kont: @st: SolveFast.CKRes -> CW.TblOf(G, C, n_root, st) ->
+          CW.Prend(G, C, n_root, 0n, Con{bc, rest}, st) -> R(st)) ->
+  R(SolveFast.class_k_opt(big, CW.head_ws(Con{bc, rest}),
+      CW.head_len(Con{bc, rest}), gn, tbl)):
+  match big:
+    case True{}:
+      match bc:
+        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+          (t1, d2) = dpt
+          (t2, pe) = d2
+          (+e1, +e2) = pe
+          +et2 : {t2 == tbl : Array<U32>} =
+            Equal.trans(Array<U32>, t2, t1, tbl, e2, e1)
+          +et1 : {t1 == t2 : Array<U32>} =
+            Equal.sym(Array<U32>, t2, t1, e2)
+          +htbl2 : FT.FT.TblOk(G, C, n_root, t2) =
+            FT.FT.tbl_ok_transport(G, C, n_root, tbl, t2,
+              Equal.sym(Array<U32>, t2, tbl, et2), htbl)
+          +hlen : {len == Groups.len_words(SolveFast.cwords_words(ws)) : Nat} =
+            NatProof.NatPrf.is_eq_true(len,
+              Groups.len_words(SolveFast.cwords_words(ws)),
+              Logic.Proof.and_true_r(FT.FT.cwords_ok_b(G, C, n_root, ws),
+                Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))), hh))
+          +hcwo : {FT.FT.cwords_ok_b(G, C, n_root, ws) == True{} : Bool} =
+            Logic.Proof.and_true_l(FT.FT.cwords_ok_b(G, C, n_root, ws),
+              Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))), hh)
+          +hloop2 : CK.CK.LoopOk(G, C, n_root, SolveFast.cwords_words(ws), gn,
+              SolveFast.class_k_start(ws, len, gn, t2)) =
+            CK.CK.class_k_spec(G, C, SolveFast.cwords_words(ws), n_root, ws,
+              len, gn, t2, {==}, hcwo, hlen, hgn, htbl2,
+              Arr.Arr.dup(U32, t2))
+          +e_s : {SolveFast.class_k_start(ws, len, gn, t1)
+                  == SolveFast.class_k_start(ws, len, gn, t2)
+                  : SolveFast.CKRes} =
+            Equal.cong(Array<U32>, SolveFast.CKRes,
+              x => SolveFast.class_k_start(ws, len, gn, x), t1, t2, et1)
+          +hloop1 : CK.CK.LoopOk(G, C, n_root, SolveFast.cwords_words(ws), gn,
+              SolveFast.class_k_start(ws, len, gn, t1)) =
+            CW.loop_ok_transport(G, C, n_root, SolveFast.cwords_words(ws), gn,
+              SolveFast.class_k_start(ws, len, gn, t2),
+              SolveFast.class_k_start(ws, len, gn, t1), e_s, hloop2)
+          +e_g : {SolveFast.class_k_start(ws, len, gn, t1)
+                  == SolveFast.class_k_opt(big, CW.head_ws(Con{bc, rest}),
+                       CW.head_len(Con{bc, rest}), gn, tbl)
+                  : SolveFast.CKRes} =
+            Equal.trans(SolveFast.CKRes,
+              SolveFast.class_k_start(ws, len, gn, t1),
+              SolveFast.class_k_start(ws, len, gn, tbl),
+              SolveFast.class_k_opt(big, CW.head_ws(Con{bc, rest}),
+                CW.head_len(Con{bc, rest}), gn, tbl),
+              Equal.cong(Array<U32>, SolveFast.CKRes,
+                x => SolveFast.class_k_start(ws, len, gn, x), t1, tbl,
+                Equal.trans(Array<U32>, t1, t2, tbl, Equal.sym(Array<U32>, t2, t1, e2), et2)),
+              {==})
+          %e_g : R(_)
+          CW.facts_of_state(R, G, C, n_root, Con{bc, rest}, gn, hgn, hok,
+            SolveFast.class_k_start(ws, len, gn, t1), hloop1, kont)
+    case False{}:
+      match bc:
+        case SolveFast.BigClass{+fb, +ws, +len, clb}:
+          (t1, d2) = dpt
+          (t2, pe) = d2
+          (+e1, +e2) = pe
+          +et2 : {t2 == tbl : Array<U32>} =
+            Equal.trans(Array<U32>, t2, t1, tbl, e2, e1)
+          +hlenc : {len == Groups.len_words(SolveFast.cwords_words(ws)) : Nat} =
+            NatProof.NatPrf.is_eq_true(len,
+              Groups.len_words(SolveFast.cwords_words(ws)),
+              Logic.Proof.and_true_r(FT.FT.cwords_ok_b(G, C, n_root, ws),
+                Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))), hh))
+          +htbl2 : FT.FT.TblOk(G, C, n_root, t1) =
+            FT.FT.tbl_ok_transport(G, C, n_root, tbl, t1,
+              Equal.sym(Array<U32>, t1, tbl, e1), htbl)
+          +e_g : {SolveFast.ck_cheap(CW.head_len(Con{bc, rest}), t1)
+                  == SolveFast.class_k_opt(big, CW.head_ws(Con{bc, rest}),
+                       CW.head_len(Con{bc, rest}), gn, tbl)
+                  : SolveFast.CKRes} =
+            Equal.cong(Array<U32>, SolveFast.CKRes,
+              x => SolveFast.ck_cheap(CW.head_len(Con{bc, rest}), x), t1, tbl, e1)
+          %e_g : R(_)
+          kont(SolveFast.ck_cheap(CW.head_len(Con{bc, rest}), t1), htbl2,
+            CW.prend_cheap(G, C, n_root, Con{bc, rest}, t1, hok, htbl2))
+
+# The capacity invariant of one phase-zero step: the gain grows by the
+# difference between the raised bound and the depth bound, which is at most
+# the slack of the class that is being consumed.
+def CW.inv_step(+dep: Nat, +clb2: Nat, +cc: Nat, +gain: Nat, +gain2: Nat,
+    +total0: Nat, +slack_rest: Nat, +capv: Nat,
+    +hgain2: {gain2 == Nat.add(gain, Nat.sub(clb2, dep)) : Nat},
+    +hstep: {Nat.is_le(clb2, cc) == True{} : Bool},
+    +hdepc: {Nat.is_le(dep, cc) == True{} : Bool},
+    +hinv: {Nat.is_le(Nat.add(Nat.add(total0, gain),
+              Nat.add(Nat.sub(cc, dep), slack_rest)), capv) == True{} : Bool}) ->
+  {Nat.is_le(Nat.add(Nat.add(total0, gain2), slack_rest), capv)
+   == True{} : Bool}:
+  +e0 : {cc == Nat.add(Nat.sub(cc, dep), dep) : Nat} =
+    Equal.trans(Nat, cc, Nat.add(dep, Nat.sub(cc, dep)),
+      Nat.add(Nat.sub(cc, dep), dep),
+      Equal.sym(Nat, Nat.add(dep, Nat.sub(cc, dep)), cc,
+        FC.FC.add_sub_of_le(cc, dep, hdepc)),
+      NatProof.NatPrf.add_comm(dep, Nat.sub(cc, dep)))
+  +hdep : {Nat.is_le(dep, Nat.add(Nat.sub(cc, dep), dep)) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_r(dep, cc, Nat.add(Nat.sub(cc, dep), dep), e0, hdepc)
+  +hcc : {Nat.is_le(cc, Nat.add(Nat.sub(cc, dep), dep)) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_r(cc, cc, Nat.add(Nat.sub(cc, dep), dep), e0,
+      NatProof.Nat.is_le_refl(cc))
+  +hstep2 : {Nat.is_le(clb2, Nat.add(Nat.sub(cc, dep), dep)) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(clb2, cc, Nat.add(Nat.sub(cc, dep), dep),
+      hstep, hcc)
+  +hsub : {Nat.is_le(Nat.sub(clb2, dep), Nat.sub(cc, dep)) == True{} : Bool} =
+    LBS.LBS.sub_le_of_le_add(clb2, Nat.sub(cc, dep), dep, hstep2)
+  +hg1 : {Nat.is_le(Nat.add(gain, Nat.sub(clb2, dep)),
+                    Nat.add(gain, Nat.sub(cc, dep))) == True{} : Bool} =
+    FT.FT.nat_add_le_add(gain, gain, Nat.sub(clb2, dep), Nat.sub(cc, dep),
+      NatProof.Nat.is_le_refl(gain), hsub)
+  +hg2 : {Nat.is_le(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)),
+                    Nat.add(Nat.add(total0, gain), Nat.sub(cc, dep)))
+          == True{} : Bool} =
+    FT.FT.nat_add_le_add(Nat.add(total0, gain), Nat.add(total0, gain),
+      Nat.sub(clb2, dep), Nat.sub(cc, dep),
+      NatProof.Nat.is_le_refl(Nat.add(total0, gain)), hsub)
+  +hmid : {Nat.is_le(Nat.add(Nat.add(Nat.add(total0, gain),
+               Nat.sub(clb2, dep)), slack_rest),
+             Nat.add(Nat.add(Nat.add(total0, gain),
+               Nat.sub(cc, dep)), slack_rest)) == True{} : Bool} =
+    FT.FT.nat_add_le_add(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)),
+      Nat.add(Nat.add(total0, gain), Nat.sub(cc, dep)), slack_rest, slack_rest,
+      hg2, NatProof.Nat.is_le_refl(slack_rest))
+  +eNa : {Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)),
+             slack_rest)
+          == Nat.add(Nat.add(total0, Nat.add(gain, Nat.sub(clb2, dep))),
+               slack_rest) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.add(x, slack_rest),
+      Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)),
+      Nat.add(total0, Nat.add(gain, Nat.sub(clb2, dep))),
+      NatProof.NatPrf.add_assoc(total0, gain, Nat.sub(clb2, dep)))
+  +eNb : {Nat.add(Nat.add(total0, Nat.add(gain, Nat.sub(clb2, dep))),
+             slack_rest)
+          == Nat.add(Nat.add(total0, gain2), slack_rest) : Nat} =
+    Equal.cong(Nat, Nat,
+      x => Nat.add(Nat.add(total0, x), slack_rest),
+      Nat.add(gain, Nat.sub(clb2, dep)), gain2,
+      Equal.sym(Nat, gain2, Nat.add(gain, Nat.sub(clb2, dep)), hgain2))
+  +eN : {Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)),
+            slack_rest)
+         == Nat.add(Nat.add(total0, gain2), slack_rest) : Nat} =
+    Equal.trans(Nat,
+      Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)), slack_rest),
+      Nat.add(Nat.add(total0, Nat.add(gain, Nat.sub(clb2, dep))), slack_rest),
+      Nat.add(Nat.add(total0, gain2), slack_rest), eNa, eNb)
+  +eM : {Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(cc, dep)),
+            slack_rest)
+         == Nat.add(Nat.add(total0, gain),
+              Nat.add(Nat.sub(cc, dep), slack_rest)) : Nat} =
+    NatProof.NatPrf.add_assoc(Nat.add(total0, gain), Nat.sub(cc, dep),
+      slack_rest)
+  +h1 : {Nat.is_le(Nat.add(Nat.add(Nat.add(total0, gain),
+            Nat.sub(clb2, dep)), slack_rest),
+           Nat.add(Nat.add(total0, gain),
+             Nat.add(Nat.sub(cc, dep), slack_rest))) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_r(
+      Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)), slack_rest),
+      Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(cc, dep)), slack_rest),
+      Nat.add(Nat.add(total0, gain), Nat.add(Nat.sub(cc, dep), slack_rest)),
+      eM, hmid)
+  +h2 : {Nat.is_le(Nat.add(Nat.add(total0, gain2), slack_rest),
+           Nat.add(Nat.add(total0, gain),
+             Nat.add(Nat.sub(cc, dep), slack_rest))) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_l(
+      Nat.add(Nat.add(total0, gain), Nat.add(Nat.sub(cc, dep), slack_rest)),
+      Nat.add(Nat.add(Nat.add(total0, gain), Nat.sub(clb2, dep)), slack_rest),
+      Nat.add(Nat.add(total0, gain2), slack_rest), eN, h1)
+  NatProof.Nat.is_le_trans(Nat.add(Nat.add(total0, gain2), slack_rest),
+    Nat.add(Nat.add(total0, gain), Nat.add(Nat.sub(cc, dep), slack_rest)),
+    capv, h2, hinv)
+
+# Shifting one class from the accumulator to the source list.
+def CW.rev_bigs_shift(+acc: +List<SolveFast.BigClass>, +b: SolveFast.BigClass,
+    +rest: +List<SolveFast.BigClass>) ->
+  {SolveFast.rev_bigs(b <> acc, rest)
+   == SolveFast.rev_bigs(acc, b <> rest) : List<&2, SolveFast.BigClass>}:
+  match acc:
+    case Nil{}:
+      {==}
+    case Con{h, t}:
+      CW.rev_bigs_shift(t, h, b <> rest)
+
+# ---------------------------------------------------------------------------
+# The walk
+# ---------------------------------------------------------------------------
+
+# The walk's specification, by induction on its fuel. `total0 + gain + slack`
+# stays below `capv`; the stop test relates the best cost to `total0 + gain`;
+# the accumulator invariant is `rev_bigs(acc, bs) == bs0`, so a completed walk
+# hands back exactly the input class list.
+def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +bs0: +List<SolveFast.BigClass>, +capv: Nat,
+    +best: SolveRef.Best, +gn: Nat,
+    +bs: +List<SolveFast.BigClass>, +phase: Nat, stop: Bool,
+    +acc: +List<SolveFast.BigClass>, +gain: Nat, +total0: Nat,
+    +hgn: {gn == Groups.len_words(G) : Nat},
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bs) == True{} : Bool},
+    +hb: {Nat.is_le(Nat.add(Nat.add(total0, gain), CW.slack(G, bs)), capv)
+          == True{} : Bool},
+    +hs: {stop == Nat.is_le(SolveFast.best_cost(best), Nat.add(total0, gain))
+          : Bool},
+    +hacc: {SolveFast.rev_bigs(acc, bs) == bs0
+            : List<&2, SolveFast.BigClass>},
+    st: SolveFast.CKRes,
+    +htbl: CW.TblOf(G, C, n_root, st),
+    +hpref: CW.Prend(G, C, n_root, phase, bs, st)) ->
+  CW.WalkOk(G, C, n_root, bs0, capv, best,
+    SolveFast.cap_walk(fuel, bs0, bs, phase, stop, acc, gain, total0, best, gn,
+      st)):
+  match fuel:
+    case 0n:
+      match st:
+        case SolveFast.CKRes{tbl, k}:
+          Arr.DPair{{==}, htbl}
+    case 1n+f:
+      match bs:
+        case Nil{}:
+          match phase:
+            case 0n:
+              match stop:
+                case True{}:
+                  match st:
+                    case SolveFast.CKRes{tbl, k}:
+                      Arr.DPair{
+                        CW.skip_le(SolveFast.best_cost(best),
+                          Nat.add(total0, gain), capv, capv, CW.slack(G, bs),
+                          Equal.sym(Bool, True{},
+                            Nat.is_le(SolveFast.best_cost(best),
+                              Nat.add(total0, gain)), hs),
+                          hb, NatProof.Nat.is_le_refl(capv)),
+                        htbl}
+                case False{}:
+                  match st:
+                    case SolveFast.CKRes{tbl, k}:
+                      Arr.DPair{hacc, htbl}
+            case 1n+hp:
+              match stop:
+                case True{}:
+                  match st:
+                    case SolveFast.CKRes{tbl, k}:
+                      Arr.DPair{
+                        CW.skip_le(SolveFast.best_cost(best),
+                          Nat.add(total0, gain), capv, capv, CW.slack(G, bs),
+                          Equal.sym(Bool, True{},
+                            Nat.is_le(SolveFast.best_cost(best),
+                              Nat.add(total0, gain)), hs),
+                          hb, NatProof.Nat.is_le_refl(capv)),
+                        htbl}
+                case False{}:
+                  match st:
+                    case SolveFast.CKRes{tbl, k}:
+                      Arr.DPair{hacc, htbl}
+        case Con{bc, rest}:
+          match bc:
+            case SolveFast.BigClass{+fb, +ws, +len, clb}:
+              match phase:
+                case 1n+hp:
+                  match stop:
+                    case True{}:
+                      match st:
+                        case SolveFast.CKRes{tbl, k}:
+                          Arr.DPair{
+                            CW.skip_le(SolveFast.best_cost(best),
+                              Nat.add(total0, gain), capv, capv, CW.slack(G, bs),
+                              Equal.sym(Bool, True{},
+                                Nat.is_le(SolveFast.best_cost(best),
+                                  Nat.add(total0, gain)), hs),
+                              hb, NatProof.Nat.is_le_refl(capv)),
+                            htbl}
+                    case False{}:
+                      match st:
+                        case SolveFast.CKRes{tbl, k}:
+                          +big = Nat.is_le(16n, len)
+                          +stop2 = Nat.is_le(SolveFast.best_cost(best),
+                            Nat.add(total0, gain))
+                          +hh : {FH.FH.big_ok_b(G, C, n_root,
+                                   SolveFast.BigClass{fb, ws, len, clb})
+                                 == True{} : Bool} =
+                            Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
+                                SolveFast.BigClass{fb, ws, len, clb}),
+                              FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
+                          CW.scan_step(
+                            st2 => CW.WalkOk(G, C, n_root, bs0, capv, best,
+                              SolveFast.cap_walk(f, bs0, bs, 0n, stop2, acc,
+                                gain, total0, best, gn, st2)),
+                            G, C, n_root, big,
+                            SolveFast.BigClass{fb, ws, len, clb}, rest, gn,
+                            hgn, hh, hok, tbl, Arr.Arr.dup(U32, tbl), htbl,
+                            st2 => htbl2 => hpref2 =>
+                              CW.walk(f, G, C, n_root, bs0, capv, best, gn,
+                                bs, 0n, stop2, acc, gain, total0, hgn, hok,
+                                hb, {==}, hacc, st2, htbl2, hpref2))
+                case 0n:
+                  match stop:
+                    case True{}:
+                      match st:
+                        case SolveFast.CKRes{tbl, k}:
+                          Arr.DPair{
+                            CW.skip_le(SolveFast.best_cost(best),
+                              Nat.add(total0, gain), capv, capv, CW.slack(G, bs),
+                              Equal.sym(Bool, True{},
+                                Nat.is_le(SolveFast.best_cost(best),
+                                  Nat.add(total0, gain)), hs),
+                              hb, NatProof.Nat.is_le_refl(capv)),
+                            htbl}
+                    case False{}:
+                      match st:
+                        case SolveFast.CKRes{tbl, +k}:
+                          +dep = CW.dep(len)
+                          +clb2 = Nat.max(dep, SolveFast.capbound(len, k))
+                          +gain2 = Nat.add(gain, Nat.sub(clb2, dep))
+                          +stop2 = Nat.is_le(SolveFast.best_cost(best),
+                            Nat.add(total0, gain2))
+                          +cc = FH.FH.cap_class(G,
+                            SolveFast.cwords_words(ws))
+                          +hstep : {Nat.is_le(clb2, cc) == True{} : Bool} =
+                            Arr.Arr.dpair_r(FT.FT.TblOk(G, C, n_root, tbl),
+                              {Nat.is_le(Nat.max(CW.dep(len),
+                                  SolveFast.capbound(len, k)),
+                                 FH.FH.cap_class(G,
+                                   SolveFast.cwords_words(ws)))
+                               == True{} : Bool}, hpref)
+                          +hh0 : {FH.FH.big_ok_b(G, C, n_root,
+                                    SolveFast.BigClass{fb, ws, len, clb})
+                                  == True{} : Bool} =
+                            Logic.Proof.and_true_l(FH.FH.big_ok_b(G, C, n_root,
+                                SolveFast.BigClass{fb, ws, len, clb}),
+                              FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
+                          +hlen : {len == Groups.len_words(
+                                     SolveFast.cwords_words(ws)) : Nat} =
+                            NatProof.NatPrf.is_eq_true(len,
+                              Groups.len_words(SolveFast.cwords_words(ws)),
+                              Logic.Proof.and_true_r(
+                                FT.FT.cwords_ok_b(G, C, n_root, ws),
+                                Nat.is_eq(len, Groups.len_words(
+                                  SolveFast.cwords_words(ws))), hh0))
+                          +hdepc : {Nat.is_le(dep, cc) == True{} : Bool} =
+                            CW.dep_le_class_eq(G, len,
+                              SolveFast.cwords_words(ws), hlen)
+                          +hinv2 : {Nat.is_le(Nat.add(Nat.add(total0, gain2),
+                                      CW.slack(G, rest)), capv)
+                                    == True{} : Bool} =
+                            CW.inv_step(dep, clb2, cc, gain, gain2, total0,
+                              CW.slack(G, rest), capv, {==}, hstep, hdepc, hb)
+                          +hrest : {FH.FH.bigs_ok_b(G, C, n_root, rest)
+                                    == True{} : Bool} =
+                            Logic.Proof.and_true_r(FH.FH.big_ok_b(G, C, n_root,
+                                SolveFast.BigClass{fb, ws, len, clb}),
+                              FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
+                          +hacc2 : {SolveFast.rev_bigs(
+                                      SolveFast.BigClass{fb, ws, len, clb}
+                                      <> acc, rest) == bs0
+                                    : List<&2, SolveFast.BigClass>} =
+                            Equal.trans(List<&2, SolveFast.BigClass>,
+                              SolveFast.rev_bigs(
+                                SolveFast.BigClass{fb, ws, len, clb} <> acc,
+                                rest),
+                              SolveFast.rev_bigs(acc,
+                                SolveFast.BigClass{fb, ws, len, clb} <> rest),
+                              bs0,
+                              CW.rev_bigs_shift(acc,
+                                SolveFast.BigClass{fb, ws, len, clb}, rest),
+                              hacc)
+                          +htbl2 : CW.TblOf(G, C, n_root,
+                              SolveFast.CKRes{tbl, k}) =
+                            Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl),
+                              {Nat.is_le(Nat.max(CW.dep(len),
+                                  SolveFast.capbound(len, k)),
+                                 FH.FH.cap_class(G,
+                                   SolveFast.cwords_words(ws)))
+                               == True{} : Bool}, hpref)
+                          CW.walk(f, G, C, n_root, bs0, capv, best, gn,
+                            rest, 1n, stop2,
+                            SolveFast.BigClass{fb, ws, len, clb} <> acc,
+                            gain2, total0, hgn, hrest, hinv2, {==}, hacc2,
+                            SolveFast.CKRes{tbl, k}, htbl2, Unit{})
