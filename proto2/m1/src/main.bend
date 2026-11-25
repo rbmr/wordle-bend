@@ -84,7 +84,8 @@ def region_sum(a: Array<U32>, +base: U32, +n: U32) -> U32:
 
 def build_all(+c: U32, +gg: U32, +gtext: String, +ctext: String,
               a: Array<U32>) -> Array<U32>:
-  a2 = T.fill_c(ctext, c, gg, T.fill_g(gtext, c, gg, a))
+  a1 = T.fill_g(gtext, c, gg, a)
+  a2 = T.fill_c(ctext, c, gg, a1)
   a3 = T.fill_zob(c, gg, a2)
   a4 = T.fill_hh_init(c, gg, a3)
   a5 = T.fill_hh(c, gg, a4)
