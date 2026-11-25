@@ -108,7 +108,7 @@ def step(+fuel: Nat, +ph: U32, +c: U32, +gg: U32, +sb: U32, +n: U32,
   match fuel:
     case 0n:
       (a2, _) = p
-      a2
+      Array.set(U32, a2, cell_val(c, gg), 60000)
     case 1n+f:
       match ph:
         case 0:
@@ -502,4 +502,4 @@ def step(+fuel: Nat, +ph: U32, +c: U32, +gg: U32, +sb: U32, +n: U32,
                    rest, Array.get(U32, a2, 0))
         case _:
           (a2, _) = p
-          a2
+          Array.set(U32, a2, cell_val(c, gg), U32.add(ph, 1000))

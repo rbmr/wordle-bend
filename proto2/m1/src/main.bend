@@ -3,6 +3,7 @@ import ./geo.bend as G
 import ./arith.bend as A
 import ./tab.bend as T
 import ./heur.bend as H
+import ./driver.bend as D
 
 # ------------------------------------------------------------------- input ---
 
@@ -200,11 +201,20 @@ def go4(+gtext: String, +ctext: String, +c: U32, +gg: U32,
         +mode: String) -> IO(Unit):
   go5(gtext, ctext, c, gg, U32.read(mode))
 
+# With no further arguments the program runs the search (this is the pc2 entry
+# point); with a mode argument it runs the table checks below.
+def go_search(+gtext: String, +ctext: String, +c: U32, +gg: U32) -> IO(Unit):
+  do IO<Unit>:
+    total : U32 = G.total_size(c, gg)
+    a : Array<U32> = Array.new(U32, depth_for(total), 0)
+    a1 : Array<U32> = build_all(c, gg, gtext, ctext, a)
+    D.run(c, gg, U32.mul(c, U32.inc(c)), a1)
+
 def go3b(+gtext: String, +ctext: String, +c: U32, +gg: U32,
          rest: List<&1, String>) -> IO(Unit):
   match rest:
     case Nil{}:
-      run(0, c, gg, gtext, ctext)
+      go_search(gtext, ctext, c, gg)
     case Con{m, _}:
       go4(gtext, ctext, c, gg, m)
 
