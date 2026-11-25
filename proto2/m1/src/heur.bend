@@ -8,6 +8,7 @@ import ./geo.bend as G
 import ./arith.bend as A
 import ./bounds.bend as B
 import ./tab.bend as T
+import ./sec.bend as S
 
 # ------------------------------------------------------------ capacity table ---
 #
@@ -38,16 +39,15 @@ def cap_fill(+maxk: U32, +c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
 # in-set guesses is exact when some guess has at most one collision. Packed as
 # 2*value + exact.
 #
-# Count cells are generation stamped (cell = gen*256 + count), so a stale cell
-# reads as 0 without a reset pass.
+# Count cells are stamped: cell = (gen << 10) | count, with the gen taken from
+# the global quick counter so a stale cell reads as 0 without a reset pass.
 #
-# Phase 3: v = set[sb+i] for a new guess.  4: v = its guess index.
+# Phase 6: v = the quick gen counter (start).  3: v = set[sb+i] for a new guess.
+# Phase 4: v = its guess index.
 # Phase 0: v = set[sb+m].  1: v = its feedback.  2: v = its count cell.
 # Phase 5: stop.
 def qcount(+cell: U32, +genb: U32) -> U32:
-  +diff = U32.sub(cell, genb)
-  +fresh = U32.sub(1, U32.div(diff, 2147483648))
-  U32.mul(diff, fresh)
+  S.cellcnt(cell, genb)
 
 def qresult(+a0: U32, +a1: U32, +n: U32) -> U32:
   +val = A.sel(a0, U32.sub(U32.mul(2, n), 1), U32.mul(2, n))
@@ -62,6 +62,13 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
       Array.set(U32, a2, out, qresult(a0, a1, n))
     case 1n+p:
       match ph:
+        case 6:
+          # pick a fresh gen for this call: n consecutive rows from one counter.
+          (a2, +x) = r
+          +g0 = U32.inc(x)
+          a3 = Array.set(U32, a2, S.quickgencell(c, gg), U32.add(x, n))
+          quick(p, 3, 0, 0, 0, 0, 0, 0, g0, 0, sb, n, c, gg, out,
+                Array.get(U32, a3, U32.add(sb, 0)))
         case 3:
           (a2, +x) = r
           quick(p, 4, i, 0, x, 0, a0, a1, genb, row, sb, n, c, gg, out,
@@ -83,7 +90,7 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
           (a2, +x) = r
           +cnt = qcount(x, genb)
           a3 = Array.set(U32, a2, U32.add(G.off_qcnt(c, gg), si),
-                         U32.add(genb, U32.inc(cnt)))
+                         S.stamp(genb, U32.inc(cnt)))
           +coll2 = U32.add(coll, A.nz(cnt))
           +m2 = U32.inc(m)
           +gend = A.eq01(m2, n)
@@ -97,7 +104,7 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
                                       U32.add(sb, m2)))
           quick(p, A.sel(stop, 5, A.sel(gend, 3, 0)), i2,
                 A.sel(gend, 0, m2), si, A.sel(gend, 0, coll2), a0b, a1b,
-                U32.add(genb, U32.mul(gend, 256)), row, sb, n, c, gg, out,
+                U32.add(genb, gend), row, sb, n, c, gg, out,
                 Array.get(U32, a3, nxt))
         case _:
           (a2, _) = r
@@ -116,12 +123,12 @@ def fill_set(+fuel: Nat, +i: U32, +n: U32, +k: U32, +base: U32,
 # Quick-evaluate candidates k..k+n-1, which must be copied into the depth-0 set
 # region first. The packed result is written to cell `out`.
 def quick_at(a: Array<U32>, +sb: U32, +n: U32, +c: U32, +gg: U32,
-             +genb: U32, +out: U32) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(n), Nat.mul(U32.to_nat(n), 8n)), 64n)
-  quick(fuel, 3, 0, 0, 0, 0, 0, 0, genb, 0, sb, n, c, gg, out,
-        Array.get(U32, a, sb))
+             +out: U32) -> Array<U32>:
+  +fuel = Nat.add(Nat.mul(U32.to_nat(n), Nat.mul(U32.to_nat(n), 8n)), 68n)
+  quick(fuel, 6, 0, 0, 0, 0, 0, 0, 0, 0, sb, n, c, gg, out,
+        Array.get(U32, a, S.quickgencell(c, gg)))
 
 def run_quick(a: Array<U32>, +k: U32, +n: U32, +c: U32, +gg: U32) -> Array<U32>:
   +sb = G.off_sets(c, gg)
   +out = U32.add(G.off_qcnt(c, gg), 200)
-  quick_at(fill_set(U32.to_nat(n), 0, n, k, sb, a), sb, n, c, gg, 0, out)
+  quick_at(fill_set(U32.to_nat(n), 0, n, k, sb, a), sb, n, c, gg, out)

@@ -98,8 +98,9 @@ def off_p1t(+c: U32, +g: U32) -> U32:
 def off_p2t(+c: U32, +g: U32) -> U32:
   U32.add(off_p1t(c, g), U32.mul(depths(), U32.mul(c, 3)))
 
+# Phase 2 can append one tuple per guess, so its buffer is depths*g*3.
 def off_sset(+c: U32, +g: U32) -> U32:
-  U32.add(off_p2t(c, g), U32.mul(depths(), g))
+  U32.add(off_p2t(c, g), U32.mul(depths(), U32.mul(g, 3)))
 
 def off_gset(+c: U32, +g: U32) -> U32:
   U32.add(off_sset(c, g), U32.mul(depths(), g))

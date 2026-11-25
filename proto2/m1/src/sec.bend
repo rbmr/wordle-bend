@@ -41,6 +41,30 @@ def ent_at(+dep: U32, +c: U32, +gg: U32) -> U32:
 def cap_at(+k: U32, +n: U32, +c: U32, +gg: U32) -> U32:
   U32.add(U32.add(G.off_cap(c, gg), U32.mul(k, U32.inc(c))), n)
 
+# --------------------------------------------------------- generation stamps ---
+#
+# A count cell is (gen << 10) | count. The gen of a scan comes from one global
+# counter in the state array, bumped by every scan. Two scans can never share a
+# gen, so a stale cell is recognised by equality (cell >> 10 == gen) and no
+# reset pass is needed. The counter lives in the array so it cannot be lost by a
+# caller that keeps an older gen in a register; `n` (a bucket size) must stay
+# below 1024.
+def gencell(+c: U32, +gg: U32) -> U32:
+  U32.add(G.off_qgen(c, gg), 720)
+
+def markgencell(+c: U32, +gg: U32) -> U32:
+  U32.add(G.off_qgen(c, gg), 722)
+
+def quickgencell(+c: U32, +gg: U32) -> U32:
+  U32.add(G.off_qgen(c, gg), 723)
+
+# The stamped count in `cell` for scan `gen` (0 when the cell is stale).
+def cellcnt(+cell: U32, +gen: U32) -> U32:
+  U32.mul(U32.and(cell, 1023), A.eq01(U32.shrn(cell, 10n), gen))
+
+def stamp(+gen: U32, +cnt: U32) -> U32:
+  U32.or(U32.shln(gen, 10n), cnt)
+
 # ------------------------------------------------------------------ counting ---
 
 # Result cells written by cnt: pk, n3, sq.
@@ -54,14 +78,16 @@ def sqcell(+c: U32, +gg: U32) -> U32:
   U32.add(U32.add(G.off_qgen(c, gg), 600), 11)
 
 # Count the responses of guess `g` over set[sb..sb+n), skipping set element
-# index `skip` (0xFFFFFFFF for none). Fills cnt[dep][r] = gen + count, appends
-# each first-seen response to ne[dep], and counts responses reaching 3.
+# index `skip` (0xFFFFFFFF for none). Fills cnt[dep][r] = (gen<<10) + count for a
+# fresh gen from the global counter, appends each first-seen response to
+# ne[dep], and counts responses reaching 3.
 # Returns pk = distinct | duplicates<<12 | has_win<<24.
 #
-# ph 0: the pair holds set[sb+i].            ph 1: the pair holds fb[g][x].
-# ph 2: the pair holds cnt[r].               ph 3: stop (dummy read).
-def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
-           +skip: U32, +gen: U32, +dep: U32, +c: U32, +gg: U32,
+# ph 9: the pair holds the global gen counter.  ph 0: the pair holds set[sb+i].
+# ph 1: the pair holds fb[g][x].   ph 2: the pair holds cnt[r].
+# ph 3: stop (dummy read).
+def cnt_go(+fuel: Nat, +ph: U32, +gen: U32, +g: U32, +i: U32, +n: U32,
+           +sb: U32, +skip: U32, +dep: U32, +c: U32, +gg: U32,
            +t: U32, +dup: U32, +hw: U32, +n3: U32, +sq: U32, +x: U32,
            +r: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -70,6 +96,12 @@ def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
       a2
     case 1n+p2:
       match ph:
+        case 9:
+          (a2, +v) = p
+          +gen2 = U32.inc(v)
+          a3 = Array.set(U32, a2, gencell(c, gg), gen2)
+          cnt_go(p2, 0, gen2, g, 0, n, sb, skip, dep, c, gg, 0, 0, 0, 0, 0,
+                 0, 0, Array.get(U32, a3, sb))
         case 0:
           (a2, +v) = p
           +i2 = U32.inc(i)
@@ -77,29 +109,27 @@ def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
           +sk = A.eq01(i, skip)
           +idx = A.sel(sk, A.sel(last, 0, U32.add(sb, i2)),
                        U32.add(U32.mul(g, c), v))
-          cnt_go(p2, A.sel(sk, A.sel(last, 3, 0), 1), g, A.sel(sk, i2, i), n,
-                 sb, skip, gen, dep, c, gg, t, dup, hw, n3, sq,
+          cnt_go(p2, A.sel(sk, A.sel(last, 3, 0), 1), gen, g, A.sel(sk, i2, i),
+                 n, sb, skip, dep, c, gg, t, dup, hw, n3, sq,
                  A.sel(sk, 0, v), r, Array.get(U32, a2, idx))
         case 1:
           (a2, +fb) = p
           +cb = cnt_at(dep, c, gg)
-          cnt_go(p2, 2, g, i, n, sb, skip, gen, dep, c, gg, t, dup, hw, n3, sq,
+          cnt_go(p2, 2, gen, g, i, n, sb, skip, dep, c, gg, t, dup, hw, n3, sq,
                  x, fb, Array.get(U32, a2, U32.add(cb, fb)))
         case 2:
           (a2, +cell) = p
-          +diff = U32.sub(cell, gen)
-          +fresh = U32.sub(1, U32.shrn(diff, 31n))
-          +old = U32.mul(diff, fresh)
+          +old = cellcnt(cell, gen)
           +new = A.eq01(old, 0)
           +cb = cnt_at(dep, c, gg)
           +nb = ne_at(dep, c, gg)
           +neidx = A.sel(new, U32.add(nb, t), U32.add(nb, 255))
-          a3 = Array.set(U32, a2, U32.add(cb, r), U32.add(gen, U32.inc(old)))
+          a3 = Array.set(U32, a2, U32.add(cb, r), stamp(gen, U32.inc(old)))
           a4 = Array.set(U32, a3, neidx, r)
           +i2 = U32.inc(i)
           +last = A.eq01(i2, n)
           +idx = A.sel(last, 0, U32.add(sb, i2))
-          cnt_go(p2, A.sel(last, 3, 0), g, i2, n, sb, skip, gen, dep, c, gg,
+          cnt_go(p2, A.sel(last, 3, 0), gen, g, i2, n, sb, skip, dep, c, gg,
                  U32.add(t, new), U32.add(dup, U32.sub(1, new)),
                  U32.max(hw, A.eq01(r, 121)), U32.add(n3, A.eq01(old, 2)),
                  U32.add(sq, U32.inc(U32.mul(old, 2))), 0, 0,
@@ -112,11 +142,11 @@ def cnt_go(+fuel: Nat, +ph: U32, +g: U32, +i: U32, +n: U32, +sb: U32,
           a6 = Array.set(U32, a5, n3cell(c, gg), n3)
           Array.set(U32, a6, sqcell(c, gg), sq)
 
-def cnt(+g: U32, +sb: U32, +n: U32, +skip: U32, +gen: U32, +dep: U32,
+def cnt(+g: U32, +sb: U32, +n: U32, +skip: U32, +dep: U32,
         +c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(n), 8n), 64n)
-  cnt_go(fuel, 0, g, 0, n, sb, skip, gen, dep, c, gg, 0, 0, 0, 0, 0, 0, 0,
-         Array.get(U32, a, sb))
+  +fuel = Nat.add(Nat.mul(U32.to_nat(n), 8n), 68n)
+  cnt_go(fuel, 9, 0, g, 0, n, sb, skip, dep, c, gg, 0, 0, 0, 0, 0, 0, 0,
+         Array.get(U32, a, gencell(c, gg)))
 
 # --------------------------------------------------------- stats from ne/cnt ---
 
@@ -133,8 +163,9 @@ def write_stats(a: Array<U32>, +lb: U32, +exp: U32, +c: U32,
 
 
 # lb = n + sum over distinct responses of cap[pmk][k]; exp = 1 + sum k*k.
-# ph 0: the pair holds ne[j].   ph 1: the pair holds cnt[r].
-# ph 2: the pair holds cap[pmk][k].   ph 3: stop.
+# ph 8: the pair holds the global gen counter.  ph 0: the pair holds ne[j].
+# ph 1: the pair holds cnt[r].   ph 2: the pair holds cap[pmk][k].
+# ph 3: stop.
 def stats_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +c: U32,
              +gg: U32, +pmk: U32, +lb: U32, +exp: U32, +gen: U32, +r: U32,
              +skipwin: U32, +rw: U32, p: Array<U32> & U32) -> Array<U32>:
@@ -144,6 +175,11 @@ def stats_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +c: U32,
       write_stats(a2, lb, exp, c, gg)
     case 1n+p2:
       match ph:
+        case 8:
+          (a2, +v) = p
+          +nb = ne_at(dep, c, gg)
+          stats_go(p2, 0, j, t, dep, c, gg, pmk, lb, exp, v, r, skipwin, rw,
+                   Array.get(U32, a2, U32.add(nb, j)))
         case 0:
           (a2, +v) = p
           +cb = cnt_at(dep, c, gg)
@@ -151,7 +187,7 @@ def stats_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +c: U32,
                    Array.get(U32, a2, U32.add(cb, v)))
         case 1:
           (a2, +cell) = p
-          +k = U32.sub(cell, gen)
+          +k = cellcnt(cell, gen)
           +cp = cap_at(pmk, k, c, gg)
           stats_go(p2, 2, j, t, dep, c, gg, pmk, lb, exp, gen, k, skipwin, rw,
                    Array.get(U32, a2, cp))
@@ -171,18 +207,19 @@ def stats_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +c: U32,
 
 # j0 = starting index into ne, t = number of distinct responses to walk.
 def stats(+j0: U32, +t: U32, +dep: U32, +c: U32, +gg: U32, +pmk: U32,
-          +lb0: U32, +exp0: U32, +gen: U32, +skipwin: U32,
+          +lb0: U32, +exp0: U32, +skipwin: U32,
           a: Array<U32>) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 64n)
+  +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 68n)
   +nb = ne_at(dep, c, gg)
-  stats_go(fuel, 0, j0, t, dep, c, gg, pmk, lb0, exp0, gen, 0, skipwin, 0,
-           Array.get(U32, a, U32.add(nb, j0)))
+  stats_go(fuel, 8, j0, t, dep, c, gg, pmk, lb0, exp0, 0, 0, skipwin, 0,
+           Array.get(U32, a, gencell(c, gg)))
 
 # ------------------------------------------------------------------ offsets ---
 
 # For each distinct response in ne order, off[r] = start of its bucket in the
 # destination set and cur[r] = the same, as a running cursor.
-# ph 0: the pair holds ne[j].   ph 1: the pair holds cnt[r].   ph 2: stop.
+# ph 8: the pair holds the global gen counter.  ph 0: the pair holds ne[j].
+# ph 1: the pair holds cnt[r].   ph 2: stop.
 def offs_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +dst: U32,
             +cur: U32, +c: U32, +gg: U32, +gen: U32, +r: U32,
             p: Array<U32> & U32) -> Array<U32>:
@@ -192,6 +229,11 @@ def offs_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +dst: U32,
       a2
     case 1n+p2:
       match ph:
+        case 8:
+          (a2, +v) = p
+          +nb = ne_at(dep, c, gg)
+          offs_go(p2, 0, j, t, dep, dst, cur, c, gg, v, r,
+                  Array.get(U32, a2, U32.add(nb, j)))
         case 0:
           (a2, +v) = p
           +cb = cnt_at(dep, c, gg)
@@ -199,7 +241,7 @@ def offs_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +dst: U32,
                   Array.get(U32, a2, U32.add(cb, v)))
         case 1:
           (a2, +cell) = p
-          +k = U32.sub(cell, gen)
+          +k = cellcnt(cell, gen)
           +ob = off_at(dep, c, gg)
           +ub = cur_at(dep, c, gg)
           +zb = ent_at(dep, c, gg)
@@ -216,12 +258,12 @@ def offs_go(+fuel: Nat, +ph: U32, +j: U32, +t: U32, +dep: U32, +dst: U32,
           (a2, _) = p
           a2
 
-def offsets(+t: U32, +dep: U32, +dst: U32, +c: U32, +gg: U32, +gen: U32,
+def offsets(+t: U32, +dep: U32, +dst: U32, +c: U32, +gg: U32,
             a: Array<U32>) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 64n)
+  +fuel = Nat.add(Nat.mul(U32.to_nat(t), 8n), 68n)
   +nb = ne_at(dep, c, gg)
-  offs_go(fuel, 0, 0, t, dep, dst, dst, c, gg, gen, 0,
-          Array.get(U32, a, nb))
+  offs_go(fuel, 8, 0, t, dep, dst, dst, c, gg, 0, 0,
+          Array.get(U32, a, gencell(c, gg)))
 
 # ------------------------------------------------------------------ scatter ---
 

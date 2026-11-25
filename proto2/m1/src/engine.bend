@@ -202,9 +202,9 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                Array.get(U32, a2, 0))
         case 22:
           (a2, _) = p
-          a3 = H.quick_at(a2, ss, n, c, gg, gen, qcell(c, gg, 604))
+          a3 = H.quick_at(a2, ss, n, c, gg, qcell(c, gg, 604))
           step(f, c, gg, 0, 1, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, g, cost, bcur, t, lbk, cut, U32.add(gen, 4096),
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
                ret, nst, ngs, nht, npr, stk,
                Array.get(U32, a3, qcell(c, gg, 604)))
         case 1:
@@ -524,10 +524,9 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         # ------------------------------------------------------ guess ----
         case 300:
           (a2, _) = p
-          +gen2 = U32.add(gen, 1024)
-          a3 = S.cnt(g, ss, n, noskip(), gen2, dep, c, gg, a2)
+          a3 = S.cnt(g, ss, n, noskip(), dep, c, gg, a2)
           step(f, c, gg, 1, 301, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen2, ret,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret,
                nst, U32.add(ngs, 1), nht, npr, stk,
                Array.get(U32, a3, S.pkcell(c, gg)))
         case 301:
@@ -545,7 +544,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 302:
           (a2, _) = p
           +dst = S.set_at(U32.inc(dep), c, gg)
-          a3 = S.offsets(t, dep, dst, c, gg, gen, a2)
+          a3 = S.offsets(t, dep, dst, c, gg, a2)
           a4 = S.scatter(g, ss, n, dep, dst, c, gg, a3)
           step(f, c, gg, 1, 61, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, cost, 0, t, lbk, cut, gen, ret, nst, ngs, nht,

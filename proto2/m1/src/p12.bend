@@ -184,9 +184,8 @@ def p1_go(+fuel: Nat, +ph: U32, +ci: U32, +best: U32, +lmk: U32, +v1: U32,
                 Array.get(U32, a2, idx))
         case 2:
           (a2, +v) = p
-          +gen2 = U32.add(gen, 1024)
-          a3 = S.cnt(v, ss, n, ci, gen2, dep, c, gg, a2)
-          p1_go(f, 3, ci, best, lmk, v1, mv, nt, ngs, npr, gen2, ss, n, pmk,
+          a3 = S.cnt(v, ss, n, ci, dep, c, gg, a2)
+          p1_go(f, 3, ci, best, lmk, v1, mv, nt, ngs, npr, gen, ss, n, pmk,
                 dep, c, gg, cand, v, dup, t, h3, ab, lb, exp, plb, pex, pg,
                 Array.get(U32, a3, S.pkcell(c, gg)))
         case 3:
@@ -210,7 +209,7 @@ def p1_go(+fuel: Nat, +ph: U32, +ci: U32, +best: U32, +lmk: U32, +v1: U32,
                 pg, Array.get(U32, a2, 0))
         case 6:
           (a2, _) = p
-          a3 = S.stats(0, t, dep, c, gg, pmk, n, 1, gen, 1, a2)
+          a3 = S.stats(0, t, dep, c, gg, pmk, n, 1, 1, a2)
           p1_go(f, 7, ci, best, lmk, v1, mv, nt, ngs, npr, gen, ss, n, pmk,
                 dep, c, gg, cand, g, dup, t, h3, ab, lb, exp, plb, pex, pg,
                 Array.get(U32, a3, S.lbcell(c, gg)))
@@ -328,6 +327,14 @@ def p2_go(+fuel: Nat, +ph: U32, +ci: U32, +g: U32, +best: U32, +lmk: U32,
       a2
     case 1n+f:
       match ph:
+        case 19:
+          # p holds the mark counter: take a fresh tag for this scan.
+          (a2, +v) = p
+          +tag = U32.inc(v)
+          a3 = Array.set(U32, a2, S.markgencell(c, gg), tag)
+          p2_go(f, 20, 0, 0, best, lmk, v2, mv, nt, ngs, npr, tag, cm, mu, ss,
+                n, pmk, dep, c, gg, cand, m, dup, t, h3, ab, lb, exp, plb,
+                pex, pg, Array.get(U32, a3, ss))
         case 20:
           (a2, _) = p
           +done = A.ge01(ci, n)
@@ -351,9 +358,8 @@ def p2_go(+fuel: Nat, +ph: U32, +ci: U32, +g: U32, +best: U32, +lmk: U32,
           (a2, +v) = p
           +mb = U32.or(mu, U32.and(cm, v))
           +cmb = U32.or(cm, v)
-          +tag = U32.add(gen, 512)
           +midx = U32.add(G.off_sset(c, gg), U32.mul(dep, gg))
-          a3 = Array.set(U32, a2, U32.add(midx, g), tag)
+          a3 = Array.set(U32, a2, U32.add(midx, g), gen)
           +ci2 = U32.inc(ci)
           +done = A.ge01(ci2, n)
           +idx = A.sel(done, 0, U32.add(ss, ci2))
@@ -372,7 +378,7 @@ def p2_go(+fuel: Nat, +ph: U32, +ci: U32, +g: U32, +best: U32, +lmk: U32,
           # p holds mark[g].
           (a2, +v) = p
           +done = A.ge01(g, gg)
-          +same = A.eq01(v, U32.add(gen, 512))
+          +same = A.eq01(v, gen)
           +g2 = A.sel(same, U32.inc(g), g)
           +sbase = U32.add(G.off_sset(c, gg), U32.mul(dep, gg))
           +idx = A.sel(same, U32.add(sbase, g2),
@@ -396,9 +402,8 @@ def p2_go(+fuel: Nat, +ph: U32, +ci: U32, +g: U32, +best: U32, +lmk: U32,
                 lb, exp, plb, pex, pg, Array.get(U32, a2, idx))
         case 32:
           (a2, _) = p
-          +gen2 = U32.add(gen, 1024)
-          a3 = S.cnt(g, ss, n, 4294967295, gen2, dep, c, gg, a2)
-          p2_go(f, 33, ci, g, best, lmk, v2, mv, nt, ngs, npr, gen2, cm, mu,
+          a3 = S.cnt(g, ss, n, 4294967295, dep, c, gg, a2)
+          p2_go(f, 33, ci, g, best, lmk, v2, mv, nt, ngs, npr, gen, cm, mu,
                 ss, n, pmk, dep, c, gg, cand, m, dup, t, h3, ab, lb, exp, plb,
                 pex, pg, Array.get(U32, a3, S.pkcell(c, gg)))
         case 33:
@@ -422,7 +427,7 @@ def p2_go(+fuel: Nat, +ph: U32, +ci: U32, +g: U32, +best: U32, +lmk: U32,
                 plb, pex, pg, Array.get(U32, a2, 0))
         case 36:
           (a2, _) = p
-          a3 = S.stats(0, t, dep, c, gg, pmk, n, 0, gen, 1, a2)
+          a3 = S.stats(0, t, dep, c, gg, pmk, n, 0, 1, a2)
           p2_go(f, 37, ci, g, best, lmk, v2, mv, nt, ngs, npr, gen, cm, mu,
                 ss, n, pmk, dep, c, gg, cand, m, dup, t, h3, ab, lb, exp, plb,
                 pex, pg, Array.get(U32, a3, S.lbcell(c, gg)))
@@ -519,7 +524,7 @@ def p2_go(+fuel: Nat, +ph: U32, +ci: U32, +g: U32, +best: U32, +lmk: U32,
 
 def p2_scan(a: Array<U32>, +ss: U32, +n: U32, +beta: U32, +pmk: U32,
             +dep: U32, +gen: U32, +c: U32, +gg: U32) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(gg), 64n), 64n)
-  p2_go(fuel, 20, 0, 0, beta, 0, 0, 4294967295, 0, 0, 0, gen, 0, 0, ss, n,
+  +fuel = Nat.add(Nat.mul(U32.to_nat(gg), 64n), 68n)
+  p2_go(fuel, 19, 0, 0, beta, 0, 0, 4294967295, 0, 0, 0, gen, 0, 0, ss, n,
         pmk, dep, c, gg, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        Array.get(U32, a, ss))
+        Array.get(U32, a, S.markgencell(c, gg)))

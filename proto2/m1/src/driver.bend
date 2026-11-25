@@ -13,6 +13,7 @@ import ./arith.bend as A
 def setdep() -> U32:
   127
 
+# DEBUG: dump the root bucket trace (0 = absent).
 def mxcell(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 620)
 
@@ -52,9 +53,8 @@ def maxk_go(+fuel: Nat, +ph: U32, +g: U32, +mx: U32, +gen: U32, +c: U32,
         case 1:
           (a2, _) = r
           +sb = S.set_at(setdep(), c, gg)
-          +gen2 = U32.add(gen, 1024)
-          a1 = S.cnt(g, sb, c, 4294967295, gen2, setdep(), c, gg, a2)
-          maxk_go(f, 3, g, mx, gen2, c, gg, sq,
+          a1 = S.cnt(g, sb, c, 4294967295, setdep(), c, gg, a2)
+          maxk_go(f, 3, g, mx, gen, c, gg, sq,
                   Array.get(U32, a1, S.pkcell(c, gg)))
         case 2:
           (a2, _) = r
@@ -78,7 +78,8 @@ def maxk(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
 
 # maxk writes its result into a scratch cell; `after_max` reads it and runs the
 # search. (A read can only be destructured by a callee whose parameter it is.)
-def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32) -> IO(Unit):
+def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32,
+              +dbg: U32) -> IO(Unit):
   (a, +pk) = p
   +mx = U32.and(pk, 255)
   +sq = U32.shrn(pk, 8n)
@@ -109,5 +110,5 @@ def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32) -> IO(Unit):
     IO.pure(Unit, Unit{})
 
 def run(+c: U32, +gg: U32, +beta0: U32, a: Array<U32>) -> IO(Unit):
-  after_max(Array.get(U32, maxk(c, gg, a), mxcell(c, gg)), c, gg, beta0)
+  after_max(Array.get(U32, maxk(c, gg, a), mxcell(c, gg)), c, gg, beta0, 1)
 
