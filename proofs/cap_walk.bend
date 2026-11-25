@@ -19,6 +19,7 @@
 # has not reached yet.
 import Base
 import ../src/solve_fast.bend as SolveFast
+import ../src/solve_ref.bend as SolveRef
 import ../src/groups.bend as Groups
 import ./fast_hist5.bend as FH
 import ./fast_tbl.bend as FT
@@ -279,3 +280,143 @@ def CW.dsum_slack(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   e1, e2),
                 e3),
               {==}))
+
+# ---------------------------------------------------------------------------
+# The walk's state predicates
+# ---------------------------------------------------------------------------
+
+# The scan of the head class has not happened yet at a positive phase, and at
+# phase zero it has: the state's table is valid and its raised bound is within
+# the class bound.
+def CW.Prend(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +bs: +List<SolveFast.BigClass>, +phase: Nat,
+    st: SolveFast.CKRes) -> Data:
+  match bs:
+    case Nil{}:
+      Unit
+    case Con{bc, rest}:
+      match bc:
+        case SolveFast.BigClass{fb, ws, +len, clb}:
+          match phase:
+            case 0n:
+              match st:
+                case SolveFast.CKRes{tbl, +k}:
+                  Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                    {Nat.is_le(Nat.max(CW.dep(len),
+                        SolveFast.capbound(len, k)),
+                       FH.FH.cap_class(G, SolveFast.cwords_words(ws)))
+                     == True{} : Bool}>
+            case 1n+p:
+              Unit
+
+# The state's table is valid.
+def CW.TblOf(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    st: SolveFast.CKRes) -> Data:
+  match st:
+    case SolveFast.CKRes{tbl, k}:
+      FT.FT.TblOk(G, C, n_root, tbl)
+
+# The walk's result: dropping the guess needs the best cost at most the class
+# bound of the guess, and keeping it needs the class list unchanged. Both
+# carry the table the buffer keeps.
+def CW.WalkOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +bs0: +List<SolveFast.BigClass>, +capv: Nat, +best: SolveRef.Best,
+    r: SolveFast.CapRes) -> Data:
+  match r:
+    case SolveFast.CapSkip{tbl}:
+      Arr.Arr.DPair<
+        {Nat.is_le(SolveFast.best_cost(best), capv) == True{} : Bool},
+        FT.FT.TblOk(G, C, n_root, tbl)>
+    case SolveFast.CapOk{bigs, tbl}:
+      Arr.Arr.DPair<{bigs == bs0 : +List<SolveFast.BigClass>},
+        FT.FT.TblOk(G, C, n_root, tbl)>
+
+# The scan's postcondition is stated about the scan call; move it to the value
+# the scan returned.
+def CW.loop_ok_transport(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +ws: +List<+List<Nat>>, +gn: Nat,
+    -r1: SolveFast.CKRes, -r2: SolveFast.CKRes,
+    +e: {r2 == r1 : SolveFast.CKRes},
+    +h: CK.CK.LoopOk(G, C, n_root, ws, gn, r1)) ->
+  CK.CK.LoopOk(G, C, n_root, ws, gn, r2):
+  %Equal.sym(SolveFast.CKRes, r2, r1, e) : CK.CK.LoopOk(G, C, n_root, ws, gn, _)
+  h
+
+# The scan of one class hands over its table and a `k` that covers the class's
+# branching factor over the whole guess list.
+def CW.scan_take(-R: SolveFast.CKRes -> Data, +G: +List<+List<Nat>>,
+    +C: +List<+List<Nat>>, +n_root: Nat, +ws: +List<SolveFast.CWord>,
+    +len: Nat, +gn: Nat, big: Bool, tbl: Array<U32>,
+    +hgn: {gn == Groups.len_words(G) : Nat},
+    +hlen: {len == Groups.len_words(SolveFast.cwords_words(ws)) : Nat},
+    +hcwo: {FT.FT.cwords_ok_b(G, C, n_root, ws) == True{} : Bool},
+    +htbl: FT.FT.TblOk(G, C, n_root, tbl),
+    r: SolveFast.CKRes,
+    +e: {r == SolveFast.class_k_opt(big, ws, len, gn, tbl) : SolveFast.CKRes},
+    kont: @tbl2: Array<U32> -> @+k: Nat ->
+          FT.FT.TblOk(G, C, n_root, tbl2) ->
+          {Nat.is_le(Nat.max(CW.dep(len), SolveFast.capbound(len, k)),
+             FH.FH.cap_class(G, SolveFast.cwords_words(ws))) == True{} : Bool} ->
+          R(SolveFast.CKRes{tbl2, k})) -> R(r):
+  match big:
+    case True{}:
+      match r:
+        case SolveFast.CKRes{tbl2, +k}:
+          +hloop : CK.CK.LoopOk(G, C, n_root, SolveFast.cwords_words(ws), gn,
+              SolveFast.class_k_start(ws, len, gn, tbl)) =
+            CK.CK.class_k_spec(G, C, SolveFast.cwords_words(ws), n_root, ws,
+              len, gn, tbl, {==}, hcwo, hlen, hgn, htbl,
+              Arr.Arr.dup(U32, tbl))
+          +hl1 : CK.CK.LoopOk(G, C, n_root, SolveFast.cwords_words(ws), gn,
+              SolveFast.CKRes{tbl2, k}) =
+            CW.loop_ok_transport(G, C, n_root, SolveFast.cwords_words(ws), gn,
+              SolveFast.class_k_start(ws, len, gn, tbl),
+              SolveFast.CKRes{tbl2, k}, e, hloop)
+          +htbl2 : FT.FT.TblOk(G, C, n_root, tbl2) =
+            Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl2),
+              {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+               == True{} : Bool}, hl1)
+          +hck : {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+                  == True{} : Bool} =
+            Arr.Arr.dpair_r(FT.FT.TblOk(G, C, n_root, tbl2),
+              {Nat.is_le(CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), k)
+               == True{} : Bool}, hl1)
+          +epf : {FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                     Groups.len_words(G))
+                  == CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn) : Nat} =
+            Equal.trans(Nat,
+              FH.FH.prefmax(G, SolveFast.cwords_words(ws), Groups.len_words(G)),
+              FH.FH.prefmax(G, SolveFast.cwords_words(ws), gn),
+              CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+              Equal.cong(Nat, Nat,
+                x => FH.FH.prefmax(G, SolveFast.cwords_words(ws), x),
+                Groups.len_words(G), gn,
+                Equal.sym(Nat, gn, Groups.len_words(G), hgn)),
+              CP.CP.prefmax_eq(G, SolveFast.cwords_words(ws), gn))
+          +hk : {Nat.is_le(FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                     Groups.len_words(G)), k) == True{} : Bool} =
+            NatProof.Nat.is_le_eq_l(k,
+              CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn),
+              FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                Groups.len_words(G)),
+              Equal.sym(Nat, FH.FH.prefmax(G, SolveFast.cwords_words(ws),
+                Groups.len_words(G)),
+                CK.CK.prefmax(G, SolveFast.cwords_words(ws), gn), epf), hck)
+          kont(tbl2, k, htbl2, CW.step_le(G, len, ws, k, hlen, hk))
+    case False{}:
+      +es : {SolveFast.CKRes{tbl, len} == r : SolveFast.CKRes} =
+        Equal.sym(SolveFast.CKRes, r, SolveFast.CKRes{tbl, len}, e)
+      %es : R(_)
+      kont(tbl, len, htbl, CW.step_le_cheap(G, len, ws, hlen))
+
+# The parts of a scan state, as projections (the state may be matched only once,
+# but a projection may be applied to the reconstructed value).
+def CW.tbl_of(r: SolveFast.CKRes) -> Array<U32>:
+  match r:
+    case SolveFast.CKRes{tbl, k}:
+      tbl
+
+def CW.k_of(r: SolveFast.CKRes) -> Nat:
+  match r:
+    case SolveFast.CKRes{tbl, k}:
+      k
