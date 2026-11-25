@@ -322,17 +322,7 @@ def CW.TblOf(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
 # The walk's result: dropping the guess needs the best cost at most the class
 # bound of the guess, and keeping it needs the class list unchanged. Both
 # carry the table the buffer keeps.
-def CW.WalkOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
-    +bs0: +List<SolveFast.BigClass>, +capv: Nat, +best: SolveRef.Best,
-    r: SolveFast.CapRes) -> Data:
-  match r:
-    case SolveFast.CapSkip{tbl}:
-      Arr.Arr.DPair<
-        {Nat.is_le(SolveFast.best_cost(best), capv) == True{} : Bool},
-        FT.FT.TblOk(G, C, n_root, tbl)>
-    case SolveFast.CapOk{bigs, tbl}:
-      Arr.Arr.DPair<{bigs == bs0 : +List<SolveFast.BigClass>},
-        FT.FT.TblOk(G, C, n_root, tbl)>
+
 
 # The scan's postcondition is stated about the scan call; move it to the value
 # the scan returned.
@@ -880,7 +870,7 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     st: SolveFast.CKRes,
     +htbl: CW.TblOf(G, C, n_root, st),
     +hpref: CW.Prend(G, C, n_root, phase, bs, st)) ->
-  CW.WalkOk(G, C, n_root, bs0, capv, best,
+  FH.FH.CapWalkWit(G, C, n_root, bs0, capv, best,
     SolveFast.cap_walk(fuel, bs0, bs, phase, stop, acc, gain, total0, best, gn,
       st)):
   match fuel:
@@ -956,7 +946,7 @@ def CW.walk(+fuel: Nat, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                                 SolveFast.BigClass{fb, ws, len, clb}),
                               FH.FH.bigs_ok_b(G, C, n_root, rest), hok)
                           CW.scan_step(
-                            st2 => CW.WalkOk(G, C, n_root, bs0, capv, best,
+                            st2 => FH.FH.CapWalkWit(G, C, n_root, bs0, capv, best,
                               SolveFast.cap_walk(f, bs0, bs, 0n, stop2, acc,
                                 gain, total0, best, gn, st2)),
                             G, C, n_root, big,
@@ -1443,3 +1433,89 @@ def CW.base_le(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
                        Nat.add(n,
                          FH.FH.cap_fold(G, Groups.Group{fb, ws} <> restg)))
                      == True{} : Bool}, hbm)
+
+# The slack is the class fold minus the depth bounds.
+def CW.slack_eq(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +bs: +List<SolveFast.BigClass>,
+    +hok: {FH.FH.bigs_ok_b(G, C, n_root, bs) == True{} : Bool}) ->
+  {CW.slack(G, bs)
+   == Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bs)),
+        SolveFast.bigs_depth(bs)) : Nat}:
+  +hds = CW.dsum_slack(G, C, n_root, bs, hok)
+  +e1 : {Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bs)),
+            SolveFast.bigs_depth(bs))
+         == Nat.sub(Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+              SolveFast.bigs_depth(bs)) : Nat} =
+    Equal.cong(Nat, Nat, x => Nat.sub(x, SolveFast.bigs_depth(bs)),
+      FH.FH.cap_fold(G, FH.FH.bigs_groups(bs)),
+      Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+      Equal.sym(Nat, Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+        FH.FH.cap_fold(G, FH.FH.bigs_groups(bs)), hds))
+  +e2 : {Nat.sub(Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+            SolveFast.bigs_depth(bs))
+         == CW.slack(G, bs) : Nat} =
+    Equal.trans(Nat,
+      Nat.sub(Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+        SolveFast.bigs_depth(bs)),
+      Nat.sub(Nat.add(CW.slack(G, bs), SolveFast.bigs_depth(bs)),
+        SolveFast.bigs_depth(bs)),
+      CW.slack(G, bs),
+      Equal.cong(Nat, Nat, x => Nat.sub(x, SolveFast.bigs_depth(bs)),
+        Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+        Nat.add(CW.slack(G, bs), SolveFast.bigs_depth(bs)),
+        NatProof.NatPrf.add_comm(SolveFast.bigs_depth(bs), CW.slack(G, bs))),
+      FH.FH.nat_sub_add_cancel(CW.slack(G, bs), SolveFast.bigs_depth(bs)))
+  Equal.sym(Nat,
+    Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bs)),
+      SolveFast.bigs_depth(bs)), CW.slack(G, bs), Equal.trans(Nat,
+      Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bs)),
+        SolveFast.bigs_depth(bs)),
+      Nat.sub(Nat.add(SolveFast.bigs_depth(bs), CW.slack(G, bs)),
+        SolveFast.bigs_depth(bs)),
+      CW.slack(G, bs), e1, e2))
+
+# The walk specification as the model's hook: `CW.walk` at the initial state
+# (`ck_cheap 0`, phase one, empty accumulator, the class-independent base).
+def CW.hook(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) ->
+  FH.FH.CapHookType(G, C):
+  gn => n_root => bigs0 => items0 => tbl0 => best => n => capv =>
+  hgn => hok => htbl => hb =>
+    CW.walk(
+      Nat.add(Nat.add(SolveFast.bigs_len(bigs0), SolveFast.bigs_len(bigs0)), 2n),
+      G, C, n_root, bigs0, capv, best, gn, bigs0, 1n,
+      Nat.is_le(SolveFast.best_cost(best),
+        Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0))),
+      Nil{}, 0n,
+      Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0)),
+      hgn, hok,
+      NatProof.Nat.is_le_eq_l(
+        capv,
+        Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
+          SolveFast.cap_base(n, items0)), 0n),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs0)),
+            SolveFast.bigs_depth(bigs0))),
+        Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
+          SolveFast.cap_base(n, items0)), 0n), CW.slack(G, bigs0)),
+        Equal.cong(Nat, Nat,
+          x => Nat.add(Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
+            SolveFast.cap_base(n, items0)), 0n), x),
+          Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs0)),
+            SolveFast.bigs_depth(bigs0)), CW.slack(G, bigs0),
+          Equal.sym(Nat, CW.slack(G, bigs0),
+            Nat.sub(FH.FH.cap_fold(G, FH.FH.bigs_groups(bigs0)),
+              SolveFast.bigs_depth(bigs0)),
+            CW.slack_eq(G, C, n_root, bigs0, hok))),
+        hb),
+      Equal.cong(Nat, Bool,
+        x => Nat.is_le(SolveFast.best_cost(best), x),
+        Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0)),
+        Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
+          SolveFast.cap_base(n, items0)), 0n),
+        Equal.sym(Nat, Nat.add(Nat.add(SolveFast.bigs_depth(bigs0),
+            SolveFast.cap_base(n, items0)), 0n),
+          Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0)),
+          NatProof.NatPrf.add_zero(
+            Nat.add(SolveFast.bigs_depth(bigs0),
+              SolveFast.cap_base(n, items0))))),
+      {==},
+      SolveFast.ck_cheap(0n, tbl0), htbl, Unit{})

@@ -49,6 +49,7 @@ import ./fast_hist5.bend as FH
 import ./fast_valid.bend as FVal
 import ./class_wid.bend as WK
 import ./cap_lb.bend as CP
+import ./cap_walk.bend as CAP
 
 # ---------------------------------------------------------------------------
 # Small arithmetic, list, and `sat_add` helpers
@@ -4621,7 +4622,7 @@ def FOpt.walk_pop_dup(+p: Nat, +G: +List<+List<Nat>>,
       FN.FN.nodup_ok(nodup, S), True{},
       Equal.cong(+List<+List<Nat>>, Bool, l => FN.FN.nodup_ok(nodup, l),
         SolveFast.cwords_words(cwS), S, ecwS), nd)
-  +hr2_cw = FH.FH.guess_items_buf_spec(G, C_root, n_root, has_buf, nodup, row,
+  +hr2_cw = FH.FH.guess_items_buf_spec(G, C_root, CAP.CW.hook(G, C_root), n_root, has_buf, nodup, row,
               g, cwS, n, fl, best, b2, en, hnd_cw, hrow, hcwS, hbuf2)
   +hr2 : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best,
            SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2)) =
