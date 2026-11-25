@@ -268,6 +268,33 @@ def class_lb_fast(+nodup: Bool, +len: Nat, +ws: +List<+List<Nat>>) -> Nat:
     case False{}:
       class_lb(ws)
 
+# --- capacity lower bound -------------------------------------------------
+#
+# A class whose biggest branching factor over the guess list is `k` can hold
+# only `G_j = 1 + k + ... + k^(j-1)` candidates in its first `j` levels, so a
+# tree over it costs at least `capbound(n, k)` (see proofs/lb_capacity.bend).
+# Only duplicate-free buffered nodes use this: `mk_buf_tbl` is built for the
+# no-duplicate path only, so a level ends at most one candidate per node.
+#
+# The exact `k` costs a pass over the guess table times the class size, so the
+# walk below runs at most once per node and only for classes of at least 16
+# candidates; it stops as soon as the bound already reaches `best`. Nodes with
+# fewer than 512 candidates skip it entirely: the pass costs more there than
+# the bound saves.
+
+# `n + sum over levels of (n - capacity(level))+`, where level 1 holds one
+# candidate and each further level holds `1 + k * capacity`.
+def cap_go(+rem: Nat, +n: Nat, +k: Nat, +cap: Nat, +acc: Nat) -> Nat:
+  match rem:
+    case 0n:
+      acc
+    case 1n+p:
+      cap_go(p, n, k, Nat.min(n, Nat.add(1n, Nat.mul(k, cap))),
+             Nat.add(Nat.sub(n, cap), acc))
+
+def capbound(+n: Nat, +k: Nat) -> Nat:
+  Nat.add(n, cap_go(n, n, k, 1n, 0n))
+
 # The sum of class lower bounds over a class list.
 def class_words(+groups: +List<Groups.Group>) -> Nat:
   match groups:
@@ -1065,7 +1092,8 @@ def child_glist(+nodup: Bool, +words: +List<CWord>, +wlen: Nat,
 
 type Buf5 is Type:
   NoBuf{}
-  Buf5{seen: Array<Nat>, buckets: Array<+List<CWord>>, tbl: Array<U32>, gen: Nat}
+  Buf5{seen: Array<Nat>, buckets: Array<+List<CWord>>, tbl: Array<U32>,
+       gen: Nat, gn: Nat}
 
 type GuessRes is Type:
   GuessRes{items: +List<Item>, buf: Buf5}
@@ -1238,13 +1266,13 @@ def fill_tbl_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +row: U32,
                               tbl
 
 def mk_buf_tbl_depth(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-                     +gcount: U32, md: Maybe<Nat>) -> Buf5:
+                     +gl: Nat, +gcount: U32, md: Maybe<Nat>) -> Buf5:
   match md:
     case None{}:
       NoBuf{}
     case Some{+d}:
       Buf5{Array.new(Nat, 10n, 0n), Array.new(+List<CWord>, 10n, Nil{}),
-           fill_tbl_go(G, C, 0, gcount, Array.new(U32, d, 0)), 1n}
+           fill_tbl_go(G, C, 0, gcount, Array.new(U32, d, 0)), 1n, gl}
 
 def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   +n: Nat) -> Buf5:
@@ -1253,7 +1281,7 @@ def mk_buf_tbl_if(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       NoBuf{}
     case True{}:
       +gl = Groups.len_words(G)
-      mk_buf_tbl_depth(G, C, U32.from_nat(gl), depth_for(Nat.mul(gl, n)))
+      mk_buf_tbl_depth(G, C, gl, U32.from_nat(gl), depth_for(Nat.mul(gl, n)))
 
 def mk_buf_tbl(+nodup: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                +n: Nat) -> Buf5:
@@ -1417,8 +1445,8 @@ def emit_bigs(+bs: +List<BigClass>, +rem_lb: Nat, +acc: +List<Item>) -> +List<It
     case Con{bc, rest}:
       match bc:
         case BigClass{+fb, +ws, +len}:
-          +clb = Nat.sub(Nat.add(len, len), 1n)
-          emit_bigs(rest, Nat.add(clb, rem_lb),
+          +clb2 = Nat.sub(Nat.add(len, len), 1n)
+          emit_bigs(rest, Nat.add(clb2, rem_lb),
             ClassItem{fb, ws, len, rem_lb} <> (Add{fb, rem_lb} <> acc))
 
 def two_tree(+w1: +List<Nat>, +w2: +List<Nat>) -> Tree.Tree:
@@ -1527,14 +1555,20 @@ type Drain5State is Type:
   Drain5State{buckets: Array<+List<CWord>>, tbl: Array<U32>, rem_lb: Nat,
               items: +List<Item>, bigs: +List<BigClass>}
 
+def drain5_ge2_emit(+fb: +List<Feedback.Color>, +rem_lb: Nat,
+                    +items: +List<Item>, +bigs: +List<BigClass>,
+                    buckets: Array<+List<CWord>>, tbl: Array<U32>,
+                    +len: Nat, +ws: +List<CWord>) -> Drain5State:
+  Drain5State{buckets, tbl, rem_lb, items,
+    insert_big(BigClass{fb, ws, len}, len, bigs, next_big_le(len, bigs))}
+
 def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                    +items: +List<Item>, +bigs: +List<BigClass>,
                    buckets: Array<+List<CWord>>, tbl: Array<U32>,
                    rl: RevCWordsLen) -> Drain5State:
   match rl:
     case RevCWordsLen{+len, +ws}:
-      Drain5State{buckets, tbl, rem_lb, items,
-        insert_big(BigClass{fb, ws, len}, len, bigs, next_big_le(len, bigs))}
+      drain5_ge2_emit(fb, rem_lb, items, bigs, buckets, tbl, len, ws)
 
 def drain5_add_three(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                      +items: +List<Item>, +bigs: +List<BigClass>,
@@ -1567,7 +1601,8 @@ def drain5_add(+code: U32, +rem_lb: Nat, +items: +List<Item>,
           match wt2:
             case Nil{}:
               Drain5State{buckets, tbl, Nat.add(3n, rem_lb),
-                TwoItem{decode_fb5(code), cword_w(cw2), cword_w(cw)} <> items, bigs}
+                TwoItem{decode_fb5(code), cword_w(cw2), cword_w(cw)} <> items,
+                bigs}
             case Con{+cw3, +wt3}:
               match wt3:
                 case Nil{}:
@@ -1594,51 +1629,279 @@ def drain5_go(+touched: +List<U32>, st: Drain5State) -> Drain5State:
             drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<CWord>, buckets, code, Nil{})))
 
-def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
-                  dr: Drain5State) -> GuessRes:
+# The scan result: the table rides through and `k` is the largest count so far.
+# The dedup scratch array never leaves the scan, so no consumer or proof state
+# has to mention it.
+type CKRes is Type:
+  CKRes{tbl: Array<U32>, k: Nat}
+
+# One pass over the class per guess, reusing the proven histogram fold: the
+# `k` of a `Hist5Ok` is the number of distinct feedback codes of that guess on
+# the class. `fuel` counts the guesses still to process, `more` says whether a
+# further guess follows the current one, and the row of each pass is its guess
+# index, so the scan never reads a table row past the guess list. The dedup
+# buffer is allocated once per class and reused: every pass raises `gen`, which
+# makes the stamps of the previous pass stale.
+def ck_loop(+fuel: Nat, +i: Nat, +C: +List<CWord>, +gen: Nat, +m: Nat,
+            +kmax: Nat, hist: Hist5Res, more: Bool) -> CKRes:
+  match fuel:
+    case 0n:
+      match hist:
+        case Hist5Pruned{seen2, tbl2}:
+          CKRes{tbl2, kmax}
+        case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
+          CKRes{tbl2, Nat.max(kmax, k2)}
+    case 1n+p:
+      match hist:
+        case Hist5Pruned{seen2, tbl2}:
+          CKRes{tbl2, kmax}
+        case Hist5Ok{seen2, tbl2, +m2, +k2, budget}:
+          match more:
+            case False{}:
+              CKRes{tbl2, Nat.max(kmax, k2)}
+            case True{}:
+              ck_loop(p, Nat.add(1n, i), C, Nat.add(1n, gen), m,
+                Nat.max(kmax, k2),
+                hist5_go(U32.from_nat(Nat.add(1n, i)), C, Nat.add(1n, gen),
+                  False{}, Hist5Ok{seen2, tbl2, 0n, 0n, m}),
+                Nat.is_le(2n, p))
+
+def class_k_start_b(empty: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
+                    tbl: Array<U32>) -> CKRes:
+  match empty:
+    case True{}:
+      CKRes{tbl, 0n}
+    case False{}:
+      ck_loop(gn, 0n, ws, 1n, m, 0n,
+        hist5_go(0, ws, 1n, False{}, Hist5Ok{Array.new(Nat, 10n, 0n), tbl,
+          0n, 0n, m}),
+        Nat.is_le(2n, gn))
+
+def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
+                  tbl: Array<U32>) -> CKRes:
+  class_k_start_b(Nat.is_le(gn, 0n), ws, m, gn, tbl)
+
+def bigs_depth(+bs: +List<BigClass>) -> Nat:
+  match bs:
+    case Nil{}:
+      0n
+    case Con{bc, rest}:
+      match bc:
+        case BigClass{fb, ws, +len}:
+          Nat.add(Nat.sub(Nat.add(len, len), 1n), bigs_depth(rest))
+
+# The class-independent part of the lower bound: `n` plus the class lower
+# bounds of the non-big items. A solved class of three candidates contributes
+# its depth bound `5`, not its exact tree cost (five or six), so this stays a
+# function of the class sizes and keeps the capacity walk's running total
+# comparable with the class list.
+def cap_base(+n: Nat, +items: +List<Item>) -> Nat:
+  match items:
+    case Nil{}:
+      0n
+    case Con{it, rest}:
+      match it:
+        case Begin{g}:
+          cap_base(n, rest)
+        case ClassItem{fb, cws, +wlen, tlb}:
+          Nat.add(Nat.sub(Nat.add(wlen, wlen), 1n), cap_base(n, rest))
+        case OneItem{fb, w}:
+          Nat.add(1n, cap_base(n, rest))
+        case TwoItem{fb, w1, w2}:
+          Nat.add(3n, cap_base(n, rest))
+        case DoneItem{fb, tree, cost}:
+          Nat.add(5n, cap_base(n, rest))
+        case Add{fb, tlb}:
+          cap_base(n, rest)
+        case End{}:
+          Nat.add(n, cap_base(n, rest))
+
+type CapRes is Type:
+  CapSkip{tbl: Array<U32>}
+  CapOk{bigs: +List<BigClass>, tbl: Array<U32>}
+
+def rev_bigs(+bs: +List<BigClass>, +acc: +List<BigClass>) -> +List<BigClass>:
+  match bs:
+    case Nil{}:
+      acc
+    case Con{b, t}:
+      rev_bigs(t, b <> acc)
+
+def bigs_len(+bs: +List<BigClass>) -> Nat:
+  match bs:
+    case Nil{}:
+      0n
+    case Con{b, t}:
+      Nat.add(1n, bigs_len(t))
+
+def ck_cheap(+m: Nat, tbl: Array<U32>) -> CKRes:
+  CKRes{tbl, m}
+
+def class_k_opt(big: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
+                tbl: Array<U32>) -> CKRes:
+  match big:
+    case False{}:
+      ck_cheap(m, tbl)
+    case True{}:
+      class_k_start(ws, m, gn, tbl)
+
+# One class per two steps. A positive phase starts the k pass for the list head
+# and zero consumes it; the phase is always a literal (1 on entry, 0 after a
+# pass), so the proof never has to reason about an unknown phase. `fuel` bounds
+# the number of steps; if it ever ran out the walk would hand back the original
+# class list, which is the same tree but without the skip, so the fuel only
+# costs time, never correctness. `stop` is checked on entry, so the walk ends as
+# soon as the running capacity gain reaches the best cost. The rebuilt list
+# keeps the input order.
+def cap_walk(+fuel: Nat, +bs0: +List<BigClass>, +bs: +List<BigClass>,
+             +phase: Nat, stop: Bool, +acc: +List<BigClass>, +gain: Nat,
+             +total0: Nat, +best: SolveRef.Best, +gn: Nat,
+             st: CKRes) -> CapRes:
+  match fuel:
+    case 0n:
+      match st:
+        case CKRes{tbl, k}:
+          CapOk{bs0, tbl}
+    case 1n+f:
+      match bs:
+        case Nil{}:
+          match phase:
+            case 0n:
+              match stop:
+                case True{}:
+                  match st:
+                    case CKRes{tbl, k}:
+                      CapSkip{tbl}
+                case False{}:
+                  match st:
+                    case CKRes{tbl, k}:
+                      CapOk{rev_bigs(acc, Nil{}), tbl}
+            case 1n+hp:
+              match stop:
+                case True{}:
+                  match st:
+                    case CKRes{tbl, k}:
+                      CapSkip{tbl}
+                case False{}:
+                  match st:
+                    case CKRes{tbl, k}:
+                      CapOk{rev_bigs(acc, Nil{}), tbl}
+        case Con{bc, rest}:
+          match bc:
+            case BigClass{+fb, +ws, +len}:
+              match phase:
+                case 1n+hp:
+                  match stop:
+                    case True{}:
+                      match st:
+                        case CKRes{tbl, k}:
+                          CapSkip{tbl}
+                    case False{}:
+                      match st:
+                        case CKRes{tbl, k}:
+                          cap_walk(f, bs0, bs, 0n,
+                            Nat.is_le(best_cost(best), Nat.add(total0, gain)),
+                            acc, gain, total0, best, gn,
+                            class_k_opt(Nat.is_le(16n, len), ws, len, gn, tbl))
+                case 0n:
+                  match stop:
+                    case True{}:
+                      match st:
+                        case CKRes{tbl, k}:
+                          CapSkip{tbl}
+                    case False{}:
+                      match st:
+                        case CKRes{tbl, +k}:
+                          +dep = Nat.sub(Nat.add(len, len), 1n)
+                          +clb2 = Nat.max(dep, capbound(len, k))
+                          +gain2 = Nat.add(gain, Nat.sub(clb2, dep))
+                          cap_walk(f, bs0, rest, 1n,
+                            Nat.is_le(best_cost(best), Nat.add(total0, gain2)),
+                            BigClass{fb, ws, len} <> acc, gain2, total0,
+                            best, gn, CKRes{tbl, k})
+
+def finish_cap(r: CapRes, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
+               +gn: Nat, +rem_lb: Nat, +items: +List<Item>,
+               buckets3: Array<+List<CWord>>) -> GuessRes:
+  match r:
+    case CapSkip{tbl}:
+      GuessRes{Nil{}, Buf5{seen, buckets3, tbl, gen2, gn}}
+    case CapOk{+bigs2, tbl}:
+      GuessRes{Begin{g} <> emit_bigs(bigs2, rem_lb, items),
+               Buf5{seen, buckets3, tbl, gen2, gn}}
+
+# The capacity walk runs only when its class scans can pay for themselves: the
+# node needs at least 512 candidates, and the guess list may be at most two and
+# a half times the node's candidate count. A class scan costs one pass over the
+# class per guess, so a long guess list next to a small node makes the walk lose.
+# `cap_base` is the class-independent part of the lower bound and `bigs_depth`
+# adds the depth bound of every big class, so `base` is the walk's starting
+# value.
+def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
+                +gn: Nat, +n: Nat, +rem_lb: Nat, +items: +List<Item>,
+                +bigs: +List<BigClass>, buckets3: Array<+List<CWord>>,
+                tbl3: Array<U32>, +best: SolveRef.Best) -> GuessRes:
+  match ok:
+    case False{}:
+      GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
+               Buf5{seen, buckets3, tbl3, gen2, gn}}
+    case True{}:
+      +base = Nat.add(bigs_depth(bigs), cap_base(n, items))
+      +fuel = Nat.add(Nat.add(bigs_len(bigs), bigs_len(bigs)), 2n)
+      finish_cap(cap_walk(fuel, bigs, bigs, 1n,
+                   Nat.is_le(best_cost(best), base),
+                   Nil{}, 0n, base, best, gn, ck_cheap(0n, tbl3)),
+        g, seen, gen2, gn, rem_lb, items, buckets3)
+
+def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat, +gn: Nat,
+                  +best: SolveRef.Best, +n: Nat, dr: Drain5State) -> GuessRes:
   match dr:
     case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
-      GuessRes{Begin{g} <> emit_bigs(bigs, rem_lb, items),
-               Buf5{seen, buckets3, tbl3, gen2}}
+      finish_node(Bool.and(Nat.is_le(512n, n),
+          Nat.is_le(Nat.add(gn, gn), Nat.mul(5n, n))),
+        g, seen, gen2, gn, n, rem_lb, items, bigs, buckets3, tbl3, best)
 
 def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
-               fs: Fill5State) -> GuessRes:
+               +gn: Nat, +best: SolveRef.Best, fs: Fill5State) -> GuessRes:
   match fs:
     case Fill5State{buckets2, tbl2, +touched}:
-      finish_drain5(g, seen, gen2,
-        drain5_go(touched, Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
+      finish_drain5(g, seen, gen2, gn, best, n,
+        drain5_go(touched,
+          Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
 
 def schedule5_lb(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
                  seen: Array<Nat>, buckets: Array<+List<CWord>>,
-                 tbl: Array<U32>, +gen2: Nat, skip: Bool) -> GuessRes:
+                 tbl: Array<U32>, +gen2: Nat, +gn: Nat, +best: SolveRef.Best,
+                 skip: Bool) -> GuessRes:
   match skip:
     case True{}:
-      GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2}}
+      GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2, gn}}
     case False{}:
-      run_drain5(g, n, seen, gen2,
+      run_drain5(g, n, seen, gen2, gn, best,
         fill5_go(row, S, Fill5State{buckets, tbl, Nil{}}))
 
 def schedule5_usable(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
                      +best: SolveRef.Best, seen: Array<Nat>,
                      buckets: Array<+List<CWord>>, tbl: Array<U32>,
-                     +gen2: Nat, +m: Nat, +k: Nat, usable: Bool) -> GuessRes:
+                     +gen2: Nat, +gn: Nat, +m: Nat, +k: Nat,
+                     usable: Bool) -> GuessRes:
   match usable:
     case False{}:
-      GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2}}
+      GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2, gn}}
     case True{}:
       +lb = Nat.sub(Nat.add(n, Nat.add(m, m)), k)
-      schedule5_lb(row, g, S, n, seen, buckets, tbl, gen2,
+      schedule5_lb(row, g, S, n, seen, buckets, tbl, gen2, gn, best,
         skippable(best, lb))
 
 def schedule5_hist(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
                    +best: SolveRef.Best, buckets: Array<+List<CWord>>,
-                   +gen: Nat, hr: Hist5Res) -> GuessRes:
+                   +gen: Nat, +gn: Nat, hr: Hist5Res) -> GuessRes:
   match hr:
     case Hist5Pruned{seen2, tbl2}:
-      GuessRes{Nil{}, Buf5{seen2, buckets, tbl2, Nat.add(1n, gen)}}
+      GuessRes{Nil{}, Buf5{seen2, buckets, tbl2, Nat.add(1n, gen), gn}}
     case Hist5Ok{seen2, tbl2, +m, +k, budget}:
       schedule5_usable(row, g, S, n, best, seen2, buckets, tbl2,
-        Nat.add(1n, gen), m, k,
+        Nat.add(1n, gen), gn, m, k,
         Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))
 
 def budget_for(+n: Nat, +best: SolveRef.Best, skip_self: Bool) -> Nat:
@@ -1655,9 +1918,9 @@ def guess_body_buf_ge2(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
       +fg = fgroups_build_fast(g, cwords_words(S), Nil{})
       GuessRes{schedule_fguess(True{}, g, fg, n, best, fgroups_smaller(n, fg)),
                NoBuf{}}
-    case Buf5{seen, buckets, tbl, +gen}:
+    case Buf5{seen, buckets, tbl, +gen, +gn}:
       +budget0 = budget_for(n, best, skip_self)
-      schedule5_hist(row, g, S, n, best, buckets, gen,
+      schedule5_hist(row, g, S, n, best, buckets, gen, gn,
         hist5_go(row, S, gen, skip_self, Hist5Ok{seen, tbl, 0n, 0n, budget0}))
 
 # How many candidates `S` holds, capped at two. Reading the shape in a

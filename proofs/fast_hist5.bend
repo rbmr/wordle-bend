@@ -36,6 +36,7 @@ import ./fast_fb5.bend as FF5
 import ./fast_perm.bend as FP
 import ./fast_tbl.bend as FT
 import ./fast_three.bend as FT3
+import ./lb_capacity.bend as CapProof
 
 # ---------------------------------------------------------------------------
 # Small Nat and Bool helpers
@@ -3229,6 +3230,43 @@ def FH.body_lb(+nodup: Bool, +n: Nat, +body: +List<SolveFast.Item>) -> Nat:
           FH.body_lb(nodup, n, rest)
         case SolveFast.End{}:
           n
+
+# The number of feedback groups of `g` on the class `ws`. It is the same count
+# the class scan produces (`CK.count` in `proofs/class_k.bend`).
+def FH.cap_count(+g: +List<Nat>, +ws: +List<+List<Nat>>) -> Nat:
+  FH.fgroups_count(SolveFast.fgroups_build_fast(g, ws, Nil{}))
+
+# The largest count over the first `i` guesses of the guess list.
+def FH.prefmax(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>, +i: Nat) -> Nat:
+  match i:
+    case 0n:
+      0n
+    case 1n+p:
+      Nat.max(FH.cap_count(FT.FT.nth_word(G, p), ws), FH.prefmax(G, ws, p))
+
+# The capacity lower bound of one class: the depth bound, or the capacity bound
+# at the class's branching factor over the whole guess list, whichever is
+# larger.
+def FH.cap_class(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>) -> Nat:
+  Nat.max(SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws),
+    CapProof.LB.capbound(Groups.len_words(ws),
+      FH.prefmax(G, ws, Groups.len_words(G))))
+
+# The class bounds of a class list, added up.
+def FH.cap_fold(+G: +List<+List<Nat>>, +groups: +List<Groups.Group>) -> Nat:
+  match groups:
+    case Nil{}:
+      0n
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          Nat.add(FH.cap_class(G, ws), FH.cap_fold(G, rest))
+
+# The capacity lower bound of a guess: one per candidate plus one class bound
+# per feedback class.
+def FH.cap_lb(+G: +List<+List<Nat>>, +n: Nat,
+              +groups: +List<Groups.Group>) -> Nat:
+  Nat.add(n, FH.cap_fold(G, groups))
 
 def FH.done_ws_ok_b(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
     +tree: Tree.Tree, +cost: Nat) -> Bool:
@@ -7539,11 +7577,13 @@ def FH.emit_bigs_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     case Con{bc, +rest}:
       match bc:
         case SolveFast.BigClass{+fb, +ws, +len}:
+          +bcv : SolveFast.BigClass =
+            SolveFast.BigClass{fb, ws, len}
           +hbc = Logic.Proof.and_true_l(
-                   FH.big_ok_b(G, C, n_root, SolveFast.BigClass{fb, ws, len}),
+                   FH.big_ok_b(G, C, n_root, bcv),
                    FH.bigs_ok_b(G, C, n_root, rest), hbs)
           +hrest = Logic.Proof.and_true_r(
-                     FH.big_ok_b(G, C, n_root, SolveFast.BigClass{fb, ws, len}),
+                     FH.big_ok_b(G, C, n_root, bcv),
                      FH.bigs_ok_b(G, C, n_root, rest), hbs)
           +hcws = Logic.Proof.and_true_l(
                     FT.FT.cwords_ok_b(G, C, n_root, ws),
@@ -7746,7 +7786,8 @@ def FH.drain5_add_ge4_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       match dw1:
         case DWit{+ig1, +perm1, +hok_bigs1, +hbm1, +elb1, +hperm1}:
           +fdec = SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f))
-          +bc : SolveFast.BigClass = SolveFast.BigClass{fdec, ws, rlen}
+          +bc : SolveFast.BigClass =
+            SolveFast.BigClass{fdec, ws, rlen}
           +le0 = SolveFast.next_big_le(rlen, bigs2)
           +bigs3 = SolveFast.insert_big(bc, rlen, bigs2, le0)
           +hbc : {FH.big_ok_b(G, C, n_root, bc) == True{} : Bool} =
@@ -8588,7 +8629,7 @@ def FH.drain5_one_dup0(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     etbl2, dw1)
 
 def FH.drain5_cons_step(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +pre: +List<SolveFast.FGroup>,
+    +gn: Nat, +n_root: Nat, +pre: +List<SolveFast.FGroup>,
     +f: +List<Feedback.Color>, +len: Nat, +rws: +List<+List<Nat>>,
     +rest: +List<SolveFast.FGroup>, +n_orig: Nat, +ig0: +List<Groups.Group>,
     +bigs0: +List<SolveFast.BigClass>, -tbl0: Array<U32>,
@@ -8631,7 +8672,7 @@ def FH.drain5_cons_step(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         htbl2, et2, dw1)
 
 def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +pre: +List<SolveFast.FGroup>,
+    +gn: Nat, +n_root: Nat, +pre: +List<SolveFast.FGroup>,
     +f: +List<Feedback.Color>, +len: Nat, +rws: +List<+List<Nat>>,
     +rest: +List<SolveFast.FGroup>, +n_orig: Nat, +ig0: +List<Groups.Group>,
     +bigs0: +List<SolveFast.BigClass>, +lb0: Nat, +items0: +List<SolveFast.Item>,
@@ -8669,8 +8710,7 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}))) ->
   FH.DrainSpec(G, C, n_root, pre, SolveFast.FGroup{f, len, rws} <> rest,
     n_orig, ig0, bigs0, tbl,
-    SolveFast.drain5_go(
-      FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
+    SolveFast.drain5_go(FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
       SolveFast.Drain5State{bkts, tbl, lb0, items0, bigs0})):
   (b3, dpb3) = dpb2
   (b4, peb2) = dpb3
@@ -8728,8 +8768,7 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
               SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
             eq_41, hdr_tb)
-  +eapp : {SolveFast.drain5_go(
-             List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+  +eapp : {SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
              SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})
            == SolveFast.drain5_go(c <> Nil{},
                 SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
@@ -8737,16 +8776,14 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
            : SolveFast.Drain5State} =
     FH.drain5_go_append(FH.rev_codes(rest, Nil{}), c <> Nil{},
       SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})
-  +eapp_1 : {SolveFast.drain5_go(
-               List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+  +eapp_1 : {SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})
              == SolveFast.drain5_go(c <> Nil{},
                   SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
                     SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}))
              : SolveFast.Drain5State} =
     Equal.trans(SolveFast.Drain5State,
-      SolveFast.drain5_go(
-        List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+      SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
         SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
       SolveFast.drain5_go(c <> Nil{},
         SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
@@ -8755,33 +8792,26 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
           SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})),
       Equal.trans(SolveFast.Drain5State,
-        SolveFast.drain5_go(
-          List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+        SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
           SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
-        SolveFast.drain5_go(
-          List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+        SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
           SolveFast.Drain5State{b3, t3, lb0, items0, bigs0}),
         SolveFast.drain5_go(c <> Nil{},
           SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
             SolveFast.Drain5State{b3, t3, lb0, items0, bigs0})),
         Equal.trans(SolveFast.Drain5State,
-          SolveFast.drain5_go(
-            List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+          SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
             SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
-          SolveFast.drain5_go(
-            List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+          SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
             SolveFast.Drain5State{b3, t1, lb0, items0, bigs0}),
-          SolveFast.drain5_go(
-            List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+          SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
             SolveFast.Drain5State{b3, t3, lb0, items0, bigs0}),
           Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Drain5State,
-            x => SolveFast.drain5_go(
-                   List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+            x => SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                    SolveFast.Drain5State{x, t1, lb0, items0, bigs0}),
             b1, b3, Equal.sym(Array<+List<SolveFast.CWord>>, b3, b1, eb3_b1)),
           Equal.cong(Array<U32>, SolveFast.Drain5State,
-            y => SolveFast.drain5_go(
-                   List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+            y => SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
                    SolveFast.Drain5State{b3, y, lb0, items0, bigs0}),
             t1, t3, Equal.sym(Array<U32>, t3, t1, et3_t1))),
         eapp),
@@ -8818,22 +8848,21 @@ def FH.drain5_go_cons_dup2(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     FH.DrainSpec(G, C, n_root, pre, gp <> rest, n_orig, ig0, bigs0, tbl,
       SolveFast.drain5_go(_, SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}))
   %Equal.sym(SolveFast.Drain5State,
-     SolveFast.drain5_go(
-       List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
+     SolveFast.drain5_go(List.append(&2, U32, FH.rev_codes(rest, Nil{}), c <> Nil{}),
        SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
      SolveFast.drain5_go(c <> Nil{},
        SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
          SolveFast.Drain5State{b1, t1, lb0, items0, bigs0})),
      eapp_1) :
     FH.DrainSpec(G, C, n_root, pre, gp <> rest, n_orig, ig0, bigs0, tbl, _)
-  FH.drain5_cons_step(G, C, n_root, pre, f, len, rws, rest, n_orig, ig0, bigs0,
-    tbl, htbl,
+  FH.drain5_cons_step(G, C, gn, n_root, pre, f, len, rws, rest, n_orig, ig0,
+    bigs0, tbl, htbl,
     SolveFast.drain5_go(FH.rev_codes(rest, Nil{}),
       SolveFast.Drain5State{b1, t1, lb0, items0, bigs0}),
     hf5, hnd_gp, hnh, hdr1)
 
 def FH.drain5_go_cons_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +pre: +List<SolveFast.FGroup>,
+    +gn: Nat, +n_root: Nat, +pre: +List<SolveFast.FGroup>,
     +f: +List<Feedback.Color>, +len: Nat, +rws: +List<+List<Nat>>,
     +rest: +List<SolveFast.FGroup>, +n_orig: Nat, +ig0: +List<Groups.Group>,
     +bigs0: +List<SolveFast.BigClass>, +lb0: Nat, +items0: +List<SolveFast.Item>,
@@ -8865,8 +8894,7 @@ def FH.drain5_go_cons_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.Drain5State{b4, t4, lb0, items0, bigs0}))) ->
   FH.DrainSpec(G, C, n_root, pre, SolveFast.FGroup{f, len, rws} <> rest,
     n_orig, ig0, bigs0, tbl,
-    SolveFast.drain5_go(
-      FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
+    SolveFast.drain5_go(FH.rev_codes(SolveFast.FGroup{f, len, rws} <> rest, Nil{}),
       SolveFast.Drain5State{bkts, tbl, lb0, items0, bigs0})):
   (b1, dpb2) = dpb
   (b2, peb) = dpb2
@@ -8874,13 +8902,13 @@ def FH.drain5_go_cons_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   (t1, dpt2) = dpt
   (t2, pet) = dpt2
   (+et1, +et2) = pet
-  FH.drain5_go_cons_dup2(G, C, n_root, pre, f, len, rws, rest, n_orig, ig0,
+  FH.drain5_go_cons_dup2(G, C, gn, n_root, pre, f, len, rws, rest, n_orig, ig0,
     bigs0, lb0, items0, bkts, tbl, b1, eb1, b2, eb2,
     Arr.Arr.dup(+List<SolveFast.CWord>, b2), t1, et1, t2, et2,
     Arr.Arr.dup(U32, t2), hf5, hnd_gp, hnh, hb, htbl, ih)
 
 def FH.drain5_go_spec(+fg: +List<SolveFast.FGroup>, +G: +List<+List<Nat>>,
-    +C: +List<+List<Nat>>, +n_root: Nat, +pre: +List<SolveFast.FGroup>,
+    +C: +List<+List<Nat>>, +gn: Nat, +n_root: Nat, +pre: +List<SolveFast.FGroup>,
     +n_orig: Nat, +ig0: +List<Groups.Group>, +bigs0: +List<SolveFast.BigClass>,
     +lb0: Nat, +items0: +List<SolveFast.Item>,
     bkts: Array<+List<SolveFast.CWord>>, tbl: Array<U32>,
@@ -8960,12 +8988,12 @@ def FH.drain5_go_spec(+fg: +List<SolveFast.FGroup>, +G: +List<+List<Nat>>,
           +hb_pre2 = FH.bkt_tree_transport_fg(G, C, n_root, 10n, 0, bkts,
                        List.append(&2, SolveFast.FGroup, pre, gp1 <> rest),
                        List.append(&2, SolveFast.FGroup, pre2, rest), eapp, hb)
-          FH.drain5_go_cons_dup(G, C, n_root, pre, f, len, rws, rest, n_orig,
+          FH.drain5_go_cons_dup(G, C, gn, n_root, pre, f, len, rws, rest, n_orig,
             ig0, bigs0, lb0, items0, bkts, tbl, hf5, hnd_gp, hnh_pre, hb_pre2,
             htbl, Arr.Arr.dup(+List<SolveFast.CWord>, bkts),
             Arr.Arr.dup(U32, tbl),
             b2 => t2 => hb2 => ht2 =>
-              FH.drain5_go_spec(rest, G, C, n_root, pre2, n_orig, ig0, bigs0,
+              FH.drain5_go_spec(rest, G, C, gn, n_root, pre2, n_orig, ig0, bigs0,
                 lb0, items0, b2, t2, hr, hd_pre2, hnd_rest, hok_bigs0, hbm0,
                 elb0, hb2, ht2))
 
@@ -8981,20 +9009,22 @@ def FH.BufOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
       match buf:
         case SolveFast.NoBuf{}:
           Unit
-        case SolveFast.Buf5{_, _, _, _}:
+        case SolveFast.Buf5{_, _, _, _, _}:
           Empty
     case True{}:
       match buf:
         case SolveFast.NoBuf{}:
           Empty
-        case SolveFast.Buf5{seen, buckets, tbl, gen}:
+        case SolveFast.Buf5{seen, buckets, tbl, gen, gn}:
           Arr.Arr.DPair<
             {nodup == True{} : Bool},
             Arr.Arr.DPair<
               FH.SeenTree(10n, 0, seen, gen, Nil{}),
               Arr.Arr.DPair<
                 FH.BktTree(G, C, n_root, 10n, 0, buckets, Nil{}),
-                FT.FT.TblOk(G, C, n_root, tbl)>>>
+                Arr.Arr.DPair<
+                  FT.FT.TblOk(G, C, n_root, tbl),
+                  {gn == Groups.len_words(G) : Nat}>>>>
 
 def FH.buf_ok_transport(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, +has_buf: Bool, +nodup: Bool,
@@ -9037,7 +9067,8 @@ def FH.mk_buf_tbl_depth_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +hg5: {SolveFast.all_len5(G) == True{} : Bool},
     +hc5: {SolveFast.all_len5(C) == True{} : Bool}) ->
   FH.BufOk(G, C, n, FH.mk_buf_has_depth(md), True{},
-    SolveFast.mk_buf_tbl_depth(G, C, U32.from_nat(Groups.len_words(G)), md)):
+    SolveFast.mk_buf_tbl_depth(G, C, Groups.len_words(G),
+      U32.from_nat(Groups.len_words(G)), md)):
   match md:
     case None{}:
       Unit{}
@@ -9052,7 +9083,9 @@ def FH.mk_buf_tbl_depth_ok(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         FH.seen_tree_new(10n, 0),
         Arr.DPair{
           FH.bkt_tree_new(G, C, n, 10n, 0),
-          FT.FT.mk_tbl_ok_go(G, C, n, d, emd, hd, hb, en, hg5, hc5)}}}
+          Arr.DPair{
+            FT.FT.mk_tbl_ok_go(G, C, n, d, emd, hd, hb, en, hg5, hc5),
+            {==}}}}}
 
 def FH.mk_buf_tbl_if_ok(ok: Bool, +G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n: Nat,
@@ -9090,7 +9123,7 @@ def FH.mk_buf_tbl_ok(+nodup: Bool, +G: +List<+List<Nat>>,
         {==}, en)
 
 def FH.buf_dup_go(-seen: Array<Nat>, -bkts: Array<+List<SolveFast.CWord>>,
-    -tbl: Array<U32>, +gen: Nat,
+    -tbl: Array<U32>, +gen: Nat, +gn: Nat,
     ds: &s1: Array<Nat> -> &s2: Array<Nat> ->
         {s1 == seen : Array<Nat>} & {s2 == s1 : Array<Nat>},
     db: &k1: Array<+List<SolveFast.CWord>> -> &k2: Array<+List<SolveFast.CWord>> ->
@@ -9099,7 +9132,7 @@ def FH.buf_dup_go(-seen: Array<Nat>, -bkts: Array<+List<SolveFast.CWord>>,
     dt: &t1: Array<U32> -> &t2: Array<U32> ->
         {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>}) ->
   &b1: SolveFast.Buf5 -> &b2: SolveFast.Buf5 ->
-  {b1 == SolveFast.Buf5{seen, bkts, tbl, gen} : SolveFast.Buf5}
+  {b1 == SolveFast.Buf5{seen, bkts, tbl, gen, gn} : SolveFast.Buf5}
   & {b2 == b1 : SolveFast.Buf5}:
   (s1, ds2) = ds
   (s2, ps) = ds2
@@ -9110,39 +9143,39 @@ def FH.buf_dup_go(-seen: Array<Nat>, -bkts: Array<+List<SolveFast.CWord>>,
   (t1, dt2) = dt
   (t2, pt) = dt2
   (+et1, +et2) = pt
-  +e1 : {SolveFast.Buf5{s1, k1, t1, gen} == SolveFast.Buf5{seen, bkts, tbl, gen}
+  +e1 : {SolveFast.Buf5{s1, k1, t1, gen, gn} == SolveFast.Buf5{seen, bkts, tbl, gen, gn}
          : SolveFast.Buf5} =
     Equal.trans(SolveFast.Buf5,
-      SolveFast.Buf5{s1, k1, t1, gen},
-      SolveFast.Buf5{seen, k1, t1, gen},
-      SolveFast.Buf5{seen, bkts, tbl, gen},
+      SolveFast.Buf5{s1, k1, t1, gen, gn},
+      SolveFast.Buf5{seen, k1, t1, gen, gn},
+      SolveFast.Buf5{seen, bkts, tbl, gen, gn},
       Equal.cong(Array<Nat>, SolveFast.Buf5,
-        s => SolveFast.Buf5{s, k1, t1, gen}, s1, seen, es1),
+        s => SolveFast.Buf5{s, k1, t1, gen, gn}, s1, seen, es1),
       Equal.trans(SolveFast.Buf5,
-        SolveFast.Buf5{seen, k1, t1, gen},
-        SolveFast.Buf5{seen, bkts, t1, gen},
-        SolveFast.Buf5{seen, bkts, tbl, gen},
+        SolveFast.Buf5{seen, k1, t1, gen, gn},
+        SolveFast.Buf5{seen, bkts, t1, gen, gn},
+        SolveFast.Buf5{seen, bkts, tbl, gen, gn},
         Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Buf5,
-          k => SolveFast.Buf5{seen, k, t1, gen}, k1, bkts, ek1),
+          k => SolveFast.Buf5{seen, k, t1, gen, gn}, k1, bkts, ek1),
         Equal.cong(Array<U32>, SolveFast.Buf5,
-          t => SolveFast.Buf5{seen, bkts, t, gen}, t1, tbl, et1)))
-  +e2 : {SolveFast.Buf5{s2, k2, t2, gen} == SolveFast.Buf5{s1, k1, t1, gen}
+          t => SolveFast.Buf5{seen, bkts, t, gen, gn}, t1, tbl, et1)))
+  +e2 : {SolveFast.Buf5{s2, k2, t2, gen, gn} == SolveFast.Buf5{s1, k1, t1, gen, gn}
          : SolveFast.Buf5} =
     Equal.trans(SolveFast.Buf5,
-      SolveFast.Buf5{s2, k2, t2, gen},
-      SolveFast.Buf5{s1, k2, t2, gen},
-      SolveFast.Buf5{s1, k1, t1, gen},
+      SolveFast.Buf5{s2, k2, t2, gen, gn},
+      SolveFast.Buf5{s1, k2, t2, gen, gn},
+      SolveFast.Buf5{s1, k1, t1, gen, gn},
       Equal.cong(Array<Nat>, SolveFast.Buf5,
-        s => SolveFast.Buf5{s, k2, t2, gen}, s2, s1, es2),
+        s => SolveFast.Buf5{s, k2, t2, gen, gn}, s2, s1, es2),
       Equal.trans(SolveFast.Buf5,
-        SolveFast.Buf5{s1, k2, t2, gen},
-        SolveFast.Buf5{s1, k1, t2, gen},
-        SolveFast.Buf5{s1, k1, t1, gen},
+        SolveFast.Buf5{s1, k2, t2, gen, gn},
+        SolveFast.Buf5{s1, k1, t2, gen, gn},
+        SolveFast.Buf5{s1, k1, t1, gen, gn},
         Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Buf5,
-          k => SolveFast.Buf5{s1, k, t2, gen}, k2, k1, ek2),
+          k => SolveFast.Buf5{s1, k, t2, gen, gn}, k2, k1, ek2),
         Equal.cong(Array<U32>, SolveFast.Buf5,
-          t => SolveFast.Buf5{s1, k1, t, gen}, t2, t1, et2)))
-  (SolveFast.Buf5{s1, k1, t1, gen}, (SolveFast.Buf5{s2, k2, t2, gen}, (e1, e2)))
+          t => SolveFast.Buf5{s1, k1, t, gen, gn}, t2, t1, et2)))
+  (SolveFast.Buf5{s1, k1, t1, gen, gn}, (SolveFast.Buf5{s2, k2, t2, gen, gn}, (e1, e2)))
 
 def FH.buf_dup(buf: SolveFast.Buf5) ->
   &b1: SolveFast.Buf5 -> &b2: SolveFast.Buf5 ->
@@ -9150,8 +9183,8 @@ def FH.buf_dup(buf: SolveFast.Buf5) ->
   match buf:
     case SolveFast.NoBuf{}:
       (SolveFast.NoBuf{}, (SolveFast.NoBuf{}, ({==}, {==})))
-    case SolveFast.Buf5{seen, bkts, tbl, +gen}:
-      FH.buf_dup_go(seen, bkts, tbl, gen,
+    case SolveFast.Buf5{seen, bkts, tbl, +gen, gn}:
+      FH.buf_dup_go(seen, bkts, tbl, gen, gn,
         Arr.Arr.dup(Nat, seen),
         Arr.Arr.dup(+List<SolveFast.CWord>, bkts),
         Arr.Arr.dup(U32, tbl))
@@ -9162,6 +9195,7 @@ type FH.GuessCase is Data:
   GCSkipUnusable{}
   GCSkipPre{}
   GCSkipLb{}
+  GCSkipCap{}
   GCLive{ord: +List<Groups.Group>, body: +List<SolveFast.Item>, perm: FP.FP.Perm}
 
 def FH.GuessCaseOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
@@ -9193,6 +9227,17 @@ def FH.GuessCaseOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
         {Nat.is_le(Eval.Eval.cost_of(best),
            SolveFast.lower_bound(n, Groups.groups_build(g, S, Nil{})))
          == True{} : Bool}>
+    case GCSkipCap{}:
+      Arr.Arr.DPair<
+        {items == Nil{} : +List<SolveFast.Item>},
+        Arr.Arr.DPair<
+          {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+           == True{} : Bool},
+          Arr.Arr.DPair<
+            {nodup == True{} : Bool},
+            {Nat.is_le(Eval.Eval.cost_of(best),
+               FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})))
+             == True{} : Bool}>>>
     case GCLive{ord, body, perm}:
       Arr.Arr.DPair<
         {items == SolveFast.Begin{g} <> body : +List<SolveFast.Item>},
@@ -9221,7 +9266,69 @@ def FH.GuessSpec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
         FH.GuessWit<G, C, n_root, has_buf, nodup, g, S, n, floor, best, items>,
         FH.BufOk(G, C, n_root, has_buf, nodup, buf)>
 
+# What the capacity walk's result gives the model: a skip carries the bound,
+# a completed walk carries the unchanged class list.
+def FH.CapWalkWit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +n_root: Nat, +bs0: +List<SolveFast.BigClass>, +capv: Nat,
+    +best: SolveRef.Best, r: SolveFast.CapRes) -> Data:
+  match r:
+    case SolveFast.CapSkip{tbl}:
+      Arr.Arr.DPair<
+        {Nat.is_le(SolveFast.best_cost(best), capv) == True{} : Bool},
+        FT.FT.TblOk(G, C, n_root, tbl)>
+    case SolveFast.CapOk{bigs, tbl}:
+      Arr.Arr.DPair<{bigs == bs0 : List<&2, SolveFast.BigClass>},
+        FT.FT.TblOk(G, C, n_root, tbl)>
+
+# An affine duplication of a table (for proofs only).
+def FH.TblDup(-tbl: Array<U32>) -> Type:
+  &dt1: Array<U32> -> &dt2: Array<U32> ->
+  {dt1 == tbl : Array<U32>} & {dt2 == dt1 : Array<U32>}
+
+# What the walk's continuation must do with the result.
+def FH.CapKontType(-R: SolveFast.CapRes -> Data,
+    +G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
+    +bigs0: +List<SolveFast.BigClass>, +capv: Nat, +best: SolveRef.Best) -> Type:
+  @st: SolveFast.CapRes ->
+  FH.CapWalkWit(G, C, n_root, bigs0, capv, best, st) ->
+  R(st)
+
+# The hook that supplies the capacity walk's specification from above (the
+# walk's proof lives in cap_walk.bend, which imports this module).
+def FH.CapHookType(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>) -> Type:
+  @+gn: Nat ->
+  @+n_root: Nat ->
+  @+g: +List<Nat> ->
+  @+S: +List<+List<Nat>> ->
+  @+n: Nat ->
+  @+bigs0: +List<SolveFast.BigClass> ->
+  @+items0: +List<SolveFast.Item> ->
+  @-tbl0: Array<U32> ->
+  @dpt: FH.TblDup(tbl0) ->
+  @+best: SolveRef.Best ->
+  @+ig: +List<Groups.Group> ->
+  @p: FP.FP.Perm ->
+  @+hbm: FH.BodyMatch(G, C, n_root, True{}, True{}, n, ig, items0) ->
+  @+hperm: FP.FP.PermOk(p,
+     List.append(&2, Groups.Group, FH.bigs_groups(bigs0), ig),
+     Groups.groups_build(g, S, Nil{})) ->
+  @+hgn: {gn == Groups.len_words(G) : Nat} ->
+  @+hok: {FH.bigs_ok_b(G, C, n_root, bigs0) == True{} : Bool} ->
+  @+htbl: FT.FT.TblOk(G, C, n_root, tbl0) ->
+  @-R: (SolveFast.CapRes -> Data) ->
+  @kont: FH.CapKontType(R, G, C, n_root, bigs0,
+            FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})), best) ->
+  R(SolveFast.cap_walk(
+      Nat.add(Nat.add(SolveFast.bigs_len(bigs0), SolveFast.bigs_len(bigs0)), 2n),
+      bigs0, bigs0, 1n,
+      Nat.is_le(SolveFast.best_cost(best),
+        Nat.add(SolveFast.bigs_depth(bigs0), SolveFast.cap_base(n, items0))),
+      Nil{}, 0n, Nat.add(SolveFast.bigs_depth(bigs0),
+        SolveFast.cap_base(n, items0)), best, gn, SolveFast.ck_cheap(0n, tbl0)))
+
+# The capacity branch of `finish_drain5`.
 def FH.run_drain5_spec_dw(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
     +n_root: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat, +floor: Nat,
     +best: SolveRef.Best, -seen: Array<Nat>, +gen2: Nat,
     -bkts3: Array<+List<SolveFast.CWord>>, -tbl3: Array<U32>,
@@ -9237,7 +9344,7 @@ def FH.run_drain5_spec_dw(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
     SolveFast.GuessRes{
       SolveFast.Begin{g} <> SolveFast.emit_bigs(bigs3, lb3, items3),
-      SolveFast.Buf5{seen, bkts3, tbl3, gen2}}):
+      SolveFast.Buf5{seen, bkts3, tbl3, gen2, gn}}):
   match dw:
     case DWit{+ig, +perm1, +hok_bigs, +hbm, +elb, +hperm1}:
       +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
@@ -9273,11 +9380,155 @@ def FH.run_drain5_spec_dw(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Arr.DPair{
         GWit{GCLive{ord, body, p_full},
           Arr.DPair{{==}, Arr.DPair{hus, Arr.DPair{hp_full, hbm_all}}}},
-        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb3, htbl3}}}}
+        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb3,
+          Arr.DPair{htbl3, hgn}}}}}
+
+# One capacity walk result, case split: a skip emits nothing, a completed walk
+# emits the (unchanged) class list.
+def FH.finish_cap_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    +n_root: Nat, +g: +List<Nat>,
+    +S: +List<+List<Nat>>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
+    -seen: Array<Nat>, +gen2: Nat, +lb3: Nat,
+    +items3: +List<SolveFast.Item>, +bigs3: +List<SolveFast.BigClass>,
+    bkts3: Array<+List<SolveFast.CWord>>,
+    +hus: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+           == True{} : Bool},
+    +hs: FH.SeenTree(10n, 0, seen, gen2, Nil{}),
+    +hb3: FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
+    +dw: FH.DrainWit<G, C, n_root, SolveFast.fgroups_build_fast(g, S, Nil{}),
+           n, Nil{}, Nil{}, lb3, items3, bigs3>,
+    r: SolveFast.CapRes,
+    +hwit: FH.CapWalkWit(G, C, n_root, bigs3,
+             FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})), best, r)) ->
+  FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
+    SolveFast.finish_cap(r, g, seen, gen2, gn, lb3, items3, bkts3)):
+  match r:
+    case SolveFast.CapSkip{tbl}:
+      +hcap : {Nat.is_le(SolveFast.best_cost(best),
+                 FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})))
+               == True{} : Bool} =
+        Arr.Arr.dpair_l(
+          {Nat.is_le(SolveFast.best_cost(best),
+             FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{}))) == True{} : Bool},
+          FT.FT.TblOk(G, C, n_root, tbl), hwit)
+      +htbl : FT.FT.TblOk(G, C, n_root, tbl) =
+        Arr.Arr.dpair_r(
+          {Nat.is_le(SolveFast.best_cost(best),
+             FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{}))) == True{} : Bool},
+          FT.FT.TblOk(G, C, n_root, tbl), hwit)
+      +hle : {Nat.is_le(Eval.Eval.cost_of(best),
+                 FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})))
+               == True{} : Bool} =
+        NatProof.Nat.is_le_eq_l(
+          FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{})),
+          SolveFast.best_cost(best), Eval.Eval.cost_of(best),
+          FLB.FS.best_cost_eq(best), hcap)
+      Arr.DPair{
+        GWit{GCSkipCap{}, Arr.DPair{{==}, Arr.DPair{hus,
+          Arr.DPair{{==}, hle}}}},
+        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb3,
+          Arr.DPair{htbl, hgn}}}}}
+    case SolveFast.CapOk{bigs2, tbl}:
+      +ebigs : {bigs2 == bigs3 : List<&2, SolveFast.BigClass>} =
+        Arr.Arr.dpair_l({bigs2 == bigs3 : List<&2, SolveFast.BigClass>},
+          FT.FT.TblOk(G, C, n_root, tbl), hwit)
+      +htbl : FT.FT.TblOk(G, C, n_root, tbl) =
+        Arr.Arr.dpair_r({bigs2 == bigs3 : List<&2, SolveFast.BigClass>},
+          FT.FT.TblOk(G, C, n_root, tbl), hwit)
+      +hr = FH.run_drain5_spec_dw(G, C, gn, hgn, n_root, g, S, n, floor,
+              best, seen, gen2, bkts3, tbl, lb3, items3, bigs3, hus, hs, hb3,
+              htbl, dw)
+      +e_res : {SolveFast.GuessRes{
+                  SolveFast.Begin{g} <> SolveFast.emit_bigs(bigs3, lb3, items3),
+                  SolveFast.Buf5{seen, bkts3, tbl, gen2, gn}}
+                == SolveFast.GuessRes{
+                  SolveFast.Begin{g} <> SolveFast.emit_bigs(bigs2, lb3, items3),
+                  SolveFast.Buf5{seen, bkts3, tbl, gen2, gn}} : SolveFast.GuessRes} =
+        Equal.cong(List<&2, SolveFast.BigClass>, SolveFast.GuessRes,
+          x => SolveFast.GuessRes{
+            SolveFast.Begin{g} <> SolveFast.emit_bigs(x, lb3, items3),
+            SolveFast.Buf5{seen, bkts3, tbl, gen2, gn}},
+          bigs3, bigs2,
+          Equal.sym(List<&2, SolveFast.BigClass>, bigs2, bigs3, ebigs))
+      %e_res : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best, _)
+      hr
+
+def FH.finish_drain5_cap(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C), +n_root: Nat, +g: +List<Nat>,
+    +S: +List<+List<Nat>>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
+    -seen: Array<Nat>, +gen2: Nat, +lb3: Nat,
+    +items3: +List<SolveFast.Item>, +bigs3: +List<SolveFast.BigClass>,
+    bkts3: Array<+List<SolveFast.CWord>>,
+    +hus: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+           == True{} : Bool},
+    +hs: FH.SeenTree(10n, 0, seen, gen2, Nil{}),
+    +hb3: FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
+    tbl3: Array<U32>,
+    +htbl3: FT.FT.TblOk(G, C, n_root, tbl3),
+    dw: FH.DrainWit<G, C, n_root, SolveFast.fgroups_build_fast(g, S, Nil{}),
+          n, Nil{}, Nil{}, lb3, items3, bigs3>) ->
+  FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
+    SolveFast.finish_cap(
+      SolveFast.cap_walk(
+        Nat.add(Nat.add(SolveFast.bigs_len(bigs3),
+          SolveFast.bigs_len(bigs3)), 2n),
+        bigs3, bigs3, 1n,
+        Nat.is_le(SolveFast.best_cost(best),
+          Nat.add(SolveFast.bigs_depth(bigs3),
+            SolveFast.cap_base(n, items3))),
+        Nil{}, 0n, Nat.add(SolveFast.bigs_depth(bigs3),
+          SolveFast.cap_base(n, items3)), best, gn,
+        SolveFast.ck_cheap(0n, tbl3)),
+      g, seen, gen2, gn, lb3, items3, bkts3)):
+  match dw:
+    case DWit{+ig, +perm1, +hok_bigs, +hbm, +elb, +hperm1}:
+      +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
+      +capv = FH.cap_lb(G, n, Groups.groups_build(g, S, Nil{}))
+      +fg_g = FN.FN.fgroups_to_groups(fg)
+      +srcL = List.append(&2, Groups.Group, fg_g,
+                List.append(&2, Groups.Group,
+                  FH.bigs_groups(Nil{}), Nil{}))
+      +dstL = List.append(&2, Groups.Group, FH.bigs_groups(bigs3), ig)
+      +eA : {srcL == Groups.groups_build(g, S, Nil{})
+             : +List<Groups.Group>} =
+        Equal.trans(+List<Groups.Group>, srcL,
+          List.append(&2, Groups.Group, fg_g, Nil{}),
+          Groups.groups_build(g, S, Nil{}),
+          Equal.cong(+List<Groups.Group>,
+            +List<Groups.Group>,
+            x => List.append(&2, Groups.Group, fg_g, x),
+            List.append(&2, Groups.Group, FH.bigs_groups(Nil{}), Nil{}),
+            Nil{}, {==}),
+          Equal.trans(+List<Groups.Group>,
+            List.append(&2, Groups.Group, fg_g, Nil{}), fg_g,
+            Groups.groups_build(g, S, Nil{}),
+            FH.list_append_nil(Groups.Group, fg_g),
+            FN.FN.fgroups_build_eq(g, S, Nil{})))
+      +hperm_rev : FP.FP.PermOk(FP.FP.perm_sym(perm1),
+          List.append(&2, Groups.Group, FH.bigs_groups(bigs3), ig),
+          Groups.groups_build(g, S, Nil{})) =
+        %eA : FP.FP.PermOk(FP.FP.perm_sym(perm1),
+          List.append(&2, Groups.Group, FH.bigs_groups(bigs3), ig), _)
+        FP.FP.perm_sym_ok(perm1, srcL, dstL, hperm1)
+      hook(gn, n_root, g, S, n, bigs3, items3, tbl3, Arr.Arr.dup(U32, tbl3),
+        best, ig,
+        FP.FP.perm_sym(perm1), hbm, hperm_rev, hgn, hok_bigs, htbl3,
+        r => FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
+          SolveFast.finish_cap(r, g, seen, gen2, gn, lb3, items3, bkts3)),
+        st => wit => FH.finish_cap_spec(G, C, gn, hgn, n_root, g, S, n,
+          floor, best, seen, gen2, lb3, items3, bigs3, bkts3, hus, hs, hb3, dw,
+          st, wit))
 
 def FH.finish_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat, +floor: Nat,
     +best: SolveRef.Best, -seen: Array<Nat>, -tbl0: Array<U32>, +gen2: Nat,
+    bnode: Bool,
+    +ebnode: {bnode == Bool.and(Nat.is_le(512n, n),
+                 Nat.is_le(Nat.add(gn, gn), Nat.mul(5n, n))) : Bool},
     dr: SolveFast.Drain5State,
     +hus: {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
            == True{} : Bool},
@@ -9287,32 +9538,70 @@ def FH.finish_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.fgroups_build_fast(g, S, Nil{}), n, Nil{}, Nil{}, tbl0,
             dr)) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
-    SolveFast.finish_drain5(g, seen, gen2, dr)):
-  match dr:
-    case SolveFast.Drain5State{bkts3, tbl3, +lb3, +items3, +bigs3}:
-      +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
-      +hb3 = Arr.Arr.dpair_l(
-               FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
-               Arr.Arr.DPair<{tbl3 == tbl0 : Array<U32>},
-                 FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
-                   bigs3>>, hdr)
-      +hr = Arr.Arr.dpair_r(
-              FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
-              Arr.Arr.DPair<{tbl3 == tbl0 : Array<U32>},
-                FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
-                  bigs3>>, hdr)
-      +et3 = Arr.Arr.dpair_l({tbl3 == tbl0 : Array<U32>},
-               FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
-                 bigs3>, hr)
-      +dw = Arr.Arr.dpair_r({tbl3 == tbl0 : Array<U32>},
-              FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
-                bigs3>, hr)
-      +htbl3 = FT.FT.tbl_ok_transport(G, C, n_root, tbl0, tbl3,
-                 Equal.sym(Array<U32>, tbl3, tbl0, et3), htbl0)
-      FH.run_drain5_spec_dw(G, C, n_root, g, S, n, floor, best, seen, gen2,
-        bkts3, tbl3, lb3, items3, bigs3, hus, hs, hb3, htbl3, dw)
+    SolveFast.finish_drain5(g, seen, gen2, gn, best, n, dr)):
+  match bnode:
+    case False{}:
+      match dr:
+        case SolveFast.Drain5State{bkts3, tbl3, +lb3, +items3, +bigs3}:
+          +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
+          +hb3 = Arr.Arr.dpair_l(
+                   FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
+                   Arr.Arr.DPair<{tbl3 == tbl0 : Array<U32>},
+                     FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                       bigs3>>, hdr)
+          +hr = Arr.Arr.dpair_r(
+                  FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
+                  Arr.Arr.DPair<{tbl3 == tbl0 : Array<U32>},
+                    FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                      bigs3>>, hdr)
+          +et3 = Arr.Arr.dpair_l({tbl3 == tbl0 : Array<U32>},
+                   FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                     bigs3>, hr)
+          +dw = Arr.Arr.dpair_r({tbl3 == tbl0 : Array<U32>},
+                  FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                    bigs3>, hr)
+          +htbl3 = FT.FT.tbl_ok_transport(G, C, n_root, tbl0, tbl3,
+                     Equal.sym(Array<U32>, tbl3, tbl0, et3), htbl0)
+          %ebnode : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor,
+            best,
+            SolveFast.finish_node(_, g, seen, gen2, gn, n, lb3, items3, bigs3,
+              bkts3, tbl3, best))
+          FH.run_drain5_spec_dw(G, C, gn, hgn, n_root, g, S, n, floor,
+            best, seen, gen2, bkts3, tbl3, lb3, items3, bigs3, hus, hs, hb3,
+            htbl3, dw)
+    case True{}:
+      match dr:
+        case SolveFast.Drain5State{bkts3, tbl3, +lb3, +items3, +bigs3}:
+          +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
+          +hb3 = Arr.Arr.dpair_l(
+                   FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
+                   Arr.Arr.DPair<{tbl3 == tbl0 : Array<U32>},
+                     FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                       bigs3>>, hdr)
+          +hr = Arr.Arr.dpair_r(
+                  FH.BktTree(G, C, n_root, 10n, 0, bkts3, Nil{}),
+                  Arr.Arr.DPair<{tbl3 == tbl0 : Array<U32>},
+                    FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                      bigs3>>, hdr)
+          +et3 = Arr.Arr.dpair_l({tbl3 == tbl0 : Array<U32>},
+                   FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                     bigs3>, hr)
+          +dw = Arr.Arr.dpair_r({tbl3 == tbl0 : Array<U32>},
+                  FH.DrainWit<G, C, n_root, fg, n, Nil{}, Nil{}, lb3, items3,
+                    bigs3>, hr)
+          +htbl3 = FT.FT.tbl_ok_transport(G, C, n_root, tbl0, tbl3,
+                     Equal.sym(Array<U32>, tbl3, tbl0, et3), htbl0)
+          %ebnode : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor,
+            best,
+            SolveFast.finish_node(_, g, seen, gen2, gn, n, lb3, items3,
+              bigs3, bkts3, tbl3, best))
+          FH.finish_drain5_cap(G, C, gn, hgn, hook, n_root, g, S, n, floor,
+            best, seen, gen2, lb3, items3, bigs3, bkts3, hus, hs, hb3, tbl3,
+            htbl3, dw)
 
 def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat, +floor: Nat,
     +best: SolveRef.Best, -seen: Array<Nat>, +gen2: Nat,
     -bkts2: Array<+List<SolveFast.CWord>>, -tbl0: Array<U32>, -tbl2: Array<U32>,
@@ -9335,7 +9624,7 @@ def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     dpt: &t1: Array<U32> -> &t2: Array<U32> ->
          {t1 == tbl2 : Array<U32>} & {t2 == t1 : Array<U32>}) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
-    SolveFast.finish_drain5(g, seen, gen2,
+    SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
       SolveFast.drain5_go(touched,
         SolveFast.Drain5State{bkts2, tbl2, n, SolveFast.End{} <> Nil{}, Nil{}}))):
   (b1, dpb2) = dpb
@@ -9365,7 +9654,7 @@ def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         FN.FN.fgroups_build_eq(g, S, Nil{})),
       FN.FN.nodup_ok_next_groups(True{}, Groups.groups_build(g, S, Nil{}), S,
         CoverGroups.Cover.all_subseq_nil(g, S), hnd_s))
-  +hdr2 = FH.drain5_go_spec(fg, G, C, n_root, Nil{}, n, Nil{}, Nil{}, n,
+  +hdr2 = FH.drain5_go_spec(fg, G, C, gn, n_root, Nil{}, n, Nil{}, Nil{}, n,
             SolveFast.End{} <> Nil{}, b2, t2, hwf, FH.disjoint_codes_nil(fg),
             hnd_fg, {==}, {==}, {==}, hb_b2, ht_t2)
   +hdr_t0 = FH.drain_spec_transport_tbl(G, C, n_root, Nil{}, fg, n, Nil{}, Nil{},
@@ -9401,24 +9690,28 @@ def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}}),
             eq_12, hdr_t0)
   %eb1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
-           SolveFast.finish_drain5(g, seen, gen2,
+           SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
              SolveFast.drain5_go(touched,
                SolveFast.Drain5State{_, tbl2, n, SolveFast.End{} <> Nil{}, Nil{}})))
   %et1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
-           SolveFast.finish_drain5(g, seen, gen2,
+           SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
              SolveFast.drain5_go(touched,
                SolveFast.Drain5State{b1, _, n, SolveFast.End{} <> Nil{}, Nil{}})))
   %Equal.sym(+List<U32>, touched, FH.rev_codes(fg, Nil{}), etouched) :
     FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
-      SolveFast.finish_drain5(g, seen, gen2,
+      SolveFast.finish_drain5(g, seen, gen2, gn, best, n,
         SolveFast.drain5_go(_,
           SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}})))
-  FH.finish_drain5_spec(G, C, n_root, g, S, n, floor, best, seen, tbl0, gen2,
+  FH.finish_drain5_spec(G, C, gn, hgn, hook, n_root, g, S, n, floor, best, seen, tbl0, gen2,
+    Bool.and(Nat.is_le(512n, n),
+      Nat.is_le(Nat.add(gn, gn), Nat.mul(5n, n))), {==},
     SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
       SolveFast.Drain5State{b1, t1, n, SolveFast.End{} <> Nil{}, Nil{}}),
     hus, hs, htbl0, hdr1)
 
 def FH.run_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat, +floor: Nat,
     +best: SolveRef.Best, -seen: Array<Nat>, -tbl0: Array<U32>, +gen2: Nat,
     fs: SolveFast.Fill5State,
@@ -9430,7 +9723,7 @@ def FH.run_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +hfs: FH.FillSpec(G, C, n_root, SolveFast.fgroups_build_fast(g, S, Nil{}),
             Nil{}, tbl0, fs)) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, S, n, floor, best,
-    SolveFast.run_drain5(g, n, seen, gen2, fs)):
+    SolveFast.run_drain5(g, n, seen, gen2, gn, best, fs)):
   match fs:
     case SolveFast.Fill5State{bkts2, tbl2, +touched}:
       +fg = SolveFast.fgroups_build_fast(g, S, Nil{})
@@ -9454,11 +9747,13 @@ def FH.run_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               {FH.fgroups_wf(fg) == True{} : Bool}, r2)
       +hwf = Arr.Arr.dpair_r({touched == FH.rev_codes(fg, Nil{}) : +List<U32>},
                {FH.fgroups_wf(fg) == True{} : Bool}, r2)
-      FH.run_drain5_spec_dup(G, C, n_root, g, S, n, floor, best, seen, gen2,
+      FH.run_drain5_spec_dup(G, C, gn, hgn, hook, n_root, g, S, n, floor, best, seen, gen2,
         bkts2, tbl0, tbl2, touched, hus, hnd_s, hs, htbl0, et20, hb2, et, hwf,
         Arr.Arr.dup(+List<SolveFast.CWord>, bkts2), Arr.Arr.dup(U32, tbl2))
 
 def FH.schedule5_lb_false_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, -seen: Array<Nat>,
     -bkts: Array<+List<SolveFast.CWord>>, -tbl: Array<U32>, +gen2: Nat,
@@ -9478,7 +9773,7 @@ def FH.schedule5_lb_false_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
          {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>}) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
     floor, best,
-    SolveFast.run_drain5(g, n, seen, gen2,
+    SolveFast.run_drain5(g, n, seen, gen2, gn, best,
       SolveFast.fill5_go(row, S, SolveFast.Fill5State{bkts, tbl, Nil{}}))):
   (b1, dpb2) = dpb
   (b2, peb) = dpb2
@@ -9518,12 +9813,12 @@ def FH.schedule5_lb_false_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t1, Nil{}}),
             eq_12, hfs_t0)
   %eb1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.run_drain5(g, n, seen, gen2,
+           SolveFast.run_drain5(g, n, seen, gen2, gn, best,
              SolveFast.fill5_go(row, S, SolveFast.Fill5State{_, tbl, Nil{}})))
   %et1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.run_drain5(g, n, seen, gen2,
+           SolveFast.run_drain5(g, n, seen, gen2, gn, best,
              SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, _, Nil{}})))
-  FH.run_drain5_spec(G, C, n_root, g, ws, n, floor, best, seen, tbl, gen2,
+  FH.run_drain5_spec(G, C, gn, hgn, hook, n_root, g, ws, n, floor, best, seen, tbl, gen2,
     SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t1, Nil{}}),
     hus, hnd_s, hs, htbl, hfs1)
 
@@ -9557,6 +9852,8 @@ def FH.fgroups_lb_nodup_eq_lb(+g: +List<Nat>, +ws: +List<+List<Nat>>, +n: Nat,
       FN.FN.fgroups_to_groups(fg), Groups.groups_build(g, ws, Nil{}), egrp))
 
 def FH.schedule5_lb_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, -seen: Array<Nat>,
     bkts: Array<+List<SolveFast.CWord>>, tbl: Array<U32>, +gen2: Nat,
@@ -9576,7 +9873,8 @@ def FH.schedule5_lb_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +htbl: FT.FT.TblOk(G, C, n_root, tbl)) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
     floor, best,
-    SolveFast.schedule5_lb(row, g, S, n, seen, bkts, tbl, gen2, skip)):
+    SolveFast.schedule5_lb(row, g, S, n, seen, bkts, tbl, gen2, gn, best,
+      skip)):
   match skip:
     case True{}:
       +ws = SolveFast.cwords_words(S)
@@ -9591,13 +9889,16 @@ def FH.schedule5_lb_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           elb, hle_lb)
       Arr.DPair{
         GWit{GCSkipLb{}, Arr.DPair{{==}, hle}},
-        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb, htbl}}}}
+        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb,
+          Arr.DPair{htbl, hgn}}}}}
     case False{}:
-      FH.schedule5_lb_false_dup(G, C, n_root, row, g, S, n, floor, best, seen,
+      FH.schedule5_lb_false_dup(G, C, gn, hgn, hook, n_root, row, g, S, n, floor, best, seen,
         bkts, tbl, gen2, hrow, hS, hus, hnd_s, hs, hb, htbl,
         Arr.Arr.dup(+List<SolveFast.CWord>, bkts), Arr.Arr.dup(U32, tbl))
 
 def FH.schedule5_usable_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, -seen: Array<Nat>,
     bkts: Array<+List<SolveFast.CWord>>, tbl: Array<U32>, +gen2: Nat,
@@ -9623,7 +9924,7 @@ def FH.schedule5_usable_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
     floor, best,
     SolveFast.schedule5_usable(row, g, S, n, best, seen, bkts, tbl, gen2,
-      m, k, usable)):
+      gn, m, k, usable)):
   match usable:
     case False{}:
       +ws = SolveFast.cwords_words(S)
@@ -9632,7 +9933,8 @@ def FH.schedule5_usable_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           Arr.DPair{{==},
             Equal.sym(Bool, False{},
               Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})), eus)}},
-        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb, htbl}}}}
+        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb,
+          Arr.DPair{htbl, hgn}}}}}
     case True{}:
       +ws = SolveFast.cwords_words(S)
       +fg = SolveFast.fgroups_build_fast(g, ws, Nil{})
@@ -9667,7 +9969,7 @@ def FH.schedule5_usable_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               == True{} : Bool} =
         Equal.sym(Bool, True{},
           Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})), eus)
-      FH.schedule5_lb_spec(G, C, n_root, row, g, S, n, floor, best, seen, bkts,
+      FH.schedule5_lb_spec(G, C, gn, hgn, hook, n_root, row, g, S, n, floor, best, seen, bkts,
         tbl, gen2, lb, SolveFast.skippable(best, lb), {==}, elb, hrow, hS, hus,
         hnd_s, hs, hb, htbl)
 
@@ -9900,6 +10202,8 @@ def FH.schedule5_pruned_wit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           GWit{GCSkipLb{}, Arr.DPair{{==}, hle}}
 
 def FH.schedule5_hist_ok_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, +skip_self: Bool,
     -seen2: Array<Nat>, bkts: Array<+List<SolveFast.CWord>>,
@@ -9919,7 +10223,8 @@ def FH.schedule5_hist_ok_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
     floor, best,
     SolveFast.schedule5_usable(row, g, S, n, best, seen2, bkts, tbl2,
-      Nat.add(1n, gen), m, k, Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))):
+      Nat.add(1n, gen), gn, m, k,
+      Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))):
   (s1, dp2) = dp
   (s2, pe) = dp2
   (+es1, +es2) = pe
@@ -10065,12 +10370,14 @@ def FH.schedule5_hist_ok_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})),
       Equal.sym(Bool, SolveFast.fgroups_smaller(n, fg),
         Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)), eus_fg), eus_g)
-  FH.schedule5_usable_spec(G, C, n_root, row, g, S, n, floor, best, seen2,
+  FH.schedule5_usable_spec(G, C, gn, hgn, hook, n_root, row, g, S, n, floor, best, seen2,
     bkts, tbl2, Nat.add(1n, gen), m, k,
     Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)), eus, hrow, hS, hnd_s, hwf,
     hm, hk, hbump, hb, htbl2)
 
 def FH.schedule5_hist_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, +skip_self: Bool,
     bkts: Array<+List<SolveFast.CWord>>, -tbl0: Array<U32>, +gen: Nat,
@@ -10087,7 +10394,7 @@ def FH.schedule5_hist_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.budget_for(n, best, skip_self), skip_self, tbl0, hr)) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
     floor, best,
-    SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen, hr)):
+    SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen, gn, hr)):
   match hr:
     case SolveFast.Hist5Pruned{seen2, tbl2}:
       +ws = SolveFast.cwords_words(S)
@@ -10113,13 +10420,16 @@ def FH.schedule5_hist_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Arr.DPair{
         FH.schedule5_pruned_wit(G, C, n_root, g, ws, n, floor, best, skip_self,
           esk, en, hnd_s, Tree.member_word(g, ws), {==}, hpr),
-        Arr.DPair{{==}, Arr.DPair{hs2, Arr.DPair{hb, htbl2}}}}
+        Arr.DPair{{==}, Arr.DPair{hs2, Arr.DPair{hb,
+          Arr.DPair{htbl2, hgn}}}}}
     case SolveFast.Hist5Ok{seen2, tbl2, +m, +k, +b}:
-      FH.schedule5_hist_ok_dup(G, C, n_root, row, g, S, n, floor, best,
+      FH.schedule5_hist_ok_dup(G, C, gn, hgn, hook, n_root, row, g, S, n, floor, best,
         skip_self, seen2, bkts, tbl0, tbl2, gen, m, k, b, hge1, en, hnd_s,
         hrow, hS, hb, htbl0, hhr, Arr.Arr.dup(Nat, seen2))
 
 def FH.guess_body_buf5_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    +gn: Nat, +hgn: {gn == Groups.len_words(G) : Nat},
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, +skip_self: Bool,
     -seen: Array<Nat>, bkts: Array<+List<SolveFast.CWord>>, -tbl: Array<U32>,
@@ -10139,7 +10449,7 @@ def FH.guess_body_buf5_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
          {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>}) ->
   FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
     floor, best,
-    SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen,
+    SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen, gn,
       SolveFast.hist5_go(row, S, gen, skip_self,
         SolveFast.Hist5Ok{seen, tbl, 0n, 0n,
           SolveFast.budget_for(n, best, skip_self)}))):
@@ -10188,14 +10498,14 @@ def FH.guess_body_buf5_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             SolveFast.hist5_go(row, S, gen, skip_self,
               SolveFast.Hist5Ok{s1, t1, 0n, 0n, budget0}), eq_12, hhr_t0)
   %es1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen,
+           SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen, gn,
              SolveFast.hist5_go(row, S, gen, skip_self,
                SolveFast.Hist5Ok{_, tbl, 0n, 0n, budget0})))
   %et1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen,
+           SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen, gn,
              SolveFast.hist5_go(row, S, gen, skip_self,
                SolveFast.Hist5Ok{s1, _, 0n, 0n, budget0})))
-  FH.schedule5_hist_spec(G, C, n_root, row, g, S, n, floor, best, skip_self,
+  FH.schedule5_hist_spec(G, C, gn, hgn, hook, n_root, row, g, S, n, floor, best, skip_self,
     bkts, tbl, gen,
     SolveFast.hist5_go(row, S, gen, skip_self,
       SolveFast.Hist5Ok{s1, t1, 0n, 0n, budget0}),
@@ -10465,6 +10775,7 @@ def FH.schedule_one_wit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       GWit{GCSkipUnusable{}, Arr.DPair{{==}, hnus}}
 
 def FH.guess_body_buf_ge2_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, has_buf: Bool, +row: U32, +g: +List<Nat>,
     +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
     +skip_self: Bool, buf: SolveFast.Buf5,
@@ -10486,12 +10797,12 @@ def FH.guess_body_buf_ge2_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             FH.schedule_fguess_fast_wit(G, C, n_root, True{}, g,
               SolveFast.cwords_words(S), n, floor, best, en, hnd_s),
             Unit{}}
-        case SolveFast.Buf5{s0, k0, t0, g0}:
+        case SolveFast.Buf5{s0, k0, t0, g0, gn0}:
           Empty.absurd(
             FH.GuessSpec(G, C, n_root, False{}, True{}, g,
               SolveFast.cwords_words(S), n, floor, best,
               SolveFast.guess_body_buf_ge2(row, g, S, n, best, skip_self,
-                SolveFast.Buf5{s0, k0, t0, g0})), hbuf)
+                SolveFast.Buf5{s0, k0, t0, g0, gn0})), hbuf)
     case True{}:
       match buf:
         case SolveFast.NoBuf{}:
@@ -10500,26 +10811,37 @@ def FH.guess_body_buf_ge2_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               SolveFast.cwords_words(S), n, floor, best,
               SolveFast.guess_body_buf_ge2(row, g, S, n, best, skip_self,
                 SolveFast.NoBuf{})), hbuf)
-        case SolveFast.Buf5{seen, bkts, tbl, +gen}:
+        case SolveFast.Buf5{seen, bkts, tbl, +gen, +gn}:
           +r1 = Arr.Arr.dpair_r({True{} == True{} : Bool},
                   Arr.Arr.DPair<FH.SeenTree(10n, 0, seen, gen, Nil{}),
                     Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                      FT.FT.TblOk(G, C, n_root, tbl)>>, hbuf)
+                      Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                        {gn == Groups.len_words(G) : Nat}>>>, hbuf)
           +hs = Arr.Arr.dpair_l(FH.SeenTree(10n, 0, seen, gen, Nil{}),
                   Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                    FT.FT.TblOk(G, C, n_root, tbl)>, r1)
+                    Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                      {gn == Groups.len_words(G) : Nat}>>, r1)
           +r2 = Arr.Arr.dpair_r(FH.SeenTree(10n, 0, seen, gen, Nil{}),
                   Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                    FT.FT.TblOk(G, C, n_root, tbl)>, r1)
+                    Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                      {gn == Groups.len_words(G) : Nat}>>, r1)
+          +r3 = Arr.Arr.dpair_r(FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
+                  Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                    {gn == Groups.len_words(G) : Nat}>, r2)
           +hb = Arr.Arr.dpair_l(FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                  FT.FT.TblOk(G, C, n_root, tbl), r2)
-          +htbl = Arr.Arr.dpair_r(FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                    FT.FT.TblOk(G, C, n_root, tbl), r2)
-          FH.guess_body_buf5_dup(G, C, n_root, row, g, S, n, floor, best,
+                  Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                    {gn == Groups.len_words(G) : Nat}>, r2)
+          +htbl = Arr.Arr.dpair_l(FT.FT.TblOk(G, C, n_root, tbl),
+                    {gn == Groups.len_words(G) : Nat}, r3)
+          +hgn : {gn == Groups.len_words(G) : Nat} =
+            Arr.Arr.dpair_r(FT.FT.TblOk(G, C, n_root, tbl),
+              {gn == Groups.len_words(G) : Nat}, r3)
+          FH.guess_body_buf5_dup(G, C, gn, hgn, hook, n_root, row, g, S, n, floor, best,
             skip_self, seen, bkts, tbl, gen, esk, hge1, en, hnd_s, hrow, hS,
             hs, hb, htbl, Arr.Arr.dup(Nat, seen), Arr.Arr.dup(U32, tbl))
 
 def FH.guess_body_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +has_buf: Bool, +row: U32, +g: +List<Nat>,
     +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
     +skip_self: Bool, buf: SolveFast.Buf5,
@@ -10565,11 +10887,12 @@ def FH.guess_body_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                     Equal.cong(Nat, Bool, x => Nat.is_le(1n, x),
                       n, 1n+(1n+Groups.len_words(SolveFast.cwords_words(t2))),
                       en)
-                  FH.guess_body_buf_ge2_spec(G, C, n_root, has_buf, row, g,
+                  FH.guess_body_buf_ge2_spec(G, C, hook, n_root, has_buf, row, g,
                     cw1 <> (cw2a <> t2), n, floor, best, skip_self, buf, esk,
                     hge1, en, hnd_s, hrow, hS, hbuf)
 
 def FH.guess_items_mem_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +has_buf: Bool, +row: U32, +g: +List<Nat>,
     +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
     +skip_self: Bool, buf: SolveFast.Buf5, in_s: Bool,
@@ -10587,7 +10910,7 @@ def FH.guess_items_mem_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     SolveFast.guess_items_mem_buf(row, g, S, n, best, skip_self, buf, in_s)):
   match in_s:
     case True{}:
-      FH.guess_body_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor, best,
+      FH.guess_body_buf_spec(G, C, hook, n_root, has_buf, row, g, S, n, floor, best,
         skip_self, buf, esk, en, hnd_s, hrow, hS, hbuf)
     case False{}:
       +ws = SolveFast.cwords_words(S)
@@ -10612,6 +10935,7 @@ def FH.guess_items_mem_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Arr.DPair{GWit{GCSkipPre{}, Arr.DPair{{==}, hle}}, hbuf}
 
 def FH.guess_items_nodup_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +has_buf: Bool, +row: U32, +g: +List<Nat>,
     +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
     +skip_self: Bool, buf: SolveFast.Buf5, le_2n: Bool,
@@ -10627,10 +10951,10 @@ def FH.guess_items_nodup_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     SolveFast.guess_items_nodup_buf(row, g, S, n, best, skip_self, buf, le_2n)):
   match le_2n:
     case False{}:
-      FH.guess_body_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor, best,
+      FH.guess_body_buf_spec(G, C, hook, n_root, has_buf, row, g, S, n, floor, best,
         skip_self, buf, esk, en, hnd_s, hrow, hS, hbuf)
     case True{}:
-      FH.guess_items_mem_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor,
+      FH.guess_items_mem_buf_spec(G, C, hook, n_root, has_buf, row, g, S, n, floor,
         best, skip_self, buf,
         SolveFast.member_word_fast(g, SolveFast.cwords_words(S)), {==},
         Equal.sym(Bool, True{}, SolveFast.skippable(best, Nat.add(n, n)), e2n),
@@ -10710,11 +11034,12 @@ def FH.guess_items_buf_false_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   SolveFast.skippable(best,
                     SolveFast.pre_lb(n, g, SolveFast.cwords_words(S)))),
                 SolveFast.NoBuf{}}), hbuf)
-        case SolveFast.Buf5{seen, bkts, tbl, gen}:
+        case SolveFast.Buf5{seen, bkts, tbl, gen, gn}:
           +hft = Arr.Arr.dpair_l({False{} == True{} : Bool},
                    Arr.Arr.DPair<FH.SeenTree(10n, 0, seen, gen, Nil{}),
                      Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                       FT.FT.TblOk(G, C, n_root, tbl)>>, hbuf)
+                       Arr.Arr.DPair<FT.FT.TblOk(G, C, n_root, tbl),
+                         {gn == Groups.len_words(G) : Nat}>>>, hbuf)
           Empty.absurd(
             FH.GuessSpec(G, C, n_root, True{}, False{}, g,
               SolveFast.cwords_words(S), n, floor, best,
@@ -10723,12 +11048,13 @@ def FH.guess_items_buf_false_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   n, best,
                   SolveFast.skippable(best,
                     SolveFast.pre_lb(n, g, SolveFast.cwords_words(S)))),
-                SolveFast.Buf5{seen, bkts, tbl, gen}}),
+                SolveFast.Buf5{seen, bkts, tbl, gen, gn}}),
             Logic.Proof.false_ne_true(hft))
 
 # Main theorem: `guess_items_buf` satisfies the 5-case `FH.GuessSpec` and
 # preserves `FH.BufOk`.
 def FH.guess_items_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
+    hook: FH.CapHookType(G, C),
     +n_root: Nat, +has_buf: Bool, +nodup: Bool, +row: U32, +g: +List<Nat>,
     +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
     buf: SolveFast.Buf5,
@@ -10742,7 +11068,7 @@ def FH.guess_items_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     SolveFast.guess_items_buf(nodup, row, g, S, n, floor, best, buf)):
   match nodup:
     case True{}:
-      FH.guess_items_nodup_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor,
+      FH.guess_items_nodup_buf_spec(G, C, hook, n_root, has_buf, row, g, S, n, floor,
         best, Nat.is_eq(floor, Nat.add(n, n)), buf,
         SolveFast.skippable(best, Nat.add(n, n)), {==}, {==}, en, hnd, hrow,
         hS, hbuf)
