@@ -324,9 +324,19 @@ def CP.cap_class_le_child(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
   ok : BO.BO.BestOK(inf, cr, G, ws) = MV.MV.main_ok(p, inf, G, ws, ble)
   v : Tree.Valid(Eval.Eval.tree_of(cr), G, ws) =
     SV.SV.valid_of_ok_lt(inf, cr, G, ws, clt, ok)
-  +hb : {Nat.is_le(SolveFast.class_lb(ws),
+  +hb0 : {Nat.is_le(SolveFast.class_lb(ws),
      Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
     FLB.FS.child_size_le(p, inf, G, ws, ble, hz, clt)
+  +efast : {SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws)
+            == SolveFast.class_lb(ws) : Nat} =
+    FN.FN.class_lb_fast_eq(True{}, Groups.len_words(ws), ws, {==}, hnd)
+  +hb : {Nat.is_le(SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws),
+     Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_l(Sat.SB.child_cost(p, G, ws, inf),
+      SolveFast.class_lb(ws),
+      SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws),
+      Equal.sym(Nat, SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws),
+        SolveFast.class_lb(ws), efast), hb0)
   +hpref : {Nat.is_le(CK.CK.prefmax(G, ws, Groups.len_words(G)),
      FH.FH.prefmax(G, ws, Groups.len_words(G))) == True{} : Bool} =
     NatProof.Nat.is_le_eq_r(CK.CK.prefmax(G, ws, Groups.len_words(G)),
@@ -352,7 +362,7 @@ def CP.cap_class_le_child(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
         FH.FH.prefmax(G, ws, Groups.len_words(G))),
       Tree.cost(Eval.Eval.tree_of(cr), ws), Sat.SB.child_cost(p, G, ws, inf),
       hc0, hc1)
-  CK.CK.max_le(SolveFast.class_lb(ws),
+  CK.CK.max_le(SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws),
     CapProof.LB.capbound(Groups.len_words(ws),
       FH.FH.prefmax(G, ws, Groups.len_words(G))),
     Sat.SB.child_cost(p, G, ws, inf), hb, hc)

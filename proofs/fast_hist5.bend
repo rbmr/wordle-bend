@@ -3248,7 +3248,7 @@ def FH.prefmax(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>, +i: Nat) -> Nat:
 # at the class's branching factor over the whole guess list, whichever is
 # larger.
 def FH.cap_class(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>) -> Nat:
-  Nat.max(SolveFast.class_lb(ws),
+  Nat.max(SolveFast.class_lb_fast(True{}, Groups.len_words(ws), ws),
     CapProof.LB.capbound(Groups.len_words(ws),
       FH.prefmax(G, ws, Groups.len_words(G))))
 

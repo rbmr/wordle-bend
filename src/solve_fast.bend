@@ -1682,41 +1682,41 @@ def class_k_start(+ws: +List<CWord>, +m: Nat, +gn: Nat,
                   tbl: Array<U32>) -> CKRes:
   class_k_start_b(Nat.is_le(gn, 0n), ws, m, gn, tbl)
 
-# The depth bound `2 * len - 1` of a big class, as a function of its size.
-def bigs_depth(+bigs: +List<BigClass>, +acc: Nat) -> Nat:
-  match bigs:
+# The depth bound `2 * len - 1` of the big classes, added up.
+def bigs_depth(+bs: +List<BigClass>) -> Nat:
+  match bs:
     case Nil{}:
-      acc
+      0n
     case Con{bc, rest}:
       match bc:
         case BigClass{fb, ws, +len, clb}:
-          bigs_depth(rest, Nat.add(Nat.sub(Nat.add(len, len), 1n), acc))
+          Nat.add(Nat.sub(Nat.add(len, len), 1n), bigs_depth(rest))
 
 # The class-independent part of the lower bound: `n` plus the class lower
 # bounds of the non-big items. A solved class of three candidates contributes
 # its depth bound `5`, not its exact tree cost (five or six), so this stays a
 # function of the class sizes and keeps the capacity walk's running total
 # comparable with the class list.
-def cap_base(+n: Nat, +items: +List<Item>, +acc: Nat) -> Nat:
+def cap_base(+n: Nat, +items: +List<Item>) -> Nat:
   match items:
     case Nil{}:
-      acc
+      0n
     case Con{it, rest}:
       match it:
         case Begin{g}:
-          cap_base(n, rest, acc)
+          cap_base(n, rest)
         case ClassItem{fb, cws, +wlen, tlb}:
-          cap_base(n, rest, Nat.add(Nat.sub(Nat.add(wlen, wlen), 1n), acc))
+          Nat.add(Nat.sub(Nat.add(wlen, wlen), 1n), cap_base(n, rest))
         case OneItem{fb, w}:
-          cap_base(n, rest, Nat.add(1n, acc))
+          Nat.add(1n, cap_base(n, rest))
         case TwoItem{fb, w1, w2}:
-          cap_base(n, rest, Nat.add(3n, acc))
+          Nat.add(3n, cap_base(n, rest))
         case DoneItem{fb, tree, cost}:
-          cap_base(n, rest, Nat.add(5n, acc))
+          Nat.add(5n, cap_base(n, rest))
         case Add{fb, tlb}:
-          cap_base(n, rest, acc)
+          cap_base(n, rest)
         case End{}:
-          Nat.add(n, acc)
+          Nat.add(n, cap_base(n, rest))
 
 type CapRes is Type:
   CapSkip{tbl: Array<U32>}
@@ -1746,6 +1746,14 @@ def class_k_opt(big: Bool, +ws: +List<CWord>, +m: Nat, +gn: Nat,
       ck_cheap(m, tbl)
     case True{}:
       class_k_start(ws, m, gn, tbl)
+
+# Hand the components of a scan result to a continuation, so that the walk can
+# consume them as plain values without matching a computed value.
+def cap_scan(-R: Type, r: CKRes,
+             kont: @tbl: Array<U32> -> @+k: Nat -> R) -> R:
+  match r:
+    case CKRes{tbl, +k}:
+      kont(tbl, k)
 
 # One class per two steps. A positive phase starts the k pass for the list head
 # and zero consumes it; the walk is structural on the class list, so it needs no
@@ -1792,8 +1800,10 @@ def cap_walk(+bs: +List<BigClass>, +phase: Nat, stop: Bool,
                 case False{}:
                   match st:
                     case CKRes{tbl, k}:
-                      cap_walk(bs, hp, False{}, acc, gain, total0, best, gn,
-                        class_k_opt(Nat.is_le(16n, len), ws, len, gn, tbl))
+                      cap_scan(CapRes,
+                        class_k_opt(Nat.is_le(16n, len), ws, len, gn, tbl),
+                        t2 => k2 => cap_walk(bs, hp, False{}, acc, gain, total0,
+                          best, gn, CKRes{t2, k2}))
             case 0n:
               match stop:
                 case True{}:
@@ -1835,7 +1845,7 @@ def finish_node(ok: Bool, +g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                Buf5{seen, buckets3, tbl3, gen2, gn}}
     case True{}:
       finish_cap(cap_walk(bigs, 1n, False{}, Nil{}, 0n,
-                   Nat.add(bigs_depth(bigs, 0n), cap_base(n, items, 0n)),
+                   Nat.add(bigs_depth(bigs), cap_base(n, items)),
                    best, gn, ck_cheap(0n, tbl3)),
         g, seen, gen2, gn, rem_lb, items, buckets3)
 
