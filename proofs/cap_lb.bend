@@ -16,6 +16,20 @@ import ./lb_capacity_sound.bend as LBS
 import ./cover_list.bend as CoverList
 import ./fast_cutoff.bend as FC
 import ./fast_hist5.bend as FH
+import ./fast_tbl.bend as FT
+import ./class_k.bend as CK
+import ./class_wid.bend as WK
+import ./fast_lb.bend as FLB
+import ./fast_step.bend as FStep
+import ./fast_nodup.bend as FN
+import ./eval.bend as Eval
+import ./sat.bend as Sat
+import ./mainvalid.bend as MV
+import ./solvevalid.bend as SV
+import ./classbound_sum.bend as CBS
+import ../src/solve_ref.bend as SolveRef
+import ../src/tree.bend as Tree
+import ./bestok.bend as BO
 
 # ---------------------------------------------------------------------------
 # Truncation helpers
@@ -253,3 +267,204 @@ def CP.capbound_eq(+n: Nat, +k: Nat) ->
           Equal.sym(Nat, Nat.min(1n+m, CapProof.LB.G(k, 1n)), 1n,
             CP.min_g_one(1n+m, k, NatProof.Nat.is_le_succ(0n, m,
               NatProof.Nat.is_le_zero_l(m))))))
+
+# ---------------------------------------------------------------------------
+# The class bound against a reference tree
+# ---------------------------------------------------------------------------
+
+# `FH.cap_count` is the number of codes of `class_k.bend`.
+def CP.count_eq(+g: +List<Nat>, +ws: +List<+List<Nat>>) ->
+  {FH.FH.cap_count(g, ws) == CK.CK.count(g, ws) : Nat}:
+  {==}
+
+# `FH.prefmax` is the prefix maximum of `class_k.bend`.
+def CP.prefmax_eq(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>, +i: Nat) ->
+  {FH.FH.prefmax(G, ws, i) == CK.CK.prefmax(G, ws, i) : Nat}:
+  match i:
+    case 0n:
+      {==}
+    case 1n+p:
+      +e1 : {Nat.max(FH.FH.cap_count(FT.FT.nth_word(G, p), ws),
+                   FH.FH.prefmax(G, ws, p))
+             == Nat.max(CK.CK.count(FT.FT.nth_word(G, p), ws),
+                   FH.FH.prefmax(G, ws, p)) : Nat} =
+        Equal.cong(Nat, Nat, x => Nat.max(x, FH.FH.prefmax(G, ws, p)),
+          FH.FH.cap_count(FT.FT.nth_word(G, p), ws),
+          CK.CK.count(FT.FT.nth_word(G, p), ws),
+          CP.count_eq(FT.FT.nth_word(G, p), ws))
+      +e2 : {Nat.max(CK.CK.count(FT.FT.nth_word(G, p), ws),
+                   FH.FH.prefmax(G, ws, p))
+             == Nat.max(CK.CK.count(FT.FT.nth_word(G, p), ws),
+                   CK.CK.prefmax(G, ws, p)) : Nat} =
+        Equal.cong(Nat, Nat,
+          x => Nat.max(CK.CK.count(FT.FT.nth_word(G, p), ws), x),
+          FH.FH.prefmax(G, ws, p), CK.CK.prefmax(G, ws, p),
+          CP.prefmax_eq(G, ws, p))
+      Equal.trans(Nat,
+        Nat.max(FH.FH.cap_count(FT.FT.nth_word(G, p), ws),
+          FH.FH.prefmax(G, ws, p)),
+        Nat.max(CK.CK.count(FT.FT.nth_word(G, p), ws),
+          FH.FH.prefmax(G, ws, p)),
+        Nat.max(CK.CK.count(FT.FT.nth_word(G, p), ws),
+          CK.CK.prefmax(G, ws, p)), e1, e2)
+
+# The capacity class bound of a class is at most the cost of its reference
+# tree.
+def CP.cap_class_le_child(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +ws: +List<+List<Nat>>,
+    +ble: {Nat.is_le(Groups.len_words(ws), p) == True{} : Bool},
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +clt: {Nat.is_lt(Sat.SB.child_cost(p, G, ws, inf), inf) == True{} : Bool},
+    +hnd: {FN.FN.no_dup_ref(ws) == True{} : Bool}) ->
+  {Nat.is_le(FH.FH.cap_class(G, ws),
+     Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool}:
+  +cr : SolveRef.Best = FStep.FS.ref_run_at(p, inf, G, ws)
+  ok : BO.BO.BestOK(inf, cr, G, ws) = MV.MV.main_ok(p, inf, G, ws, ble)
+  v : Tree.Valid(Eval.Eval.tree_of(cr), G, ws) =
+    SV.SV.valid_of_ok_lt(inf, cr, G, ws, clt, ok)
+  +hb : {Nat.is_le(SolveFast.class_lb(ws),
+     Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
+    FLB.FS.child_size_le(p, inf, G, ws, ble, hz, clt)
+  +hpref : {Nat.is_le(CK.CK.prefmax(G, ws, Groups.len_words(G)),
+     FH.FH.prefmax(G, ws, Groups.len_words(G))) == True{} : Bool} =
+    NatProof.Nat.is_le_eq_r(CK.CK.prefmax(G, ws, Groups.len_words(G)),
+      CK.CK.prefmax(G, ws, Groups.len_words(G)),
+      FH.FH.prefmax(G, ws, Groups.len_words(G)),
+      Equal.sym(Nat, FH.FH.prefmax(G, ws, Groups.len_words(G)),
+        CK.CK.prefmax(G, ws, Groups.len_words(G)),
+        CP.prefmax_eq(G, ws, Groups.len_words(G))),
+      NatProof.Nat.is_le_refl(CK.CK.prefmax(G, ws, Groups.len_words(G))))
+  +hc0 : {Nat.is_le(CapProof.LB.capbound(Groups.len_words(ws),
+     FH.FH.prefmax(G, ws, Groups.len_words(G))),
+     Tree.cost(Eval.Eval.tree_of(cr), ws)) == True{} : Bool} =
+    WK.WK.class_cap(p, inf, G, ws,
+      FH.FH.prefmax(G, ws, Groups.len_words(G)), hpref, ble, hnd, v)
+  +hc1 : {Nat.is_le(Tree.cost(Eval.Eval.tree_of(cr), ws),
+     Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
+    FLB.FS.child_cost_ok(p, inf, G, ws, ble, hz, clt)
+  +hc : {Nat.is_le(CapProof.LB.capbound(Groups.len_words(ws),
+     FH.FH.prefmax(G, ws, Groups.len_words(G))),
+     Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(
+      CapProof.LB.capbound(Groups.len_words(ws),
+        FH.FH.prefmax(G, ws, Groups.len_words(G))),
+      Tree.cost(Eval.Eval.tree_of(cr), ws), Sat.SB.child_cost(p, G, ws, inf),
+      hc0, hc1)
+  CK.CK.max_le(SolveFast.class_lb(ws),
+    CapProof.LB.capbound(Groups.len_words(ws),
+      FH.FH.prefmax(G, ws, Groups.len_words(G))),
+    Sat.SB.child_cost(p, G, ws, inf), hb, hc)
+
+# The fold of the class bounds is at most the sum of the child costs.
+def CP.cap_fold_le_sum(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +groups: +List<Groups.Group>,
+    bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
+    all: CBS.CU.AllLt(inf, Sat.SB.child_costs(p, G, groups, inf)),
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +ng: {FN.FN.nodup_ok_jobs(True{}, MV.MV.next_groups(groups))
+          == True{} : Bool}) ->
+  {Nat.is_le(FH.FH.cap_fold(G, groups),
+     CBN.CB.sum(Sat.SB.child_costs(p, G, groups, inf))) == True{} : Bool}:
+  match groups:
+    case Nil{}:
+      NatProof.Nat.is_le_refl(0n)
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{fb, ws}:
+          (+ble, bt) = bounds
+          (+clt, at) = all
+          +nh : {FN.FN.nodup_ok(True{}, ws) == True{} : Bool} =
+            Logic.Proof.and_true_l(FN.FN.nodup_ok(True{}, ws),
+              FN.FN.nodup_ok_jobs(True{}, MV.MV.next_groups(rest)), ng)
+          +nt : {FN.FN.nodup_ok_jobs(True{}, MV.MV.next_groups(rest))
+                 == True{} : Bool} =
+            Logic.Proof.and_true_r(FN.FN.nodup_ok(True{}, ws),
+              FN.FN.nodup_ok_jobs(True{}, MV.MV.next_groups(rest)), ng)
+          +hd : {Nat.is_le(FH.FH.cap_class(G, ws),
+                   Sat.SB.child_cost(p, G, ws, inf)) == True{} : Bool} =
+            CP.cap_class_le_child(p, inf, G, ws, ble, hz, clt, nh)
+          +tl : {Nat.is_le(FH.FH.cap_fold(G, rest),
+                   CBN.CB.sum(Sat.SB.child_costs(p, G, rest, inf)))
+                 == True{} : Bool} =
+            CP.cap_fold_le_sum(p, inf, G, rest, bt, at, hz, nt)
+          CBN.CB.is_le_add(FH.FH.cap_class(G, ws),
+            Sat.SB.child_cost(p, G, ws, inf),
+            FH.FH.cap_fold(G, rest),
+            CBN.CB.sum(Sat.SB.child_costs(p, G, rest, inf)), hd, tl)
+
+# ---------------------------------------------------------------------------
+# The class bound is decreasing in the branching factor
+# ---------------------------------------------------------------------------
+
+# `G` grows with the branching factor.
+def CP.G_mono_k(+k1: Nat, +k2: Nat, +j: Nat,
+    +h: {Nat.is_le(k1, k2) == True{} : Bool}) ->
+  {Nat.is_le(CapProof.LB.G(k1, j), CapProof.LB.G(k2, j)) == True{} : Bool}:
+  match j:
+    case 0n:
+      NatProof.Nat.is_le_refl(0n)
+    case 1n+p:
+      +ih : {Nat.is_le(CapProof.LB.G(k1, p), CapProof.LB.G(k2, p))
+             == True{} : Bool} =
+        CP.G_mono_k(k1, k2, p, h)
+      +h1 : {Nat.is_le(Nat.mul(k1, CapProof.LB.G(k1, p)),
+                        Nat.mul(k2, CapProof.LB.G(k1, p))) == True{} : Bool} =
+        CBN.CB.is_le_mul_l(k1, k2, CapProof.LB.G(k1, p), h)
+      +h2 : {Nat.is_le(Nat.mul(k2, CapProof.LB.G(k1, p)),
+                        Nat.mul(k2, CapProof.LB.G(k2, p))) == True{} : Bool} =
+        CBN.CB.is_le_mul_r(CapProof.LB.G(k1, p), CapProof.LB.G(k2, p), k2, ih)
+      +h3 : {Nat.is_le(Nat.mul(k1, CapProof.LB.G(k1, p)),
+                        Nat.mul(k2, CapProof.LB.G(k2, p))) == True{} : Bool} =
+        NatProof.Nat.is_le_trans(Nat.mul(k1, CapProof.LB.G(k1, p)),
+          Nat.mul(k2, CapProof.LB.G(k1, p)),
+          Nat.mul(k2, CapProof.LB.G(k2, p)), h1, h2)
+      CBN.CB.is_le_add(1n, 1n, Nat.mul(k1, CapProof.LB.G(k1, p)),
+        Nat.mul(k2, CapProof.LB.G(k2, p)), NatProof.Nat.is_le_refl(1n), h3)
+
+# The level sum shrinks when the branching factor grows.
+def CP.capSum_k_le(+n: Nat, +k1: Nat, +k2: Nat, +fuel: Nat, +j: Nat,
+    +h: {Nat.is_le(k1, k2) == True{} : Bool}) ->
+  {Nat.is_le(CapProof.LB.capSum(n, k2, fuel, j),
+             CapProof.LB.capSum(n, k1, fuel, j)) == True{} : Bool}:
+  match fuel:
+    case 0n:
+      NatProof.Nat.is_le_refl(0n)
+    case 1n+pf:
+      +hg : {Nat.is_le(CapProof.LB.G(k1, j), CapProof.LB.G(k2, j))
+             == True{} : Bool} =
+        CP.G_mono_k(k1, k2, j, h)
+      +hd : {Nat.is_le(Nat.sub(n, CapProof.LB.G(k2, j)),
+                        Nat.sub(n, CapProof.LB.G(k1, j))) == True{} : Bool} =
+        LBS.LBS.sub_le_r(n, CapProof.LB.G(k2, j), CapProof.LB.G(k1, j), hg)
+      +ht : {Nat.is_le(CapProof.LB.capSum(n, k2, pf, Nat.add(1n, j)),
+                        CapProof.LB.capSum(n, k1, pf, Nat.add(1n, j)))
+             == True{} : Bool} =
+        CP.capSum_k_le(n, k1, k2, pf, Nat.add(1n, j), h)
+      CBN.CB.is_le_add(Nat.sub(n, CapProof.LB.G(k2, j)),
+        Nat.sub(n, CapProof.LB.G(k1, j)),
+        CapProof.LB.capSum(n, k2, pf, Nat.add(1n, j)),
+        CapProof.LB.capSum(n, k1, pf, Nat.add(1n, j)), hd, ht)
+
+# The capacity bound is decreasing in the branching factor.
+def CP.capbound_k_le(+n: Nat, +k1: Nat, +k2: Nat,
+    +h: {Nat.is_le(k1, k2) == True{} : Bool}) ->
+  {Nat.is_le(CapProof.LB.capbound(n, k2), CapProof.LB.capbound(n, k1))
+   == True{} : Bool}:
+  NatProof.Nat.is_le_add_l(CapProof.LB.capSum(n, k2, n, 1n),
+    CapProof.LB.capSum(n, k1, n, 1n), n,
+    CP.capSum_k_le(n, k1, k2, n, 1n, h))
+
+# The same monotonicity for the solver's truncated function.
+def CP.capbound_src_k_le(+n: Nat, +k1: Nat, +k2: Nat,
+    +h: {Nat.is_le(k1, k2) == True{} : Bool}) ->
+  {Nat.is_le(SolveFast.capbound(n, k2), SolveFast.capbound(n, k1))
+   == True{} : Bool}:
+  NatProof.Nat.is_le_eq_r(SolveFast.capbound(n, k2),
+    CapProof.LB.capbound(n, k1), SolveFast.capbound(n, k1),
+    Equal.sym(Nat, SolveFast.capbound(n, k1), CapProof.LB.capbound(n, k1),
+      CP.capbound_eq(n, k1)),
+    NatProof.Nat.is_le_eq_l(CapProof.LB.capbound(n, k1),
+      CapProof.LB.capbound(n, k2), SolveFast.capbound(n, k2),
+      Equal.sym(Nat, SolveFast.capbound(n, k2), CapProof.LB.capbound(n, k2),
+        CP.capbound_eq(n, k2)),
+      CP.capbound_k_le(n, k1, k2, h)))

@@ -9204,6 +9204,7 @@ type FH.GuessCase is Data:
   GCSkipUnusable{}
   GCSkipPre{}
   GCSkipLb{}
+  GCSkipCap{}
   GCLive{ord: +List<Groups.Group>, body: +List<SolveFast.Item>, perm: FP.FP.Perm}
 
 def FH.GuessCaseOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
@@ -9235,6 +9236,18 @@ def FH.GuessCaseOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
         {Nat.is_le(Eval.Eval.cost_of(best),
            SolveFast.lower_bound(n, Groups.groups_build(g, S, Nil{})))
          == True{} : Bool}>
+    case GCSkipCap{}:
+      Arr.Arr.DPair<
+        {items == Nil{} : +List<SolveFast.Item>},
+        Arr.Arr.DPair<
+          {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+           == True{} : Bool},
+          Arr.Arr.DPair<
+            {nodup == True{} : Bool},
+            {Nat.is_le(Eval.Eval.cost_of(best),
+               FH.cap_lb(G, Groups.len_words(S),
+                 Groups.groups_build(g, S, Nil{})))
+             == True{} : Bool}>>>
     case GCLive{ord, body, perm}:
       Arr.Arr.DPair<
         {items == SolveFast.Begin{g} <> body : +List<SolveFast.Item>},
