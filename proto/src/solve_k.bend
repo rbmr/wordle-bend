@@ -161,7 +161,7 @@ def solve_chunked(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
   +bnd : Nat = probe_cost(G, cwS, n, inf)
   +b0 : SolveRef.Best = SolveFast.dummy_inf(bnd)
   +rs : +List<SolveRef.Best> =
-    par_chunks(d, G, 0, n, G, gG, cwS, cs, n, nd, fl, inf, bnd)
+    par_chunks(Nat.min(d, 1n), G, 0, n, G, gG, cwS, cs, n, nd, fl, inf, bnd)
   SolveRef.best_to_maybe(inf, fold_results(rs, b0))
 
 # A candidate list too short to have classes keeps the direct path: it has no
