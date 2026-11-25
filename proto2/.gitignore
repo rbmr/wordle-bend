@@ -1,0 +1,7 @@
+/m0/solver
+/m0/bench_c
+/m0v2/solver
+/m0v2/bench_c
+/m0v3/solver
+/m0v3/bench_c3
+*.o
