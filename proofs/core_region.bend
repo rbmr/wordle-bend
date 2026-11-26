@@ -974,3 +974,56 @@ def CR.res_set(+xs: +List<U32>, +t: U32,
     +hi: {Nat.is_lt(512n, CS.CS.len(xs)) == True{} : Bool}) ->
   CR.Res(CS.CS.set(xs, 512n, t), t):
   CS.CS.nth_set_same(xs, 512n, t, hi)
+
+# `nth` of a ghost touched list, and the read the clear pass makes: cell
+# `256 + j + d` of the touched region holds the code at position `d`.
+def CR.nnth(+tl: +List<Nat>, +d: Nat) -> Nat:
+  match tl:
+    case Nil{}:
+      0n
+    case Con{c, rest}:
+      match d:
+        case 0n:
+          c
+        case 1n+dp:
+          CR.nnth(rest, dp)
+
+def CR.touch_get(+tl: +List<Nat>, +j: Nat, +d: Nat, xs: +List<U32>,
+    hc: CR.Touch(j, xs, tl),
+    +hd: {Nat.is_lt(d, CR.nlen(tl)) == True{} : Bool}) ->
+  {CS.CS.nth(xs, Nat.add(256n, Nat.add(j, d)))
+   == U32.from_nat(CR.nnth(tl, d)) : U32}:
+  match tl:
+    case Nil{}:
+      Empty.absurd(
+        {CS.CS.nth(xs, Nat.add(256n, Nat.add(j, d)))
+         == U32.from_nat(CR.nnth(Nil{}, d)) : U32},
+        NatProof.Nat.not_lt_zero(d, hd))
+    case Con{c, rest}:
+      match d:
+        case 0n:
+          (hhead, _) = hc
+          +e0 : {Nat.add(j, 0n) == j : Nat} = NatProof.NatPrf.add_zero(j)
+          +ei : {Nat.add(256n, Nat.add(j, 0n)) == Nat.add(256n, j) : Nat} =
+            CR.add_cong_r(256n, Nat.add(j, 0n), j, e0)
+          Equal.trans(U32,
+            CS.CS.nth(xs, Nat.add(256n, Nat.add(j, 0n))),
+            CS.CS.nth(xs, Nat.add(256n, j)), U32.from_nat(c),
+            Equal.cong(Nat, U32, z => CS.CS.nth(xs, z),
+              Nat.add(256n, Nat.add(j, 0n)), Nat.add(256n, j), ei),
+            hhead)
+        case 1n+dp:
+          (_, htail) = hc
+          +es : {Nat.add(j, Nat.add(1n, dp)) == Nat.add(1n+j, dp) : Nat} =
+            NatProof.NatPrf.add_succ(j, dp)
+          +ei : {Nat.add(256n, Nat.add(j, 1n+dp))
+                 == Nat.add(256n, Nat.add(1n+j, dp)) : Nat} =
+            CR.add_cong_r(256n, Nat.add(j, Nat.add(1n, dp)),
+              Nat.add(1n+j, dp), es)
+          Equal.trans(U32, CS.CS.nth(xs, Nat.add(256n, Nat.add(j, 1n+dp))),
+            CS.CS.nth(xs, Nat.add(256n, Nat.add(1n+j, dp))),
+            U32.from_nat(CR.nnth(rest, dp)),
+            Equal.cong(Nat, U32, z => CS.CS.nth(xs, z),
+              Nat.add(256n, Nat.add(j, 1n+dp)),
+              Nat.add(256n, Nat.add(1n+j, dp)), ei),
+            CR.touch_get(rest, 1n+j, dp, xs, htail, hd))
