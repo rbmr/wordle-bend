@@ -345,6 +345,120 @@ def scatter(+g: U32, +sb: U32, +n: U32, +dep: U32, +dst: U32, +c: U32,
   sc_go(fuel, 0, 0, n, sb, g, dep, dst, c, gg, 0, 0,
         Array.get(U32, a, sb))
 
+# ------------------------------------------------------ entry order (Rust) ---
+#
+# Rust packs each eval entry as (count << 16) | !response and sorts the entry
+# list by that word descending: bucket count descending, and on a tie response
+# ascending. The order changes work, not values: pass 1 accumulates the `fast`
+# bound bucket by bucket and abandons the whole guess as soon as it reaches the
+# cutoff, so evaluating the big buckets first (as Rust does) lets that cutoff
+# fire before the branch chain runs on the medium ones. The three parallel
+# arrays (ent, off, ne) are permuted in place with a selection sort, so the
+# result is always a valid permutation even if the fuel runs out.
+#
+# ph 0 outer head; 1/2 key of the current best; 3/4 inner scan; 10..14 load the
+# six cells of a swap; 15 swaps them; 20 done.
+def ord_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +bi: U32, +bkey: U32,
+           +kj: U32, +t: U32, +dep: U32, +c: U32, +gg: U32, +ei: U32,
+           +ebi: U32, +oi: U32, +obi: U32, +ni: U32, +nbi: U32,
+           r: Array<U32> & U32) -> Array<U32>:
+  match fuel:
+    case 0n:
+      (a2, _) = r
+      a2
+    case 1n+f:
+      match ph:
+        case 0:
+          (a2, _) = r
+          +done = A.ge01(U32.inc(i), t)
+          +eb = ent_at(dep, c, gg)
+          +idx = A.sel(done, 0, U32.add(eb, i))
+          ord_go(f, A.sel(done, 20, 1), i, U32.inc(i), i, 0, 0, t, dep, c, gg,
+                 ei, ebi, oi, obi, ni, nbi, Array.get(U32, a2, idx))
+        case 1:
+          (a2, +v) = r
+          +nb = ne_at(dep, c, gg)
+          ord_go(f, 2, i, j, bi, U32.mul(v, 256), kj, t, dep, c, gg,
+                 ei, ebi, oi, obi, ni, nbi, Array.get(U32, a2, U32.add(nb, bi)))
+        case 2:
+          (a2, +v) = r
+          +eb = ent_at(dep, c, gg)
+          ord_go(f, 3, i, j, bi, U32.add(bkey, U32.sub(255, v)), kj, t, dep, c,
+                 gg, ei, ebi, oi, obi, ni, nbi,
+                 Array.get(U32, a2, U32.add(eb, j)))
+        case 3:
+          (a2, +v) = r
+          +nb = ne_at(dep, c, gg)
+          ord_go(f, 4, i, j, bi, bkey, U32.mul(v, 256), t, dep, c, gg,
+                 ei, ebi, oi, obi, ni, nbi, Array.get(U32, a2, U32.add(nb, j)))
+        case 4:
+          # kj is complete; keep the larger key and its index, advance j.
+          (a2, +v) = r
+          +kj2 = U32.add(kj, U32.sub(255, v))
+          +gt = U32.shrn(U32.sub(bkey, kj2), 31n)
+          +bi2 = A.sel(gt, j, bi)
+          +bk2 = A.sel(gt, kj2, bkey)
+          +j2 = U32.inc(j)
+          +more = U32.sub(1, A.ge01(j2, t))
+          +eb = ent_at(dep, c, gg)
+          +idx = A.sel(more, U32.add(eb, j2), U32.add(eb, i))
+          ord_go(f, A.sel(more, 3, 10), i, j2, bi2, bk2, kj2, t, dep, c, gg,
+                 ei, ebi, oi, obi, ni, nbi, Array.get(U32, a2, idx))
+        case 10:
+          (a2, +v) = r
+          +eb = ent_at(dep, c, gg)
+          ord_go(f, 11, i, j, bi, bkey, kj, t, dep, c, gg, v, ebi, oi, obi, ni,
+                 nbi, Array.get(U32, a2, U32.add(eb, bi)))
+        case 11:
+          (a2, +v) = r
+          +ob = off_at(dep, c, gg)
+          ord_go(f, 12, i, j, bi, bkey, kj, t, dep, c, gg, ei, v, oi, obi, ni,
+                 nbi, Array.get(U32, a2, U32.add(ob, i)))
+        case 12:
+          (a2, +v) = r
+          +ob = off_at(dep, c, gg)
+          ord_go(f, 13, i, j, bi, bkey, kj, t, dep, c, gg, ei, ebi, v, obi, ni,
+                 nbi, Array.get(U32, a2, U32.add(ob, bi)))
+        case 13:
+          (a2, +v) = r
+          +nb = ne_at(dep, c, gg)
+          ord_go(f, 14, i, j, bi, bkey, kj, t, dep, c, gg, ei, ebi, oi, v, ni,
+                 nbi, Array.get(U32, a2, U32.add(nb, i)))
+        case 14:
+          (a2, +v) = r
+          +nb = ne_at(dep, c, gg)
+          ord_go(f, 15, i, j, bi, bkey, kj, t, dep, c, gg, ei, ebi, oi, obi, v,
+                 nbi, Array.get(U32, a2, U32.add(nb, bi)))
+        case 15:
+          # Swap the two entries in one phase, then advance the outer index.
+          (a2, +v) = r
+          +eb = ent_at(dep, c, gg)
+          +ob = off_at(dep, c, gg)
+          +nb = ne_at(dep, c, gg)
+          a3 = Array.set(U32, a2, U32.add(eb, i), ebi)
+          a4 = Array.set(U32, a3, U32.add(eb, bi), ei)
+          a5 = Array.set(U32, a4, U32.add(ob, i), obi)
+          a6 = Array.set(U32, a5, U32.add(ob, bi), oi)
+          a7 = Array.set(U32, a6, U32.add(nb, i), v)
+          a8 = Array.set(U32, a7, U32.add(nb, bi), ni)
+          +i2 = U32.inc(i)
+          +idx = A.sel(A.ge01(i2, t), 0, U32.add(eb, i2))
+          ord_go(f, 0, i2, j, bi, bkey, kj, t, dep, c, gg, ei, ebi, oi, obi, ni,
+                 nbi, Array.get(U32, a8, idx))
+        case 20:
+          (a2, _) = r
+          a2
+        case _:
+          (a2, _) = r
+          a2
+
+def ordsort(a: Array<U32>, +t: U32, +dep: U32, +c: U32,
+            +gg: U32) -> Array<U32>:
+  +tt = Nat.mul(U32.to_nat(t), U32.to_nat(t))
+  +fuel = Nat.add(Nat.mul(tt, 4n), Nat.add(Nat.mul(U32.to_nat(t), 32n), 64n))
+  ord_go(fuel, 0, 0, 0, 0, 0, 0, t, dep, c, gg, 0, 0, 0, 0, 0, 0,
+         Array.get(U32, a, ent_at(dep, c, gg)))
+
 # ------------------------------------------------------------ set hashing ---
 
 # One set hash: h1/h2 = xor of the two Zobrist words of every candidate in

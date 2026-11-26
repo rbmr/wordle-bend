@@ -789,9 +789,19 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           +dst = S.set_at(U32.inc(dep), c, gg)
           a3 = S.offsets(t, dep, dst, c, gg, a2)
           a4 = S.scatter(g, ss, n, dep, dst, c, gg, a3)
-          step(f, c, gg, 1, 61, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+          step(f, c, gg, 1, 303, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, cost, 0, t, lbk, cut, gen, ret, nst, ngs, nht,
                npr, stk, Array.get(U32, a4, 0))
+        case 303:
+          # Rust sorts the eval entries by count descending (packed
+          # (count<<16)|!response); the order decides how early pass 1's fast
+          # bound reaches the cutoff, i.e. how many split buckets reach the
+          # branch chain. Values are order-independent.
+          (a2, _) = p
+          a3 = S.ordsort(a2, t, dep, c, gg)
+          step(f, c, gg, 1, 61, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, 0, t, lbk, cut, gen, ret, nst, ngs, nht,
+               npr, stk, Array.get(U32, a3, 0))
         case 61:
           (a2, _) = p
           +donec = A.ge01(bcur, t)
