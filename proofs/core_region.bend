@@ -711,3 +711,149 @@ def CR.count_clear(+n: Nat, +i: Nat, +d: Nat, +xs: +List<U32>,
            CR.count_clear_shift(np, 1n+i, Nat.add(1n+i, dp), Nat.add(i, 1n+dp),
              esucc, xs, nl,
              CR.count_clear(np, 1n+i, dp, xs, nl, htail, hd, hend2)))
+
+# --------------------------------------------------------------- touched list ---
+#
+# The machine appends each first occurrence at cell `256 + t`, where `t` is the
+# number of distinct codes so far.  In ghost terms the touched list grows at its
+# end, so the two update lemmas are "append at the end" (`touch_append`) and
+# "a write at the end leaves the list" (`touch_out`, the duplicate case, where
+# the machine writes the same code into the free slot past the list).
+
+def CR.nlen(+tl: +List<Nat>) -> Nat:
+  match tl:
+    case Nil{}:
+      0n
+    case Con{d, rest}:
+      Nat.add(1n, CR.nlen(rest))
+
+def CR.snoc(+c: Nat, +tl: +List<Nat>) -> +List<Nat>:
+  match tl:
+    case Nil{}:
+      c <> Nil{}
+    case Con{d, rest}:
+      d <> CR.snoc(c, rest)
+
+# `a < b` transports to a propositionally equal `a`.
+def CR.lt_rewrite_l(+a1: Nat, +a2: Nat, +b: Nat, +e: {a1 == a2 : Nat},
+    h: {Nat.is_lt(a1, b) == True{} : Bool}) ->
+  {Nat.is_lt(a2, b) == True{} : Bool}:
+  %e : {Nat.is_lt(_, b) == True{} : Bool}
+  h
+
+# `a < b` transports to a propositionally equal `b`.
+def CR.lt_rewrite_r(+a: Nat, +b1: Nat, +b2: Nat, +e: {b1 == b2 : Nat},
+    h: {Nat.is_lt(a, b1) == True{} : Bool}) ->
+  {Nat.is_lt(a, b2) == True{} : Bool}:
+  %e : {Nat.is_lt(a, _) == True{} : Bool}
+  h
+
+# `Nat.add(a,b) == Nat.add(a,b')` from `b == b'`.
+def CR.add_cong_r(+a: Nat, +b1: Nat, +b2: Nat, +e: {b1 == b2 : Nat}) ->
+  {Nat.add(a, b1) == Nat.add(a, b2) : Nat}:
+  Equal.cong(Nat, Nat, z => Nat.add(a, z), b1, b2, e)
+
+# The cell index of the append point, `256 + j + len tl`, is strictly beyond
+# every cell of the region that starts at `256 + j`.
+def CR.lt_append(+j: Nat, +m: Nat) ->
+  {Nat.is_lt(Nat.add(256n, j), Nat.add(256n, Nat.add(j, 1n+m))) == True{} : Bool}:
+  +ea : {Nat.add(Nat.add(256n, j), 1n+m) == Nat.add(256n, Nat.add(j, 1n+m)) : Nat} =
+    NatProof.NatPrf.add_assoc(256n, j, 1n+m)
+  +h : {Nat.is_lt(Nat.add(256n, j), Nat.add(Nat.add(256n, j), 1n+m)) == True{} : Bool} =
+    CR.lt_add_pos(Nat.add(256n, j), 1n+m, {==})
+  CR.lt_rewrite_r(Nat.add(256n, j), Nat.add(Nat.add(256n, j), 1n+m),
+    Nat.add(256n, Nat.add(j, 1n+m)), ea, h)
+
+# Appending a code at the append point extends the touched region.
+def CR.touch_append(+tl: +List<Nat>, +j: Nat, +w: Nat, +xs: +List<U32>, +c: Nat,
+    hc: CR.Touch(j, xs, tl),
+    +hlen: {w == Nat.add(256n, Nat.add(j, CR.nlen(tl))) : Nat},
+    +hlt: {Nat.is_lt(w, CS.CS.len(xs)) == True{} : Bool}) ->
+  CR.Touch(j, CS.CS.set(xs, w, U32.from_nat(c)), CR.snoc(c, tl)):
+  match tl:
+    case Nil{}:
+      +e0 : {Nat.add(j, 0n) == j : Nat} = NatProof.NatPrf.add_zero(j)
+      +eq : {w == Nat.add(256n, j) : Nat} =
+        Equal.trans(Nat, w, Nat.add(256n, Nat.add(j, 0n)), Nat.add(256n, j),
+          hlen, CR.add_cong_r(256n, Nat.add(j, 0n), j, e0))
+      +hli : {Nat.is_lt(Nat.add(256n, j), CS.CS.len(xs)) == True{} : Bool} =
+        CR.lt_rewrite_l(w, Nat.add(256n, j), CS.CS.len(xs), eq, hlt)
+      +e1 : {CS.CS.nth(CS.CS.set(xs, w, U32.from_nat(c)), Nat.add(256n, j))
+             == CS.CS.nth(CS.CS.set(xs, Nat.add(256n, j), U32.from_nat(c)),
+                          Nat.add(256n, j)) : U32} =
+        Equal.cong(Nat, U32,
+          z => CS.CS.nth(CS.CS.set(xs, z, U32.from_nat(c)), Nat.add(256n, j)),
+          w, Nat.add(256n, j), eq)
+      (Equal.trans(U32,
+        CS.CS.nth(CS.CS.set(xs, w, U32.from_nat(c)), Nat.add(256n, j)),
+        CS.CS.nth(CS.CS.set(xs, Nat.add(256n, j), U32.from_nat(c)),
+          Nat.add(256n, j)),
+        U32.from_nat(c), e1,
+        CS.CS.nth_set_same(xs, Nat.add(256n, j), U32.from_nat(c), hli)), Unit{})
+    case Con{d, rest}:
+      (hhead, htail) = hc
+      +esucc : {Nat.add(j, Nat.add(1n, CR.nlen(rest)))
+                == Nat.add(1n+j, CR.nlen(rest)) : Nat} =
+        NatProof.NatPrf.add_succ(j, CR.nlen(rest))
+      +hlen2 : {w == Nat.add(256n, Nat.add(1n+j, CR.nlen(rest))) : Nat} =
+        Equal.trans(Nat, w,
+          Nat.add(256n, Nat.add(j, Nat.add(1n, CR.nlen(rest)))),
+          Nat.add(256n, Nat.add(1n+j, CR.nlen(rest))), hlen,
+          CR.add_cong_r(256n, Nat.add(j, Nat.add(1n, CR.nlen(rest))),
+            Nat.add(1n+j, CR.nlen(rest)), esucc))
+      +hlw : {Nat.is_lt(Nat.add(256n, j), w) == True{} : Bool} =
+        CR.lt_rewrite_r(Nat.add(256n, j),
+          Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))), w,
+          Equal.sym(Nat, w, Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))), hlen),
+          CR.lt_append(j, CR.nlen(rest)))
+      +hne : {Nat.is_eq(Nat.add(256n, j), w) == False{} : Bool} =
+        CN.core_nat_eq_false_of_lt(Nat.add(256n, j), w, hlw)
+      +hnes : {Nat.is_eq(w, Nat.add(256n, j)) == False{} : Bool} =
+        CN.core_nat_eq_false_sym(Nat.add(256n, j), w, hne)
+      +hh : {CS.CS.nth(CS.CS.set(xs, w, U32.from_nat(c)), Nat.add(256n, j))
+             == CS.CS.nth(xs, Nat.add(256n, j)) : U32} =
+        CS.CS.nth_set_diff(xs, w, Nat.add(256n, j), U32.from_nat(c), hnes)
+      +hh2 : {CS.CS.nth(CS.CS.set(xs, w, U32.from_nat(c)), Nat.add(256n, j))
+              == U32.from_nat(d) : U32} =
+        Equal.trans(U32,
+          CS.CS.nth(CS.CS.set(xs, w, U32.from_nat(c)), Nat.add(256n, j)),
+          CS.CS.nth(xs, Nat.add(256n, j)), U32.from_nat(d), hh, hhead)
+      (hh2, CR.touch_append(rest, 1n+j, w, xs, c, htail, hlen2, hlt))
+
+# A write at the append point leaves the touched region unchanged (the machine
+# writes the code there even when it is already counted).
+def CR.touch_out(+tl: +List<Nat>, +j: Nat, +w: Nat, +xs: +List<U32>, +v: U32,
+    hc: CR.Touch(j, xs, tl),
+    +hlen: {w == Nat.add(256n, Nat.add(j, CR.nlen(tl))) : Nat}) ->
+  CR.Touch(j, CS.CS.set(xs, w, v), tl):
+  match tl:
+    case Nil{}:
+      hc
+    case Con{d, rest}:
+      (hhead, htail) = hc
+      +esucc : {Nat.add(j, Nat.add(1n, CR.nlen(rest)))
+                == Nat.add(1n+j, CR.nlen(rest)) : Nat} =
+        NatProof.NatPrf.add_succ(j, CR.nlen(rest))
+      +hlen2 : {w == Nat.add(256n, Nat.add(1n+j, CR.nlen(rest))) : Nat} =
+        Equal.trans(Nat, w,
+          Nat.add(256n, Nat.add(j, Nat.add(1n, CR.nlen(rest)))),
+          Nat.add(256n, Nat.add(1n+j, CR.nlen(rest))), hlen,
+          CR.add_cong_r(256n, Nat.add(j, Nat.add(1n, CR.nlen(rest))),
+            Nat.add(1n+j, CR.nlen(rest)), esucc))
+      +hlw : {Nat.is_lt(Nat.add(256n, j), w) == True{} : Bool} =
+        CR.lt_rewrite_r(Nat.add(256n, j),
+          Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))), w,
+          Equal.sym(Nat, w, Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))), hlen),
+          CR.lt_append(j, CR.nlen(rest)))
+      +hne : {Nat.is_eq(Nat.add(256n, j), w) == False{} : Bool} =
+        CN.core_nat_eq_false_of_lt(Nat.add(256n, j), w, hlw)
+      +hnes : {Nat.is_eq(w, Nat.add(256n, j)) == False{} : Bool} =
+        CN.core_nat_eq_false_sym(Nat.add(256n, j), w, hne)
+      +hh : {CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j))
+             == CS.CS.nth(xs, Nat.add(256n, j)) : U32} =
+        CS.CS.nth_set_diff(xs, w, Nat.add(256n, j), v, hnes)
+      +hh2 : {CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j))
+              == U32.from_nat(d) : U32} =
+        Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j)),
+          CS.CS.nth(xs, Nat.add(256n, j)), U32.from_nat(d), hh, hhead)
+      (hh2, CR.touch_out(rest, 1n+j, w, xs, v, htail, hlen2))
