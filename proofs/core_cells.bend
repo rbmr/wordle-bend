@@ -112,3 +112,60 @@ def CC.cells_get(+n: Nat, +d: Nat, +i: Nat, a: Array<U32>,
                 Equal.sym(Nat, Nat.add(1n+dp, i),
                   Nat.add(dp, Nat.add(1n, i)), eidx))))
 
+
+# Four copies of one array plus the pairwise equalities.  `Array<T>` is not
+# `Data`, so a lemma that needs the old array in several linear positions
+# (`Arr.depth_transport`, `Arr.get_set_diff`, the recursive tail) cannot reuse
+# one value.  This is the same duplication shape as
+# `FH.hist5_step_swap_dup4`, generalised to four copies.
+def CC.dup4_node(-T: Data, -xs: Array<T>, -ys: Array<T>,
+    dl: &x1: Array<T> -> &x2: Array<T> -> &x3: Array<T> -> &x4: Array<T> ->
+        ({x1 == xs : Array<T>} & {x2 == x1 : Array<T>})
+        & ({x3 == x2 : Array<T>} & {x4 == x3 : Array<T>}),
+    dr: &y1: Array<T> -> &y2: Array<T> -> &y3: Array<T> -> &y4: Array<T> ->
+        ({y1 == ys : Array<T>} & {y2 == y1 : Array<T>})
+        & ({y3 == y2 : Array<T>} & {y4 == y3 : Array<T>})) ->
+  &a1: Array<T> -> &a2: Array<T> -> &a3: Array<T> -> &a4: Array<T> ->
+  ({a1 == ANode{xs, ys} : Array<T>} & {a2 == a1 : Array<T>})
+  & ({a3 == a2 : Array<T>} & {a4 == a3 : Array<T>}):
+  (x1, r1) = dl
+  (x2, r2) = r1
+  (x3, r3) = r2
+  (x4, px) = r3
+  ((ex1, ex2), (ex3, ex4)) = px
+  (y1, s1) = dr
+  (y2, s2) = s1
+  (y3, s3) = s2
+  (y4, py) = s3
+  ((ey1, ey2), (ey3, ey4)) = py
+  +e1 : {ANode{x1, y1} == ANode{xs, ys} : Array<T>} =
+    Equal.trans(Array<T>, ANode{x1, y1}, ANode{xs, y1}, ANode{xs, ys},
+      Equal.cong(Array<T>, Array<T>, l => ANode{l, y1}, x1, xs, ex1),
+      Equal.cong(Array<T>, Array<T>, r => ANode{xs, r}, y1, ys, ey1))
+  +e2 : {ANode{x2, y2} == ANode{x1, y1} : Array<T>} =
+    Equal.trans(Array<T>, ANode{x2, y2}, ANode{x1, y2}, ANode{x1, y1},
+      Equal.cong(Array<T>, Array<T>, l => ANode{l, y2}, x2, x1, ex2),
+      Equal.cong(Array<T>, Array<T>, r => ANode{x1, r}, y2, y1, ey2))
+  +e3 : {ANode{x3, y3} == ANode{x2, y2} : Array<T>} =
+    Equal.trans(Array<T>, ANode{x3, y3}, ANode{x2, y3}, ANode{x2, y2},
+      Equal.cong(Array<T>, Array<T>, l => ANode{l, y3}, x3, x2, ex3),
+      Equal.cong(Array<T>, Array<T>, r => ANode{x2, r}, y3, y2, ey3))
+  +e4 : {ANode{x4, y4} == ANode{x3, y3} : Array<T>} =
+    Equal.trans(Array<T>, ANode{x4, y4}, ANode{x3, y4}, ANode{x3, y3},
+      Equal.cong(Array<T>, Array<T>, l => ANode{l, y4}, x4, x3, ex4),
+      Equal.cong(Array<T>, Array<T>, r => ANode{x3, r}, y4, y3, ey4))
+  (ANode{x1, y1},
+   (ANode{x2, y2},
+    (ANode{x3, y3},
+     (ANode{x4, y4}, ((e1, e2), (e3, e4))))))
+
+def CC.dup4(-T: Data, a: Array<T>) ->
+  &a1: Array<T> -> &a2: Array<T> -> &a3: Array<T> -> &a4: Array<T> ->
+  ({a1 == a : Array<T>} & {a2 == a1 : Array<T>})
+  & ({a3 == a2 : Array<T>} & {a4 == a3 : Array<T>}):
+  match a:
+    case ALeaf{+x}:
+      (ALeaf{x}, (ALeaf{x}, (ALeaf{x}, (ALeaf{x},
+        (({==}, {==}), ({==}, {==}))))))
+    case ANode{xs, ys}:
+      CC.dup4_node(T, xs, ys, CC.dup4(T, xs), CC.dup4(T, ys))
