@@ -23,20 +23,23 @@ def fill_range(+fuel: Nat, +i: U32, +n: U32, +start: U32, +base: U32,
       a[U32.add(base, i)] <- U32.add(start, i)
       fill_range(p, U32.inc(i), n, start, base, a)
 
-# guesses 0..gm-1 over set sizes 2..km-1, printing "c g k count".
-def cells(+fuel: Nat, +g: U32, +k: U32, +km: U32, +gm: U32, +c: U32,
-          +gg: U32, a: Array<U32>) -> IO(Unit):
+# guesses 0..gm-1 over set sizes 2..km-1, printing "c g k count". The sweep is
+# one flat index over the (guess, size) grid and the fuel is exactly the number
+# of cells, so it ends by itself (the old version ignored `gm`, reset k to 0 and
+# printed 115k junk cells at n=60 instead of stopping after gm*span).
+def cells(+fuel: Nat, +i: U32, +span: U32, +c: U32, +gg: U32,
+          a: Array<U32>) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
       do IO<Unit>:
+        +g : U32 = U32.div(i, span)
+        +k : U32 = U32.add(2, U32.mod(i, span))
         a1 : Array<U32> = P.dcount(a, g, S.set_at(0, c, gg), k, c, gg)
         a2 : Array<U32> <- prn(Array.get(U32, a1, P.dnres(c, gg)),
                                "c " ++ U32.show(g) ++ " " ++ U32.show(k))
-        +over : U32 = A.ge01(U32.inc(k), km)
-        cells(f, U32.add(g, over), U32.mul(U32.sub(1, over), U32.inc(k)), km,
-              gm, c, gg, a2)
+        cells(f, U32.inc(i), span, c, gg, a2)
 
 def run(+gp: String, +cp: String, +n: U32) -> IO(Unit):
   do IO<Unit>:
@@ -47,9 +50,10 @@ def run(+gp: String, +cp: String, +n: U32) -> IO(Unit):
     total : U32 = G.total_size(c, gg)
     a : Array<U32> = Array.new(U32, M.depth_for(total), 0)
     a1 : Array<U32> = M.build_all(c, gg, gtext, ctext, a)
-    a2 : Array<U32> = fill_range(32n, 0, n, 0, S.set_at(0, c, gg), a1)
-    cells(Nat.add(Nat.mul(U32.to_nat(n), Nat.mul(32n, U32.to_nat(n))), 64n),
-          0, 2, U32.add(n, 1), 6, c, gg, a2)
+    a2 : Array<U32> = fill_range(Nat.add(U32.to_nat(n), 8n), 0, n, 0,
+                           S.set_at(0, c, gg), a1)
+    +span : U32 = U32.sub(n, 1)
+    cells(Nat.add(Nat.mul(6n, U32.to_nat(span)), 1n), 0, span, c, gg, a2)
 
 def rdm(m: Maybe<&2, U32>, +gp: String, +cp: String) -> IO(Unit):
   match m:
