@@ -883,3 +883,53 @@ def CR.len_dedup_add(+c: U32, +nl: +List<U32>) ->
    == Nat.add(CS.CS.len(CS.CS.dedup(nl)),
               U32.to_nat(Bool.to_u32(Bool.not(CS.CS.mem(c, nl))))) : Nat}:
   CR.len_dedup_cons(c, CS.CS.mem(c, nl), CS.CS.dedup(nl))
+
+# --------------------------------------------------- region independence ---
+#
+# Each machine phase writes exactly one region, so every other region's proof
+# must survive that write.  `count_set_before`/`count_set_after` already cover
+# the count region; these are the touched-list and result counterparts.
+
+# The touched region's start grows by one per induction step, so the bound
+# `w < 256 + j` must move with it.
+def CR.lt_shift(+j: Nat, +w: Nat,
+    +hw: {Nat.is_lt(w, Nat.add(256n, j)) == True{} : Bool}) ->
+  {Nat.is_lt(w, Nat.add(256n, Nat.add(1n, j))) == True{} : Bool}:
+  +e : {Nat.add(256n, Nat.add(1n, j)) == Nat.add(1n, Nat.add(256n, j)) : Nat} =
+    {==}
+  +h1 : {Nat.is_lt(w, Nat.add(1n, Nat.add(256n, j))) == True{} : Bool} =
+    NatProof.Nat.is_lt_le_trans(w, Nat.add(256n, j),
+      Nat.add(1n, Nat.add(256n, j)), hw,
+      NatProof.Nat.is_le_of_lt(Nat.add(256n, j), Nat.add(1n, Nat.add(256n, j)),
+        NatProof.Nat.is_lt_succ_self(Nat.add(256n, j))))
+  CR.lt_rewrite_r(w, Nat.add(1n, Nat.add(256n, j)),
+    Nat.add(256n, Nat.add(1n, j)), Equal.sym(Nat, Nat.add(256n, Nat.add(1n, j)),
+      Nat.add(1n, Nat.add(256n, j)), e), h1)
+
+# A write below the touched region (`w < 256 + j`) leaves it unchanged; the
+# machine's count-cell write is at a code `< 256`.
+def CR.touch_set_below(+tl: +List<Nat>, +j: Nat, +w: Nat, +xs: +List<U32>,
+    +v: U32,
+    hc: CR.Touch(j, xs, tl),
+    +hw: {Nat.is_lt(w, Nat.add(256n, j)) == True{} : Bool}) ->
+  CR.Touch(j, CS.CS.set(xs, w, v), tl):
+  match tl:
+    case Nil{}:
+      hc
+    case Con{d, rest}:
+      (hhead, htail) = hc
+      +hne : {Nat.is_eq(w, Nat.add(256n, j)) == False{} : Bool} =
+        CN.core_nat_eq_false_of_lt(w, Nat.add(256n, j), hw)
+      +hhead2 : {CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j))
+                 == U32.from_nat(d) : U32} =
+        Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j)),
+          CS.CS.nth(xs, Nat.add(256n, j)), U32.from_nat(d),
+          CS.CS.nth_set_diff(xs, w, Nat.add(256n, j), v, hne), hhead)
+      (hhead2,
+       CR.touch_set_below(rest, 1n+j, w, xs, v, htail, CR.lt_shift(j, w, hw)))
+
+# A write at the result cell establishes `CR.Res`.
+def CR.res_set(+xs: +List<U32>, +t: U32,
+    +hi: {Nat.is_lt(512n, CS.CS.len(xs)) == True{} : Bool}) ->
+  CR.Res(CS.CS.set(xs, 512n, t), t):
+  CS.CS.nth_set_same(xs, 512n, t, hi)
