@@ -58,3 +58,35 @@ def core_nat_lt_of_le_lt(a: Nat, b: Nat, c: Nat,
 # A `Bool` that is `False` is not `True`.
 def core_bool_false_ne_true(+h: {False{} == True{} : Bool}) -> Empty:
   Logic.Proof.false_ne_true(h)
+
+# `1 + a <= b` is `a < b`.
+def core_nat_lt_of_le_succ(a: Nat, b: Nat,
+    +h: {Nat.is_le(1n+a, b) == True{} : Bool}) ->
+  {Nat.is_lt(a, b) == True{} : Bool}:
+  match a b:
+    case 0n 0n:
+      Empty.absurd({Nat.is_lt(0n, 0n) == True{} : Bool}, Logic.Proof.false_ne_true(h))
+    case 0n 1n+bp:
+      {==}
+    case 1n+ap 0n:
+      Empty.absurd({Nat.is_lt(1n+ap, 0n) == True{} : Bool},
+        Logic.Proof.false_ne_true(h))
+    case 1n+ap 1n+bp:
+      core_nat_lt_of_le_succ(ap, bp, h)
+
+# The negation of `<` is `>=`.
+def core_nat_ge_of_lt_false_go(c: Cmp,
+    +h: {Cmp.is_lt(c) == False{} : Bool}) ->
+  {Cmp.is_ge(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      Empty.absurd({False{} == True{} : Bool}, Logic.Proof.true_ne_false(h))
+    case EQ{}:
+      {==}
+    case GT{}:
+      {==}
+
+def core_nat_ge_of_lt_false(a: Nat, b: Nat,
+    +h: {Nat.is_lt(a, b) == False{} : Bool}) ->
+  {Nat.is_ge(a, b) == True{} : Bool}:
+  core_nat_ge_of_lt_false_go(Nat.cmp(a, b), h)
