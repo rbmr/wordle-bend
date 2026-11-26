@@ -105,7 +105,7 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           +hit = A.eq01(v, k2h)
           ev(f, A.sel(hit, 34, 7), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
-             Array.get(U32, a2, A.sel(hit, U32.add(base, 6), base)))
+             Array.get(U32, a2, A.sel(hit, U32.add(base, 7), base)))
         case 6:
           # Key matched: the value counts only if the stored set is this set.
           (a2, +v) = p
