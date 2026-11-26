@@ -191,26 +191,41 @@ def merge(a1: Array<U32>, a2: Array<U32>, a3: Array<U32>, a4: Array<U32>,
   b3 = fold5(b2, a3, c, gg)
   fold5(b3, a4, c, gg)
 
-# Sequential witness: run lane 0 alone, then start the other three lanes from
+def merge5(a1: Array<U32>, a2: Array<U32>, a3: Array<U32>, a4: Array<U32>,
+           a5: Array<U32>, +c: U32, +gg: U32) -> Array<U32>:
+  b1 = initcnt(a1, c, gg)
+  b2 = fold5(b1, a2, c, gg)
+  b3 = fold5(b2, a3, c, gg)
+  b4 = fold5(b3, a4, c, gg)
+  fold5(b4, a5, c, gg)
+
+# Sequential witness: run lane 0 alone, then start the other four lanes from
 # its value. This is the only bound sharing safe Bend allows without a shared
 # writable array: a finished lane's value is a valid lower bound for the others'
-# starting best. The three remaining lanes run on clones of the witness array.
-def c3d(p: Array<U32> & Array<U32>, a1: Array<U32>, c1: Array<U32>,
+# starting best. The four remaining lanes run on clones of the witness array,
+# so all four cores work during the parallel stage.
+def c3e(p: Array<U32> & Array<U32>, x1: Array<U32>, x2: Array<U32>,
+        x3: Array<U32>, +c: U32, +gg: U32, +ss: U32, +beta: U32, +pmk: U32,
+        +gen: U32) -> Array<U32>:
+  (a1, x4) = p
+  r1 r2 r3 r4 = runlane(1, c, gg, ss, beta, pmk, gen, x1) runlane(2, c, gg, ss, beta, pmk, gen, x2) runlane(3, c, gg, ss, beta, pmk, gen, x3) runlane(4, c, gg, ss, beta, pmk, gen, x4)
+  merge5(a1, r1, r2, r3, r4, c, gg)
+
+def c3d(p: Array<U32> & Array<U32>, x1: Array<U32>, x2: Array<U32>,
         +c: U32, +gg: U32, +ss: U32, +beta: U32, +pmk: U32,
         +gen: U32) -> Array<U32>:
-  (b1, d1) = p
-  r1 r2 r3 = runlane(1, c, gg, ss, beta, pmk, gen, b1) runlane(2, c, gg, ss, beta, pmk, gen, c1) runlane(3, c, gg, ss, beta, pmk, gen, d1)
-  merge(a1, r1, r2, r3, c, gg)
+  (a1, x3) = p
+  c3e(Array.clone(U32, a1), x1, x2, x3, c, gg, ss, beta, pmk, gen)
 
-def c3c(p: Array<U32> & Array<U32>, b1: Array<U32>, +c: U32, +gg: U32,
+def c3c(p: Array<U32> & Array<U32>, x1: Array<U32>, +c: U32, +gg: U32,
         +ss: U32, +beta: U32, +pmk: U32, +gen: U32) -> Array<U32>:
-  (a1, c1) = p
-  c3d(Array.clone(U32, b1), a1, c1, c, gg, ss, beta, pmk, gen)
+  (a1, x2) = p
+  c3d(Array.clone(U32, a1), x1, x2, c, gg, ss, beta, pmk, gen)
 
 def c3b(p: Array<U32> & Array<U32>, +c: U32, +gg: U32, +ss: U32,
         +beta: U32, +pmk: U32, +gen: U32) -> Array<U32>:
-  (a1, b1) = p
-  c3c(Array.clone(U32, a1), b1, c, gg, ss, beta, pmk, gen)
+  (a1, x1) = p
+  c3c(Array.clone(U32, a1), x1, c, gg, ss, beta, pmk, gen)
 
 # w1 receives the witness array with the witness value as the read value; it
 # lowers the probe best to min(probe_best, witness) before cloning.
