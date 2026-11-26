@@ -56,7 +56,8 @@ def lp(+fuel: Nat, +g: U32, +c: U32, +o: U32,
       a
     case 1n+f:
       a2 = DCount.dc_go(Nat.add(Nat.mul(U32.to_nat(kk()), 8n), 80n),
-                        0, 0, 0, U32.mul(g, c), o, kk(),
+                        0, 0, Nat.sub(U32.to_nat(kk()), 1n), 0n, 0,
+                        U32.add(U32.mul(4, tbl0()), U32.mul(g, c)), o,
                         0, 0, (a, 0))
       +g2 = U32.inc(g)
       +wrap = A.ge01(g2, gg())
