@@ -124,8 +124,16 @@ def off_qcnt(+c: U32, +g: U32) -> U32:
 def off_qgen(+c: U32, +g: U32) -> U32:
   U32.add(off_qcnt(c, g), 256)
 
+# Letter-profile scratch for the branching-factor scan (see prof.bend): 30
+# per-position masks, the active letter mask, and a 5x32 factor table.
+def prof_size() -> U32:
+  512
+
+def off_prof(+c: U32, +g: U32) -> U32:
+  U32.add(off_qgen(c, g), 768)
+
 def total_size(+c: U32, +g: U32) -> U32:
-  U32.add(off_gcnt(c, g), 1024)
+  U32.add(off_prof(c, g), prof_size())
 
 # ------------------------------------------------------------- small ops ----
 

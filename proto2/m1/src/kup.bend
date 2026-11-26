@@ -11,6 +11,7 @@
 import Base
 import ./geo.bend as G
 import ./arith.bend as A
+import ./prof.bend as P
 
 def kcell(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 727)
@@ -112,6 +113,10 @@ def kup(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cand: U32, +m: U32,
               U32.or(d4, U32.and(dup, U32.xor(v, maxu()))), c, gg,
               Array.get(U32, a2p, idx))
         case 9:
+          # The product bound and the per-position masks of the fast scan. The
+          # six mask words of position i are ge2_u, eq3_u, ge2_1, eq3_1,
+          # ge2_2, eq3_2 (see prof.bend); they are the three mask classes of
+          # heuristic::compute_max_branching_factor_seq_with_target.
           (a2p, _) = p
           +bu = U32.xor(ca, maxu())
           +p1 = fct(a0, e0, d0, bu, cd)
@@ -120,10 +125,99 @@ def kup(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cand: U32, +m: U32,
           +p4 = U32.mul(p3, fct(a3, e3, d3, bu, cd))
           +p5 = U32.mul(p4, fct(a4, e4, d4, bu, cd))
           +res = U32.min(U32.min(p5, k), 242)
+          +b1b = U32.or(bu, cd)
+          +br0 = brmask(a0)
+          +b10 = U32.and(br0, b1b)
+          +ae0 = U32.and(a0, e0)
+          +ao0 = U32.or(a0, e0)
+          +ad0 = U32.and(a0, d0)
+          +ado0 = U32.or(a0, d0)
           a3p = Array.set(U32, a2p, kcell(c, gg), res)
+          a4p = Array.set(U32, a3p, P.pcell(c, gg, 0, 0), U32.or(ae0, U32.and(ao0, bu)))
+          a5p = Array.set(U32, a4p, P.pcell(c, gg, 0, 1), U32.and(ae0, bu))
+          a6p = Array.set(U32, a5p, P.pcell(c, gg, 0, 2), U32.or(ae0, U32.and(ao0, b10)))
+          a7p = Array.set(U32, a6p, P.pcell(c, gg, 0, 3), U32.and(ae0, b10))
+          a8p = Array.set(U32, a7p, P.pcell(c, gg, 0, 4), U32.or(ad0, U32.and(ado0, br0)))
+          a9p = Array.set(U32, a8p, P.pcell(c, gg, 0, 5), U32.and(ad0, br0))
+          kup(f, 17, j, o, k, cand, m, dup, cm, ca, cd, a0, a1, a2, a3, a4,
+              e0, e1, e2, e3, e4, d0, d1, d2, d3, d4, c, gg,
+              Array.get(U32, a9p, 0))
+        case 17:
+          (a2p, _) = p
+          +bu = U32.xor(ca, maxu())
+          +b1b = U32.or(bu, cd)
+          +br1 = brmask(a1)
+          +b11 = U32.and(br1, b1b)
+          +ae1 = U32.and(a1, e1)
+          +ao1 = U32.or(a1, e1)
+          +ad1 = U32.and(a1, d1)
+          +ado1 = U32.or(a1, d1)
+          a3p = Array.set(U32, a2p, P.pcell(c, gg, 1, 0), U32.or(ae1, U32.and(ao1, bu)))
+          a4p = Array.set(U32, a3p, P.pcell(c, gg, 1, 1), U32.and(ae1, bu))
+          a5p = Array.set(U32, a4p, P.pcell(c, gg, 1, 2), U32.or(ae1, U32.and(ao1, b11)))
+          a6p = Array.set(U32, a5p, P.pcell(c, gg, 1, 3), U32.and(ae1, b11))
+          a7p = Array.set(U32, a6p, P.pcell(c, gg, 1, 4), U32.or(ad1, U32.and(ado1, br1)))
+          a8p = Array.set(U32, a7p, P.pcell(c, gg, 1, 5), U32.and(ad1, br1))
+          kup(f, 18, j, o, k, cand, m, dup, cm, ca, cd, a0, a1, a2, a3, a4,
+              e0, e1, e2, e3, e4, d0, d1, d2, d3, d4, c, gg,
+              Array.get(U32, a8p, 0))
+        case 18:
+          (a2p, _) = p
+          +bu = U32.xor(ca, maxu())
+          +b1b = U32.or(bu, cd)
+          +br2 = brmask(a2)
+          +b12 = U32.and(br2, b1b)
+          +ae2 = U32.and(a2, e2)
+          +ao2 = U32.or(a2, e2)
+          +ad2 = U32.and(a2, d2)
+          +ado2 = U32.or(a2, d2)
+          a3p = Array.set(U32, a2p, P.pcell(c, gg, 2, 0), U32.or(ae2, U32.and(ao2, bu)))
+          a4p = Array.set(U32, a3p, P.pcell(c, gg, 2, 1), U32.and(ae2, bu))
+          a5p = Array.set(U32, a4p, P.pcell(c, gg, 2, 2), U32.or(ae2, U32.and(ao2, b12)))
+          a6p = Array.set(U32, a5p, P.pcell(c, gg, 2, 3), U32.and(ae2, b12))
+          a7p = Array.set(U32, a6p, P.pcell(c, gg, 2, 4), U32.or(ad2, U32.and(ado2, br2)))
+          a8p = Array.set(U32, a7p, P.pcell(c, gg, 2, 5), U32.and(ad2, br2))
+          kup(f, 19, j, o, k, cand, m, dup, cm, ca, cd, a0, a1, a2, a3, a4,
+              e0, e1, e2, e3, e4, d0, d1, d2, d3, d4, c, gg,
+              Array.get(U32, a8p, 0))
+        case 19:
+          (a2p, _) = p
+          +bu = U32.xor(ca, maxu())
+          +b1b = U32.or(bu, cd)
+          +br3 = brmask(a3)
+          +b13 = U32.and(br3, b1b)
+          +ae3 = U32.and(a3, e3)
+          +ao3 = U32.or(a3, e3)
+          +ad3 = U32.and(a3, d3)
+          +ado3 = U32.or(a3, d3)
+          a3p = Array.set(U32, a2p, P.pcell(c, gg, 3, 0), U32.or(ae3, U32.and(ao3, bu)))
+          a4p = Array.set(U32, a3p, P.pcell(c, gg, 3, 1), U32.and(ae3, bu))
+          a5p = Array.set(U32, a4p, P.pcell(c, gg, 3, 2), U32.or(ae3, U32.and(ao3, b13)))
+          a6p = Array.set(U32, a5p, P.pcell(c, gg, 3, 3), U32.and(ae3, b13))
+          a7p = Array.set(U32, a6p, P.pcell(c, gg, 3, 4), U32.or(ad3, U32.and(ado3, br3)))
+          a8p = Array.set(U32, a7p, P.pcell(c, gg, 3, 5), U32.and(ad3, br3))
+          kup(f, 20, j, o, k, cand, m, dup, cm, ca, cd, a0, a1, a2, a3, a4,
+              e0, e1, e2, e3, e4, d0, d1, d2, d3, d4, c, gg,
+              Array.get(U32, a8p, 0))
+        case 20:
+          (a2p, _) = p
+          +bu = U32.xor(ca, maxu())
+          +b1b = U32.or(bu, cd)
+          +br4 = brmask(a4)
+          +b14 = U32.and(br4, b1b)
+          +ae4 = U32.and(a4, e4)
+          +ao4 = U32.or(a4, e4)
+          +ad4 = U32.and(a4, d4)
+          +ado4 = U32.or(a4, d4)
+          a3p = Array.set(U32, a2p, P.pcell(c, gg, 4, 0), U32.or(ae4, U32.and(ao4, bu)))
+          a4p = Array.set(U32, a3p, P.pcell(c, gg, 4, 1), U32.and(ae4, bu))
+          a5p = Array.set(U32, a4p, P.pcell(c, gg, 4, 2), U32.or(ae4, U32.and(ao4, b14)))
+          a6p = Array.set(U32, a5p, P.pcell(c, gg, 4, 3), U32.and(ae4, b14))
+          a7p = Array.set(U32, a6p, P.pcell(c, gg, 4, 4), U32.or(ad4, U32.and(ado4, br4)))
+          a8p = Array.set(U32, a7p, P.pcell(c, gg, 4, 5), U32.and(ad4, br4))
           kup(f, 11, j, o, k, cand, m, dup, cm, ca, cd, a0, a1, a2, a3, a4,
               e0, e1, e2, e3, e4, d0, d1, d2, d3, d4, c, gg,
-              Array.get(U32, a3p, 0))
+              Array.get(U32, a8p, 0))
         case 11:
           (a2p, _) = p
           a2p
