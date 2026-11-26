@@ -11,35 +11,32 @@
 # one place.
 import Base
 
-# 1 when b >= 2, else 0.
-def ge2(+b: U32) -> U32:
-  U32.sub(1, U32.shrn(U32.sub(b, 2), 31n))
-
-# Byte `b & 3` of a word. `hi` shifts 16 when the byte index is 2 or 3, then
-# `b & 1` shifts another 8 for an odd index, then the low byte is masked.
-def byte4(+w: U32, +b: U32) -> U32:
-  +hi = ge2(b)
-  +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
-  +t2 = U32.add(t1, U32.mul(U32.and(b, 1), U32.sub(U32.shrn(t1, 8n), t1)))
-  U32.and(t2, 255)
-
-# Destructure a word read and extract the byte. The read result is passed in as
-# a parameter, so Bend's "a match cannot scrutinize a computed value" rule is
-# satisfied without an extra function in the hot path.
+# Byte `b & 3` of a word, inlined: `hi` shifts 16 when the byte index is 2 or
+# 3, then `b & 1` shifts another 8 for an odd index, then the low byte is
+# masked. Keeping this in one helper matters: a non-recursive Bend def is a C
+# call, and this is the per-candidate hot path.
 def peek_go(r: Array<U32> & U32, +i: U32) -> Array<U32> & U32:
   (t1, +w) = r
-  (t1, byte4(w, U32.and(i, 3)))
+  +b = U32.and(i, 3)
+  +hi = U32.sub(1, U32.shrn(U32.sub(b, 2), 31n))
+  +u1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+  +u2 = U32.add(u1, U32.mul(U32.and(b, 1), U32.sub(U32.shrn(u1, 8n), u1)))
+  (t1, U32.and(u2, 255))
 
 # Response code `i` of the packed table. The array is returned as the first
 # component so the caller can keep reading it without a copy.
 def peek(tbl: Array<U32>, +i: U32) -> Array<U32> & U32:
   peek_go(Array.get(U32, tbl, U32.shrn(i, 2n)), i)
 
-# A pure read specification: the code a correctly filled table must hold at the
-# flat index `i`.
 def at_go(r: Array<U32> & U32, +i: U32) -> U32:
   (t1, +w) = r
-  byte4(w, U32.and(i, 3))
+  +b = U32.and(i, 3)
+  +hi = U32.sub(1, U32.shrn(U32.sub(b, 2), 31n))
+  +u1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+  +u2 = U32.add(u1, U32.mul(U32.and(b, 1), U32.sub(U32.shrn(u1, 8n), u1)))
+  U32.and(u2, 255)
 
+# A pure read specification: the code a correctly filled table must hold at the
+# flat index `i`.
 def at(tbl: Array<U32>, +i: U32) -> U32:
   at_go(Array.get(U32, tbl, U32.shrn(i, 2n)), i)
