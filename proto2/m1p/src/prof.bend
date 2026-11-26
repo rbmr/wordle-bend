@@ -165,11 +165,21 @@ def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +fb: U32, +o: U32, +k: U32,
           dn_go(f, 1, i, j, fb, o, k, t, r, pb, Array.get(U32, a2, U32.add(o, i)))
         case 1:
           (a2, +v) = p
-          dn_go(f, 2, i, j, fb, o, k, t, r, pb, Array.get(U32, a2, U32.add(fb, v)))
+          +fi = U32.add(fb, v)
+          dn_go(f, 2, i, U32.and(fi, 3), fb, o, k, t, r, pb,
+                Array.get(U32, a2, U32.shrn(fi, 2n)))
         case 2:
-          (a2, +v) = p
-          dn_go(f, 3, i, j, fb, o, k, t, v, pb,
-                Array.get(U32, a2, U32.add(U32.add(pb, 224), v)))
+          # Byte extract with constant shifts only (Bend has no variable shift
+          # by a U32): shift 16 when the byte index is >= 2, then shift 8 when
+          # it is odd, then mask.
+          (a2, +w) = p
+          +hi = U32.sub(1, U32.shrn(U32.sub(j, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(j, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +resp = U32.and(t2, 255)
+          dn_go(f, 3, i, 0, fb, o, k, t, resp, pb,
+                Array.get(U32, a2, U32.add(U32.add(pb, 224), resp)))
         case 3:
           (a2, +v) = p
           +new = U32.shrn(U32.sub(v, 1), 31n)

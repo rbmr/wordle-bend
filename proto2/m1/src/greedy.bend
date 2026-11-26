@@ -101,11 +101,18 @@ def gr(+fuel: Nat, +c: U32, +gg: U32, +ph: U32, +dep: U32, +ss: U32,
              r, cost, off, ret, stk, Array.get(U32, a2, ss))
         case 5:
           (a2, +v) = p
-          gr(f, c, gg, 6, dep, ss, n, g, i, best, bg, exp, ne, tc, r, cost, v,
-             ret, stk, Array.get(U32, a2, fbat(g, v, c)))
+          +fi = fbat(g, v, c)
+          gr(f, c, gg, 6, dep, ss, n, g, i, best, bg, exp, ne, tc,
+             U32.and(fi, 3), cost, v,
+             ret, stk, Array.get(U32, a2, U32.shrn(fi, 2n)))
         case 6:
-          (a2, +rv) = p
-          gr(f, c, gg, 7, dep, ss, n, g, i, best, bg, exp, ne, tc, r, cost, rv,
+          (a2, +w) = p
+          +hi = U32.sub(1, U32.shrn(U32.sub(r, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(r, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +rv = U32.and(t2, 255)
+          gr(f, c, gg, 7, dep, ss, n, g, i, best, bg, exp, ne, tc, 0, cost, rv,
              ret, stk, Array.get(U32, a2, U32.add(gcnt(dep, c, gg), rv)))
         case 7:
           (a2, +old) = p
@@ -145,11 +152,18 @@ def gr(+fuel: Nat, +c: U32, +gg: U32, +ph: U32, +dep: U32, +ss: U32,
              ret, stk, Array.get(U32, a2, ss))
         case 21:
           (a2, +v) = p
-          gr(f, c, gg, 22, dep, ss, n, g, i, best, bg, exp, ne, tc, r, cost, v,
-             ret, stk, Array.get(U32, a2, fbat(g, v, c)))
+          +fi = fbat(g, v, c)
+          gr(f, c, gg, 22, dep, ss, n, g, i, best, bg, exp, ne, tc,
+             U32.and(fi, 3), cost, v,
+             ret, stk, Array.get(U32, a2, U32.shrn(fi, 2n)))
         case 22:
-          (a2, +rv) = p
-          gr(f, c, gg, 23, dep, ss, n, g, i, best, bg, exp, ne, tc, r, cost, rv,
+          (a2, +w) = p
+          +hi = U32.sub(1, U32.shrn(U32.sub(r, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(r, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +rv = U32.and(t2, 255)
+          gr(f, c, gg, 23, dep, ss, n, g, i, best, bg, exp, ne, tc, 0, cost, rv,
              ret, stk, Array.get(U32, a2, U32.add(gcnt(dep, c, gg), rv)))
         case 23:
           (a2, +old) = p
@@ -181,11 +195,18 @@ def gr(+fuel: Nat, +c: U32, +gg: U32, +ph: U32, +dep: U32, +ss: U32,
              off, ret, stk, Array.get(U32, a2, ss))
         case 27:
           (a2, +v) = p
-          gr(f, c, gg, 28, dep, ss, n, g, i, best, bg, exp, ne, tc, r, v, off,
-             ret, stk, Array.get(U32, a2, fbat(bg, v, c)))
+          +fi = fbat(bg, v, c)
+          gr(f, c, gg, 28, dep, ss, n, g, i, best, bg, exp, ne, tc,
+             U32.and(fi, 3), v, off,
+             ret, stk, Array.get(U32, a2, U32.shrn(fi, 2n)))
         case 28:
-          (a2, +rv) = p
-          gr(f, c, gg, 29, dep, ss, n, g, i, best, bg, exp, ne, tc, r, cost,
+          (a2, +w) = p
+          +hi = U32.sub(1, U32.shrn(U32.sub(r, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(r, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +rv = U32.and(t2, 255)
+          gr(f, c, gg, 29, dep, ss, n, g, i, best, bg, exp, ne, tc, 0, cost,
              rv, ret, stk, Array.get(U32, a2, U32.add(gcur(dep, c, gg), rv)))
         case 29:
           (a2, +pos) = p

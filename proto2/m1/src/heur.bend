@@ -82,12 +82,20 @@ def quick(+fuel: Nat, +ph: U32, +i: U32, +m: U32, +si: U32, +coll: U32,
                 Array.get(U32, a2, U32.add(sb, 0)))
         case 0:
           (a2, +x) = r
-          quick(p, 1, i, m, x, coll, a0, a1, genb, row, sb, n, c, gg, out,
-                Array.get(U32, a2, U32.add(row, x)))
+          +fi = U32.add(row, x)
+          quick(p, 1, i, m, U32.and(fi, 3), coll, a0, a1, genb, row,
+                sb, n, c, gg, out, Array.get(U32, a2, U32.shrn(fi, 2n)))
         case 1:
-          (a2, +x) = r
-          quick(p, 2, i, m, x, coll, a0, a1, genb, row, sb, n, c, gg, out,
-                Array.get(U32, a2, U32.add(G.off_qcnt(c, gg), x)))
+          # `si` carries the byte position here, `coll` must not be touched:
+          # it is the running collision count of the current guess.
+          (a2, +w) = r
+          +hi = U32.sub(1, U32.shrn(U32.sub(si, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(si, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +x2 = U32.and(t2, 255)
+          quick(p, 2, i, m, x2, coll, a0, a1, genb, row, sb, n, c, gg, out,
+                Array.get(U32, a2, U32.add(G.off_qcnt(c, gg), x2)))
 
         case 2:
           (a2, +x) = r

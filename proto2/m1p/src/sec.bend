@@ -122,15 +122,22 @@ def cnt_go(+fuel: Nat, +ph: U32, +j: U32, +lim: U32, +g: U32, +i: U32,
                                   U32.shrn(U32.sub(skip, i), 31n)))
           +ti = U32.mul(U32.sub(1, last), U32.add(sb, i2))
           +fi = U32.add(U32.mul(g, c), v)
-          +idx = U32.add(fi, U32.mul(sk, U32.sub(ti, fi)))
+          +wid = U32.shrn(fi, 2n)
+          +idx = U32.add(wid, U32.mul(sk, U32.sub(ti, wid)))
           cnt_go(p2, U32.add(U32.sub(1, sk), U32.mul(sk, U32.mul(last, 3))),
-                 j, lim, g, U32.add(i, sk), n, sb, skip, dep, c, gg, t, dup,
-                 hw, n3, sq, U32.mul(U32.sub(1, sk), v), r,
+                 U32.and(fi, 3), lim, g, U32.add(i, sk), n, sb, skip, dep, c,
+                 gg, t, dup, hw, n3, sq, U32.mul(U32.sub(1, sk), v), r,
                  Array.get(U32, a2, idx))
         case 1:
-          (a2, +fb) = p
+          # Byte extract with constant shifts only (see tab.pack_fb).
+          (a2, +w) = p
+          +hi = U32.sub(1, U32.shrn(U32.sub(j, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(j, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +fb = U32.and(t2, 255)
           +cb = cnt_at(dep, c, gg)
-          cnt_go(p2, 2, j, lim, g, i, n, sb, skip, dep, c, gg, t, dup, hw, n3,
+          cnt_go(p2, 2, 0, lim, g, i, n, sb, skip, dep, c, gg, t, dup, hw, n3,
                  sq, x, fb, Array.get(U32, a2, U32.add(cb, fb)))
         case 2:
           (a2, +old) = p
@@ -305,10 +312,16 @@ def sc_go(+fuel: Nat, +ph: U32, +i: U32, +n: U32, +sb: U32, +g: U32,
       match ph:
         case 0:
           (a2, +v) = p
-          sc_go(p2, 1, i, n, sb, g, dep, dst, c, gg, v, r,
-                Array.get(U32, a2, U32.add(U32.mul(g, c), v)))
+          +fi = U32.add(U32.mul(g, c), v)
+          sc_go(p2, 1, i, n, sb, g, dep, dst, c, gg, v, U32.and(fi, 3),
+                Array.get(U32, a2, U32.shrn(fi, 2n)))
         case 1:
-          (a2, +fb) = p
+          (a2, +w) = p
+          +hi = U32.sub(1, U32.shrn(U32.sub(r, 2), 31n))
+          +t1 = U32.add(w, U32.mul(hi, U32.sub(U32.shrn(w, 16n), w)))
+          +t2 = U32.add(t1, U32.mul(U32.and(r, 1),
+                                    U32.sub(U32.shrn(t1, 8n), t1)))
+          +fb = U32.and(t2, 255)
           +ub = cur_at(dep, c, gg)
           sc_go(p2, 2, i, n, sb, g, dep, dst, c, gg, x, fb,
                 Array.get(U32, a2, U32.add(ub, fb)))

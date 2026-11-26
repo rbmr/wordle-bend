@@ -291,6 +291,64 @@ def fill_fb(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
   fb_go(fuel, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, c, gg,
         Array.get(U32, a, G.off_gpack(c, gg)))
 
+# ---------------------------------------------------- packed response table ---
+#
+# Pack four 8-bit responses into one U32 cell, in place: word k is built from
+# cells 4k..4k+3 and written to cell k, walking k UPWARDS. Ascending order is
+# safe because when word k is written the cells already written are 0..k-1, all
+# strictly below 4k, so no source word has been overwritten.
+#
+# The table itself is the first g*c cells of the array (index x = g*c + i). The
+# last word may also take bytes from cells past the table (the z1 region); no
+# reader asks for a response beyond the last candidate of the last guess, so
+# those bytes are never observed.
+#
+# ph 0 reads 4k, ph 1..3 read 4k+1..4k+3 and accumulate, ph 4 writes cell k and
+# steps up, ph 5 is done.
+def pack_go(+fuel: Nat, +ph: U32, +k: U32, +si: U32, +lim: U32, +acc: U32,
+            r: Array<U32> & U32) -> Array<U32>:
+  match fuel:
+    case 0n:
+      (a2, _) = r
+      a2
+    case 1n+f:
+      match ph:
+        case 0:
+          (a2, _) = r
+          +idx = U32.mul(k, 4)
+          pack_go(f, 1, k, idx, lim, 0, Array.get(U32, a2, idx))
+        case 1:
+          (a2, +v) = r
+          +idx = U32.inc(si)
+          pack_go(f, 2, k, idx, lim, v, Array.get(U32, a2, idx))
+        case 2:
+          (a2, +v) = r
+          +idx = U32.inc(si)
+          pack_go(f, 3, k, idx, lim, U32.or(acc, U32.shln(v, 8n)),
+                  Array.get(U32, a2, idx))
+        case 3:
+          (a2, +v) = r
+          +idx = U32.inc(si)
+          pack_go(f, 4, k, idx, lim, U32.or(acc, U32.shln(v, 16n)),
+                  Array.get(U32, a2, idx))
+        case 4:
+          (a2, +v) = r
+          +w = U32.or(acc, U32.shln(v, 24n))
+          +kn = U32.inc(k)
+          a3 = a2[k] <- w
+          +last = A.eq01(k, lim)
+          pack_go(f, A.sel(last, 5, 0), A.sel(last, 0, kn), 0, lim, 0,
+                  Array.get(U32, a3, 0))
+        case _:
+          (a2, _) = r
+          a2
+
+def pack_fb(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
+  +n = U32.mul(gg, c)
+  +words = U32.add(U32.shrn(n, 2n), A.nz(U32.and(n, 3)))
+  +fuel = Nat.add(Nat.mul(U32.to_nat(words), 6n), 8n)
+  pack_go(fuel, 0, 0, 0, U32.sub(words, 1), 0, Array.get(U32, a, 0))
+
 # ------------------------------------------------------- candidate -> guess ---
 #
 # The candidate list is not sorted, so a merge pass will not do. A 2^16-slot

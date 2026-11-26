@@ -95,7 +95,8 @@ def build_all(+c: U32, +gg: U32, +gtext: String, +ctext: String,
   a4 = T.fill_hh_init(c, gg, a3)
   a5 = T.fill_hh(c, gg, a4)
   a6 = T.fill_c2g(c, gg, a5)
-  T.fill_fb(c, gg, a6)
+  a7 = T.fill_fb(c, gg, a6)
+  T.pack_fb(c, gg, a7)
 
 # -------------------------------------------------------------------- main ---
 
