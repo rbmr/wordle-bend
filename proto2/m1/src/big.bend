@@ -188,8 +188,11 @@ def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
         case 4:
           (a2, _) = p
           a3 = Array.set(U32, a2, uused(c, gg), mx)
-          km_go(f, 5, g, o, k, mx, eff, dep, c, gg, act, pk, pr,
+          km_go(f, 7, g, o, k, mx, eff, dep, c, gg, act, pk, pr,
                 Array.get(U32, a3, 0))
+        case 7:
+          (a2, _) = p
+          a2
         case _:
           (a2, _) = p
           a2
