@@ -59,16 +59,15 @@ def dc_branch(seen2: Array<Nat>, tbl2: Array<U32>, +gen: Nat,
     case False{}:
       DState{seen2, tbl2, Nat.add(1n, n), Nat.add(1n, k)}
 
-def dc_get(tbl2: Array<U32>, rget: Array<Nat> & Nat, +code: U32,
-           +gen: Nat, +n: Nat, +k: Nat) -> DState:
-  (seen2, +old) = rget
-  dc_branch(Array.set(Nat, seen2, code, gen), tbl2, gen, n, k,
-            Nat.is_eq(old, gen))
+def dc_swap(tbl2: Array<U32>, sw: Array<Nat> & Nat,
+            +gen: Nat, +n: Nat, +k: Nat) -> DState:
+  (seen2, +old) = sw
+  dc_branch(seen2, tbl2, gen, n, k, Nat.is_eq(old, gen))
 
 def dc_step(r: Array<U32> & U32, seen: Array<Nat>,
             +gen: Nat, +n: Nat, +k: Nat) -> DState:
   (tbl2, +code) = r
-  dc_get(tbl2, Array.get(Nat, seen, code), code, gen, n, k)
+  dc_swap(tbl2, Array.swap(Nat, seen, code, gen), gen, n, k)
 
 def dc_go(+row: U32, +S: +List<SolveFast.CWord>, +gen: Nat,
           st: DState) -> DState:
