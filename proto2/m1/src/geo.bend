@@ -133,8 +133,19 @@ def prof_size() -> U32:
 def off_prof(+c: U32, +g: U32) -> U32:
   U32.add(off_qgen(c, g), 768)
 
-def total_size(+c: U32, +g: U32) -> U32:
+# Greedy-bound arena (greedy.bend): 256 depths of (set c, counts 256,
+# offsets 257, scatter cursors 256, touched list 256).
+def greedy_depth_slot(+c: U32) -> U32:
+  U32.add(c, 1280)
+
+def off_greedy(+c: U32, +g: U32) -> U32:
   U32.add(off_prof(c, g), prof_size())
+
+def greedy_size(+c: U32) -> U32:
+  U32.mul(256, greedy_depth_slot(c))
+
+def total_size(+c: U32, +g: U32) -> U32:
+  U32.add(off_greedy(c, g), greedy_size(c))
 
 # ------------------------------------------------------------- small ops ----
 

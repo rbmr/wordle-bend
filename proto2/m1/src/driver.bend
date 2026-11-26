@@ -8,6 +8,7 @@ import ./tab.bend as T
 import ./heur.bend as H
 import ./sec.bend as S
 import ./engine.bend as E
+import ./greedy.bend as R
 import ./arith.bend as A
 
 def setdep() -> U32:
@@ -81,6 +82,27 @@ def maxk(+c: U32, +gg: U32, a: Array<U32>) -> Array<U32>:
 # maxk writes its result into a scratch cell; `after_max` reads it and runs the
 # search. (A read can only be destructured by a callee whose parameter it is.)
 
+def after_greedy(p: Array<U32> & U32, +c: U32, +gg: U32, +mx: U32,
+                 +beta0: U32) -> IO(Unit):
+  (a, +gb) = p
+  +beta = A.sel(A.eq01(gb, 4294967295), beta0, U32.min(gb, beta0))
+  do IO<Unit>:
+    Unit <- IO.print("greedy=" ++ U32.show(gb) ++ " beta=" ++ U32.show(beta))
+    +sb : U32 = S.set_at(0, c, gg)
+    a2b : Array<U32> = E.step(Nat.add(Nat.mul(U32.to_nat(c), 65536n),
+                                      Nat.mul(U32.to_nat(gg), 16384n)),
+                              c, gg, 0, 0, sb, c, beta, U32.max(mx, 2), 0,
+                              beta, 0, 0, 0, 0, 4294967295, 0, 0, 0, 0, 0, 0,
+                              0, 0, beta, U32.mul(gg, 1024), 0, 0, 0, 0, 0,
+                              Nil{}, Array.get(U32, a, 0))
+    +cm : U32 = G.off_qgen(c, gg)
+    a3 : Array<U32> <- prn(Array.get(U32, a2b, U32.add(cm, 609)), "cost")
+    a3b : Array<U32> <- prn(Array.get(U32, a3, U32.add(cm, 610)), "states")
+    a4 : Array<U32> <- prn(Array.get(U32, a3b, U32.add(cm, 611)), "guesses")
+    a5 : Array<U32> <- prn(Array.get(U32, a4, U32.add(cm, 612)), "hits")
+    a6 : Array<U32> <- prn(Array.get(U32, a5, U32.add(cm, 613)), "pruned")
+    IO.pure(Unit, Unit{})
+
 def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32,
               +dbg: U32) -> IO(Unit):
   (a, +pk) = p
@@ -98,18 +120,9 @@ def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32,
                                H.cap_fill(U32.max(mx, 2), c, gg, a))
     a2h : Array<U32> = S.hset(a2, sb, c, E.hsh1(0, c, gg), E.hsh2(0, c, gg),
                               c, gg)
-    a2b : Array<U32> = E.step(Nat.add(Nat.mul(U32.to_nat(c), 65536n),
-                                      Nat.mul(U32.to_nat(gg), 16384n)),
-                              c, gg, 0, 0, sb, c, beta2, U32.max(mx, 2), 0,
-                              beta2, 0, 0, 0, 0, 4294967295, 0, 0, 0, 0, 0, 0,
-                              0, 0, beta2, U32.mul(gg, 1024), 0, 0, 0, 0, 0,
-                              Nil{}, Array.get(U32, a2h, 0))
-    +cm : U32 = G.off_qgen(c, gg)
-    a3 : Array<U32> <- prn(Array.get(U32, a2b, U32.add(cm, 609)), "cost")
-    a3b : Array<U32> <- prn(Array.get(U32, a3, U32.add(cm, 610)), "states")
-    a4 : Array<U32> <- prn(Array.get(U32, a3b, U32.add(cm, 611)), "guesses")
-    a5 : Array<U32> <- prn(Array.get(U32, a4, U32.add(cm, 612)), "hits")
-    a6 : Array<U32> <- prn(Array.get(U32, a5, U32.add(cm, 613)), "pruned")
+    a3 : Array<U32> = R.greedy(a2h, c, gg)
+    Unit <- after_greedy(Array.get(U32, a3, R.rescell(c, gg)), c, gg, mx,
+                         beta2)
     IO.pure(Unit, Unit{})
 
 def run(+c: U32, +gg: U32, +beta0: U32, a: Array<U32>) -> IO(Unit):
