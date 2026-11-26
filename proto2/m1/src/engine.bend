@@ -537,16 +537,13 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                stk, Array.get(U32, a2, idx))
         case 172:
           # Lane filter: mode's bit 2 marks a parallel root worker (the driver
-          # passes 6 + 8*lane), and then the walk takes only its contiguous
-          # quarter of the tuple list. The tuples are sorted by lower bound, so
-          # lane 0 gets the promising head and the later lanes stop early once
-          # their own best is below their lb. A sequential state keeps mode =
-          # 1/2, so every tuple is evaluated.
+          # passes 6 + 8*lane), and then the walk takes only the tuples whose
+          # index is congruent to the lane. A sequential state keeps mode = 1/2,
+          # so every tuple is evaluated.
           (a2, +v) = p
           +lane = U32.shrn(mode, 3n)
           +par = U32.and(U32.shrn(mode, 2n), 1)
-          +part = U32.div(U32.mul(ti, 4), U32.max(nt, 1))
-          +hit = U32.max(U32.sub(1, par), A.eq01(part, lane))
+          +hit = U32.max(U32.sub(1, par), A.eq01(U32.and(ti, 3), lane))
           step(f, c, gg, 0, A.sel(hit, 177, 176), ss, n, beta, pmk, dep, best, lb, lmk,
                v1k, v2k, mv, nt, ti, mode, A.sel(hit, v, g), cost, bcur, t,
                lbk, cut, gen, ret, nst, ngs, nht, npr, stk,

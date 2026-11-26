@@ -191,23 +191,39 @@ def merge(a1: Array<U32>, a2: Array<U32>, a3: Array<U32>, a4: Array<U32>,
   b3 = fold5(b2, a3, c, gg)
   fold5(b3, a4, c, gg)
 
-# Clone the probe result into four copies and run the lanes in parallel.
-def c3(p: Array<U32> & Array<U32>, a1: Array<U32>, cc: Array<U32>,
-       +c: U32, +gg: U32, +ss: U32, +beta: U32, +pmk: U32,
-       +gen: U32) -> Array<U32>:
+# Sequential witness: run lane 0 alone, then start the other three lanes from
+# its value. This is the only bound sharing safe Bend allows without a shared
+# writable array: a finished lane's value is a valid lower bound for the others'
+# starting best. The three remaining lanes run on clones of the witness array.
+def c3d(p: Array<U32> & Array<U32>, a1: Array<U32>, c1: Array<U32>,
+        +c: U32, +gg: U32, +ss: U32, +beta: U32, +pmk: U32,
+        +gen: U32) -> Array<U32>:
   (b1, d1) = p
-  r1 r2 r3 r4 = runlane(0, c, gg, ss, beta, pmk, gen, a1) runlane(1, c, gg, ss, beta, pmk, gen, b1) runlane(2, c, gg, ss, beta, pmk, gen, cc) runlane(3, c, gg, ss, beta, pmk, gen, d1)
-  merge(r1, r2, r3, r4, c, gg)
+  r1 r2 r3 = runlane(1, c, gg, ss, beta, pmk, gen, b1) runlane(2, c, gg, ss, beta, pmk, gen, c1) runlane(3, c, gg, ss, beta, pmk, gen, d1)
+  merge(a1, r1, r2, r3, c, gg)
 
-def c2(p: Array<U32> & Array<U32>, b: Array<U32>, +c: U32, +gg: U32,
-       +ss: U32, +beta: U32, +pmk: U32, +gen: U32) -> Array<U32>:
-  (a1, cc) = p
-  c3(Array.clone(U32, b), a1, cc, c, gg, ss, beta, pmk, gen)
+def c3c(p: Array<U32> & Array<U32>, b1: Array<U32>, +c: U32, +gg: U32,
+        +ss: U32, +beta: U32, +pmk: U32, +gen: U32) -> Array<U32>:
+  (a1, c1) = p
+  c3d(Array.clone(U32, b1), a1, c1, c, gg, ss, beta, pmk, gen)
 
-def c1(p: Array<U32> & Array<U32>, +c: U32, +gg: U32, +ss: U32,
-       +beta: U32, +pmk: U32, +gen: U32) -> Array<U32>:
-  (a1, b) = p
-  c2(Array.clone(U32, a1), b, c, gg, ss, beta, pmk, gen)
+def c3b(p: Array<U32> & Array<U32>, +c: U32, +gg: U32, +ss: U32,
+        +beta: U32, +pmk: U32, +gen: U32) -> Array<U32>:
+  (a1, b1) = p
+  c3c(Array.clone(U32, a1), b1, c, gg, ss, beta, pmk, gen)
+
+# w1 receives the witness array with the witness value as the read value; it
+# lowers the probe best to min(probe_best, witness) before cloning.
+def w1b(p: Array<U32> & U32, +c: U32, +gg: U32, +ss: U32, +beta: U32,
+        +pmk: U32, +gen: U32, +w: U32) -> Array<U32>:
+  (a, +pb) = p
+  a1 = Array.set(U32, a, E.pr_best(c, gg), U32.min(pb, w))
+  c3b(Array.clone(U32, a1), c, gg, ss, beta, pmk, gen)
+
+def w1(p: Array<U32> & U32, +c: U32, +gg: U32, +ss: U32, +beta: U32,
+       +pmk: U32, +gen: U32) -> Array<U32>:
+  (a, +w) = p
+  w1b(Array.get(U32, a, E.pr_best(c, gg)), c, gg, ss, beta, pmk, gen, w)
 
 # `par2` sees the probe's sentinel cell: MAXU means the probe never reached the
 # phase-2 sort (it finished the small search itself), so its own result stands.
@@ -218,7 +234,9 @@ def par2(p: Array<U32> & U32, +c: U32, +gg: U32, +ss: U32, +beta: U32,
     case 4294967295:
       a2
     case _:
-      c1(Array.clone(U32, a2), c, gg, ss, beta, pmk, gen)
+      w1(Array.get(U32, runlane(0, c, gg, ss, beta, pmk, gen, a2),
+                   rescell(0, c, gg)),
+         c, gg, ss, beta, pmk, gen)
 
 def par(a: Array<U32>, +c: U32, +gg: U32, +ss: U32, +beta: U32,
         +pmk: U32, +gen: U32) -> Array<U32>:
