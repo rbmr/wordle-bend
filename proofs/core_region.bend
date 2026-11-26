@@ -1027,3 +1027,76 @@ def CR.touch_get(+tl: +List<Nat>, +j: Nat, +d: Nat, xs: +List<U32>,
               Nat.add(256n, Nat.add(j, 1n+dp)),
               Nat.add(256n, Nat.add(1n+j, dp)), ei),
             CR.touch_get(rest, 1n+j, dp, xs, htail, hd))
+
+# ------------------------------------------------------- the candidate set ---
+#
+# The machine reads its candidate set as the flat range `o .. o+k-1`; in the
+# ghost model those cells hold `U32.from_nat` of the candidate indices in
+# `idxs`.  This is the predicate the count theorem takes as its input ("a set of
+# valid candidate indices"); `d` is the offset already consumed, so the cell of
+# position `d+e` is `o + (d+e)`.
+
+def CR.Set(+o: Nat, +k: Nat, +d: Nat, xs: +List<U32>,
+    +idxs: +List<Nat>) -> Type:
+  match k:
+    case 0n:
+      Unit
+    case 1n+kp:
+      {CS.CS.nth(xs, Nat.add(o, d)) == U32.from_nat(CR.nnth(idxs, d)) : U32}
+      & CR.Set(o, kp, 1n+d, xs, idxs)
+
+def CR.set_get(+o: Nat, +k: Nat, +d: Nat, +e: Nat, xs: +List<U32>,
+    +idxs: +List<Nat>,
+    hc: CR.Set(o, k, d, xs, idxs),
+    +he: {Nat.is_lt(e, k) == True{} : Bool}) ->
+  {CS.CS.nth(xs, Nat.add(o, Nat.add(d, e)))
+   == U32.from_nat(CR.nnth(idxs, Nat.add(d, e))) : U32}:
+  match k:
+    case 0n:
+      Empty.absurd(
+        {CS.CS.nth(xs, Nat.add(o, Nat.add(d, e)))
+         == U32.from_nat(CR.nnth(idxs, Nat.add(d, e))) : U32},
+        NatProof.Nat.not_lt_zero(e, he))
+    case 1n+kp:
+      match e:
+        case 0n:
+          (hhead, _) = hc
+          +e0 : {Nat.add(d, 0n) == d : Nat} = NatProof.NatPrf.add_zero(d)
+          +ei : {Nat.add(o, Nat.add(d, 0n)) == Nat.add(o, d) : Nat} =
+            CR.add_cong_r(o, Nat.add(d, 0n), d, e0)
+          +er : {U32.from_nat(CR.nnth(idxs, Nat.add(d, 0n)))
+                 == U32.from_nat(CR.nnth(idxs, d)) : U32} =
+            Equal.cong(Nat, U32, z => U32.from_nat(CR.nnth(idxs, z)),
+              Nat.add(d, 0n), d, e0)
+          Equal.trans(U32, CS.CS.nth(xs, Nat.add(o, Nat.add(d, 0n))),
+            CS.CS.nth(xs, Nat.add(o, d)),
+            U32.from_nat(CR.nnth(idxs, Nat.add(d, 0n))),
+            Equal.cong(Nat, U32, z => CS.CS.nth(xs, z),
+              Nat.add(o, Nat.add(d, 0n)), Nat.add(o, d), ei),
+            Equal.trans(U32, CS.CS.nth(xs, Nat.add(o, d)),
+              U32.from_nat(CR.nnth(idxs, d)),
+              U32.from_nat(CR.nnth(idxs, Nat.add(d, 0n))), hhead,
+              Equal.sym(U32, U32.from_nat(CR.nnth(idxs, Nat.add(d, 0n))),
+                U32.from_nat(CR.nnth(idxs, d)), er)))
+        case 1n+ep:
+          (_, htail) = hc
+          +es : {Nat.add(d, Nat.add(1n, ep)) == Nat.add(1n+d, ep) : Nat} =
+            NatProof.NatPrf.add_succ(d, ep)
+          +ei : {Nat.add(o, Nat.add(d, 1n+ep))
+                 == Nat.add(o, Nat.add(1n+d, ep)) : Nat} =
+            CR.add_cong_r(o, Nat.add(d, Nat.add(1n, ep)),
+              Nat.add(1n+d, ep), es)
+          +er : {U32.from_nat(CR.nnth(idxs, Nat.add(1n+d, ep)))
+                 == U32.from_nat(CR.nnth(idxs, Nat.add(d, 1n+ep))) : U32} =
+            Equal.cong(Nat, U32, z => U32.from_nat(CR.nnth(idxs, z)),
+              Nat.add(1n+d, ep), Nat.add(d, 1n+ep), Equal.sym(Nat,
+                Nat.add(d, 1n+ep), Nat.add(1n+d, ep), es))
+          Equal.trans(U32, CS.CS.nth(xs, Nat.add(o, Nat.add(d, 1n+ep))),
+            CS.CS.nth(xs, Nat.add(o, Nat.add(1n+d, ep))),
+            U32.from_nat(CR.nnth(idxs, Nat.add(d, 1n+ep))),
+            Equal.cong(Nat, U32, z => CS.CS.nth(xs, z),
+              Nat.add(o, Nat.add(d, 1n+ep)), Nat.add(o, Nat.add(1n+d, ep)), ei),
+            Equal.trans(U32, CS.CS.nth(xs, Nat.add(o, Nat.add(1n+d, ep))),
+              U32.from_nat(CR.nnth(idxs, Nat.add(1n+d, ep))),
+              U32.from_nat(CR.nnth(idxs, Nat.add(d, 1n+ep))),
+              CR.set_get(o, kp, 1n+d, ep, xs, idxs, htail, he), er))
