@@ -857,3 +857,29 @@ def CR.touch_out(+tl: +List<Nat>, +j: Nat, +w: Nat, +xs: +List<U32>, +v: U32,
         Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j)),
           CS.CS.nth(xs, Nat.add(256n, j)), U32.from_nat(d), hh, hhead)
       (hh2, CR.touch_out(rest, 1n+j, w, xs, v, htail, hlen2))
+
+# ------------------------------------------------------- counter invariant ---
+#
+# The machine keeps `t` = the number of distinct codes seen, and increments it
+# by `U32.sub(1, v)` where `v` is the count cell's old value (0/1).  The ghost
+# counter invariant is `t = len(dedup nl)`; this is its step, and it is stated
+# on the raw `dedup_cons` so no rewrite of a computed `mem` is needed (the
+# machine's `CS.dedup(code <> nl)` unfolds to exactly this instantiation).
+
+def CR.len_dedup_cons(+c: U32, b: Bool, +d: +List<U32>) ->
+  {CS.CS.len(CS.CS.dedup_cons(c, b, d))
+   == Nat.add(CS.CS.len(d), U32.to_nat(Bool.to_u32(Bool.not(b)))) : Nat}:
+  match b:
+    case True{}:
+      +ez : {Nat.add(CS.CS.len(d), 0n) == CS.CS.len(d) : Nat} =
+        NatProof.NatPrf.add_zero(CS.CS.len(d))
+      Equal.sym(Nat, Nat.add(CS.CS.len(d), 0n), CS.CS.len(d), ez)
+    case False{}:
+      Equal.sym(Nat, Nat.add(CS.CS.len(d), 1n), Nat.add(1n, CS.CS.len(d)),
+        NatProof.NatPrf.add_comm(CS.CS.len(d), 1n))
+
+def CR.len_dedup_add(+c: U32, +nl: +List<U32>) ->
+  {CS.CS.len(CS.CS.dedup(c <> nl))
+   == Nat.add(CS.CS.len(CS.CS.dedup(nl)),
+              U32.to_nat(Bool.to_u32(Bool.not(CS.CS.mem(c, nl))))) : Nat}:
+  CR.len_dedup_cons(c, CS.CS.mem(c, nl), CS.CS.dedup(nl))
