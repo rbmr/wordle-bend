@@ -140,11 +140,14 @@ def dnt_cell(+c: U32, +gg: U32, +j: U32) -> U32:
 def dnres(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_prof(c, gg), 736)
 
-# ph 0 set[o+i] -> 1 fb[g*c+cand] -> 2 cnt[r] -> 3 count (two writes, advance)
+# ph 0 set[o+i] -> 1 fb[fb+v] -> 2 cnt[r] -> 3 count (two writes, advance)
 # -> 4..5 clear the touched cells -> 6 write the result.
-def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +g: U32, +o: U32, +k: U32,
-          +t: U32, +cand: U32, +r: U32, +old: U32, +c: U32, +gg: U32,
-          p: Array<U32> & U32) -> Array<U32>:
+#
+# The region bases are precomputed once per call of dcount (`pb` = off_prof,
+# `fb` = g*c): the offset chain is ~30 arithmetic ops (three multiplies by c and
+# five by the depth count), and this is the hottest loop of the port.
+def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +fb: U32, +o: U32, +k: U32,
+          +t: U32, +r: U32, +pb: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
     case 0n:
       (a2, _) = p
@@ -153,51 +156,50 @@ def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +g: U32, +o: U32, +k: U32,
       match ph:
         case 0:
           (a2, _) = p
-          dn_go(f, 1, i, j, g, o, k, t, cand, r, old, c, gg,
-                Array.get(U32, a2, U32.add(o, i)))
+          dn_go(f, 1, i, j, fb, o, k, t, r, pb, Array.get(U32, a2, U32.add(o, i)))
         case 1:
           (a2, +v) = p
-          dn_go(f, 2, i, j, g, o, k, t, v, r, old, c, gg,
-                Array.get(U32, a2, U32.add(U32.mul(g, c), v)))
+          dn_go(f, 2, i, j, fb, o, k, t, r, pb, Array.get(U32, a2, U32.add(fb, v)))
         case 2:
           (a2, +v) = p
-          dn_go(f, 3, i, j, g, o, k, t, cand, v, old, c, gg,
-                Array.get(U32, a2, dn_cell(c, gg, v)))
+          dn_go(f, 3, i, j, fb, o, k, t, v, pb,
+                Array.get(U32, a2, U32.add(U32.add(pb, 224), v)))
         case 3:
           (a2, +v) = p
           +new = A.eq01(v, 0)
-          a3 = Array.set(U32, a2, dn_cell(c, gg, r), U32.inc(v))
-          a4 = Array.set(U32, a3, dnt_cell(c, gg, t), r)
+          a3 = Array.set(U32, a2, U32.add(U32.add(pb, 224), r), U32.inc(v))
+          a4 = Array.set(U32, a3, U32.add(U32.add(pb, 480), t), r)
           +i2 = U32.inc(i)
           +t2 = U32.add(t, new)
           +done = A.ge01(i2, k)
-          +idx = A.sel(done, dn_cell(c, gg, 0), U32.add(o, i2))
-          dn_go(f, A.sel(done, 4, 0), i2, 0, g, o, k, t2, cand, r, old, c, gg,
+          +idx = A.sel(done, U32.add(pb, 224), U32.add(o, i2))
+          dn_go(f, A.sel(done, 4, 0), i2, 0, fb, o, k, t2, r, pb,
                 Array.get(U32, a4, idx))
         case 4:
           (a2, _) = p
           +done = A.ge01(j, t)
-          +idx = A.sel(done, dn_cell(c, gg, 0), dnt_cell(c, gg, j))
-          dn_go(f, A.sel(done, 6, 5), i, j, g, o, k, t, cand, r, old, c, gg,
+          +idx = A.sel(done, U32.add(pb, 224), U32.add(U32.add(pb, 480), j))
+          dn_go(f, A.sel(done, 6, 5), i, j, fb, o, k, t, r, pb,
                 Array.get(U32, a2, idx))
         case 5:
           (a2, +v) = p
-          a3 = Array.set(U32, a2, dn_cell(c, gg, v), 0)
+          a3 = Array.set(U32, a2, U32.add(U32.add(pb, 224), v), 0)
           +j2 = U32.inc(j)
           +done = A.ge01(j2, t)
-          +idx = A.sel(done, dn_cell(c, gg, 0), dnt_cell(c, gg, j2))
-          dn_go(f, A.sel(done, 6, 4), i, j2, g, o, k, t, cand, r, old, c, gg,
+          +idx = A.sel(done, U32.add(pb, 224), U32.add(U32.add(pb, 480), j2))
+          dn_go(f, A.sel(done, 6, 4), i, j2, fb, o, k, t, r, pb,
                 Array.get(U32, a3, idx))
         case 6:
           (a2, _) = p
-          a3 = Array.set(U32, a2, dnres(c, gg), t)
-          dn_go(f, 7, i, j, g, o, k, t, cand, r, old, c, gg,
-                Array.get(U32, a3, 0))
+          a3 = Array.set(U32, a2, U32.add(pb, 736), t)
+          dn_go(f, 7, i, j, fb, o, k, t, r, pb, Array.get(U32, a3, 0))
         case _:
           (a2, _) = p
           a2
 
 def dcount(a: Array<U32>, +g: U32, +o: U32, +k: U32, +c: U32,
            +gg: U32) -> Array<U32>:
+  +fb = U32.mul(g, c)
+  +pb = G.off_prof(c, gg)
   +fuel = Nat.add(Nat.mul(U32.to_nat(k), 8n), 80n)
-  dn_go(fuel, 0, 0, 0, g, o, k, 0, 0, 0, 0, c, gg, Array.get(U32, a, o))
+  dn_go(fuel, 0, 0, 0, fb, o, k, 0, 0, pb, Array.get(U32, a, o))
