@@ -8,8 +8,7 @@
 #   0..29   per position i: i*6 + 0 ge2_u, 1 eq3_u, 2 ge2_1, 3 eq3_1,
 #           4 ge2_2, 5 eq3_2
 #   30      active_letter_mask
-# The m_tab itself lives in its own region (G.off_mtab, 480 cells):
-#   i*96 + plane*32 + letter, plane 0..2 = Rust's guess-profile class.
+#   64..223 m_tab[i*32 + letter], a factor in 1..3
 import Base
 import ./geo.bend as G
 import ./arith.bend as A
@@ -20,10 +19,8 @@ def actcell(+c: U32, +gg: U32) -> U32:
 def pcell(+c: U32, +gg: U32, +i: U32, +q: U32) -> U32:
   U32.add(U32.add(G.off_prof(c, gg), U32.mul(i, 6)), q)
 
-# Rust's m_tab cell: position i, plane p (0..2), letter l. The guess's profile
-# class at position i selects the plane.
-def mcell(+c: U32, +gg: U32, +i: U32, +q: U32) -> U32:
-  U32.add(G.off_mtab(c, gg), U32.add(U32.mul(i, 96), q))
+def mcell(+c: U32, +gg: U32, +i: U32, +l: U32) -> U32:
+  U32.add(U32.add(G.off_prof(c, gg), 64), U32.add(U32.mul(i, 32), l))
 
 # heuristic::min_non_overlap_for_len(5, max_k). max_k is bounded by the number
 # of responses (242), so only the last five steps of Rust's ladder can fire.
@@ -68,27 +65,27 @@ def mt_go(+fuel: Nat, +ph: U32, +i: U32, +l: U32, +g2u: U32, +e3u: U32,
                 Array.get(U32, a2, pcell(c, gg, i, 0)))
         case 1:
           (a2, +v) = p
-          mt_go(f, 2, i, l, v, e3u, g21, e31, g22, e32, c, gg,
+          mt_go(f, 2, i, l, g2u, v, g21, e31, g22, e32, c, gg,
                 Array.get(U32, a2, pcell(c, gg, i, 1)))
         case 2:
           (a2, +v) = p
-          mt_go(f, 3, i, l, g2u, v, g21, e31, g22, e32, c, gg,
+          mt_go(f, 3, i, l, g2u, e3u, v, e31, g22, e32, c, gg,
                 Array.get(U32, a2, pcell(c, gg, i, 2)))
         case 3:
           (a2, +v) = p
-          mt_go(f, 4, i, l, g2u, e3u, v, e31, g22, e32, c, gg,
+          mt_go(f, 4, i, l, g2u, e3u, g21, v, g22, e32, c, gg,
                 Array.get(U32, a2, pcell(c, gg, i, 3)))
         case 4:
           (a2, +v) = p
-          mt_go(f, 5, i, l, g2u, e3u, g21, v, g22, e32, c, gg,
+          mt_go(f, 5, i, l, g2u, e3u, g21, e31, v, e32, c, gg,
                 Array.get(U32, a2, pcell(c, gg, i, 4)))
         case 5:
           (a2, +v) = p
-          mt_go(f, 8, i, l, g2u, e3u, g21, e31, v, e32, c, gg,
+          mt_go(f, 8, i, l, g2u, e3u, g21, e31, g22, v, c, gg,
                 Array.get(U32, a2, pcell(c, gg, i, 5)))
         case 8:
-          (a2, +v) = p
-          mt_go(f, 9, i, l, g2u, e3u, g21, e31, g22, v, c, gg,
+          (a2, _) = p
+          mt_go(f, 9, i, l, g2u, e3u, g21, e31, g22, e32, c, gg,
                 Array.get(U32, a2, actcell(c, gg)))
         case 9:
           # active_letter_mask |= ge2_u | ge2_1 | ge2_2 for this row.
@@ -98,20 +95,17 @@ def mt_go(+fuel: Nat, +ph: U32, +i: U32, +l: U32, +g2u: U32, +e3u: U32,
           mt_go(f, 6, i, l, g2u, e3u, g21, e31, g22, e32, c, gg,
                 Array.get(U32, a3, 0))
         case 6:
-          # One cell per plane: 1 + the ge2 bit + the eq3 bit, exactly Rust's
-          # tab_i[l] / tab_i[l+32] / tab_i[l+64] write (letters outside a ge2
-          # mask stay 1).
           (a2, _) = p
           +bit = U32.shln(1, U32.to_nat(l))
-          +f0 = U32.add(1, U32.add(A.nz(U32.and(g2u, bit)),
-                                  A.nz(U32.and(e3u, bit))))
-          +f1 = U32.add(1, U32.add(A.nz(U32.and(g21, bit)),
-                                  A.nz(U32.and(e31, bit))))
-          +f2 = U32.add(1, U32.add(A.nz(U32.and(g22, bit)),
-                                  A.nz(U32.and(e32, bit))))
-          a3 = Array.set(U32, a2, mcell(c, gg, i, l), f0)
-          a4 = Array.set(U32, a3, mcell(c, gg, i, U32.add(32, l)), f1)
-          a5 = Array.set(U32, a4, mcell(c, gg, i, U32.add(64, l)), f2)
+          +w2 = A.nz(U32.and(g22, bit))
+          +w1 = U32.mul(U32.sub(1, w2), A.nz(U32.and(g21, bit)))
+          +w0 = U32.mul(U32.sub(1, w2),
+                        U32.mul(U32.sub(1, w1), A.nz(U32.and(g2u, bit))))
+          +f2 = U32.mul(w2, U32.add(1, A.nz(U32.and(e32, bit))))
+          +f1 = U32.mul(w1, U32.add(1, A.nz(U32.and(e31, bit))))
+          +f0 = U32.mul(w0, U32.add(1, A.nz(U32.and(e3u, bit))))
+          +fv = U32.add(U32.add(U32.add(1, f2), f1), f0)
+          a3 = Array.set(U32, a2, mcell(c, gg, i, l), fv)
           +l2 = U32.inc(l)
           +rown = A.ge01(l2, 32)
           +l3 = U32.mul(U32.sub(1, rown), l2)
@@ -119,7 +113,7 @@ def mt_go(+fuel: Nat, +ph: U32, +i: U32, +l: U32, +g2u: U32, +e3u: U32,
           +done = A.ge01(i2, 5)
           +idx = A.sel(done, 0, pcell(c, gg, i2, 0))
           mt_go(f, A.sel(done, 7, 0), i2, l3, g2u, e3u, g21, e31, g22, e32,
-                c, gg, Array.get(U32, a5, idx))
+                c, gg, Array.get(U32, a3, idx))
         case _:
           (a2, _) = p
           a2

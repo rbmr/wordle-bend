@@ -146,44 +146,33 @@ def km2_go(+fuel: Nat, +ph: U32, +g: U32, +hi: U32, +o: U32, +k: U32,
           +non = U32.xor(act, 4294967295)
           +mo = P.mnover(mx)
           +skip1 = A.ge01(P.pc32(U32.and(gm, non)), mo)
-          +idx = A.sel(skip1, 0, U32.add(G.off_gcls(c, gg), g))
-          km2_go(f, A.sel(skip1, 5, 15), g, hi, o, k, mx, eff, dep, c, gg, act,
+          +idx = A.sel(skip1, 0, U32.add(G.off_gpack(c, gg), g))
+          km2_go(f, A.sel(skip1, 5, 20), g, hi, o, k, mx, eff, dep, c, gg, act,
                  pk, pr, lane, sh, Array.get(U32, a2, idx))
-        case 15:
-          # The guess's per-position letter classes; `dep` is dead in this
-          # machine, so it carries them (a new register would tax every call).
-          (a2, +v) = p
-          km2_go(f, 20, g, hi, o, k, mx, eff, v, c, gg, act, pk, pr, lane, sh,
-                 Array.get(U32, a2, U32.add(G.off_gpack(c, gg), g)))
         case 20:
           (a2, +v) = p
-          +q = U32.add(U32.mul(U32.and(dep, 3), 32), U32.and(v, 31))
-          km2_go(f, 21, g, hi, o, k, mx, eff, dep, c, gg, act, v, 1, lane, sh,
-                 Array.get(U32, a2, P.mcell(c, gg, 0, q)))
+          km2_go(f, 21, g, hi, o, k, mx, eff, dep, c, gg, act, v, v, lane, sh,
+                 Array.get(U32, a2, P.mcell(c, gg, 0, U32.and(v, 31))))
         case 21:
           (a2, +v) = p
-          +q = U32.add(U32.mul(U32.and(U32.shrn(dep, 2n), 3), 32),
-                       U32.and(U32.shrn(pk, 5n), 31))
+          +l = U32.and(U32.shrn(pk, 5n), 31)
           km2_go(f, 22, g, hi, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 1, q)))
+                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 1, l)))
         case 22:
           (a2, +v) = p
-          +q = U32.add(U32.mul(U32.and(U32.shrn(dep, 4n), 3), 32),
-                       U32.and(U32.shrn(pk, 10n), 31))
+          +l = U32.and(U32.shrn(pk, 10n), 31)
           km2_go(f, 23, g, hi, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 2, q)))
+                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 2, l)))
         case 23:
           (a2, +v) = p
-          +q = U32.add(U32.mul(U32.and(U32.shrn(dep, 6n), 3), 32),
-                       U32.and(U32.shrn(pk, 15n), 31))
+          +l = U32.and(U32.shrn(pk, 15n), 31)
           km2_go(f, 24, g, hi, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 3, q)))
+                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 3, l)))
         case 24:
           (a2, +v) = p
-          +q = U32.add(U32.mul(U32.and(U32.shrn(dep, 8n), 3), 32),
-                       U32.and(U32.shrn(pk, 20n), 31))
+          +l = U32.and(U32.shrn(pk, 20n), 31)
           km2_go(f, 8, g, hi, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 4, q)))
+                 lane, sh, Array.get(U32, a2, P.mcell(c, gg, 4, l)))
         case 8:
           (a2, _) = p
           +skip2 = A.ge01(mx, pr)

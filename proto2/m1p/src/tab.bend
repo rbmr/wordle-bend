@@ -136,37 +136,8 @@ def ldup5(+a0: U32, +a1: U32, +a2: U32, +a3: U32, +a4: U32) -> U32:
   +b4 = lbit(a4)
   U32.or(U32.or(U32.or(U32.and(b0, b1), U32.and(b0, b2)),
                 U32.or(U32.and(b0, b3), U32.and(b0, b4))),
-         U32.or(U32.or(U32.or(U32.and(b1, b2), U32.and(b1, b3)),
-                       U32.or(U32.and(b1, b4), U32.and(b2, b3))),
-                U32.or(U32.and(b2, b4), U32.and(b3, b4))))
-
-# Per-position letter class of a guess, Rust's guess_profile_chars encoding:
-# 0 = letter occurs once (plane 0), 1 = first occurrence of a repeated letter
-# (plane 1), 2 = later occurrence of a repeated letter (plane 2). Two bits per
-# position, position 0 in the low bits.
-def gcls5(+a0: U32, +a1: U32, +a2: U32, +a3: U32, +a4: U32) -> U32:
-  +e01 = A.eq01(a0, a1)
-  +e02 = A.eq01(a0, a2)
-  +e03 = A.eq01(a0, a3)
-  +e04 = A.eq01(a0, a4)
-  +e12 = A.eq01(a1, a2)
-  +e13 = A.eq01(a1, a3)
-  +e14 = A.eq01(a1, a4)
-  +e23 = A.eq01(a2, a3)
-  +e24 = A.eq01(a2, a4)
-  +e34 = A.eq01(a3, a4)
-  +c0 = A.nz(U32.or(U32.or(e01, e02), U32.or(e03, e04)))
-  +l1 = A.nz(U32.or(U32.or(e12, e13), e14))
-  +c1 = U32.add(U32.mul(2, e01), U32.mul(U32.sub(1, e01), l1))
-  +b2 = A.nz(U32.or(e02, e12))
-  +l2 = A.nz(U32.or(e23, e24))
-  +c2 = U32.add(U32.mul(2, b2), U32.mul(U32.sub(1, b2), l2))
-  +b3 = A.nz(U32.or(U32.or(e03, e13), e23))
-  +c3 = U32.add(U32.mul(2, b3), U32.mul(U32.sub(1, b3), e34))
-  +c4 = U32.mul(2, A.nz(U32.or(U32.or(e04, e14), U32.or(e24, e34))))
-  U32.add(U32.add(c0, U32.shln(c1, 2n)),
-          U32.add(U32.shln(c2, 4n),
-                   U32.add(U32.shln(c3, 6n), U32.shln(c4, 8n))))
+         U32.or(U32.or(U32.and(b1, b2), U32.and(b1, b3)),
+                U32.or(U32.and(b1, b4), U32.and(b2, b3))))
 
 # Walk the text of the guesses file.
 def fill_g_go(s: String, +n: U32, +k: U32, +q0: U32, +q1: U32, +q2: U32,
@@ -186,11 +157,8 @@ def fill_g_go(s: String, +n: U32, +k: U32, +q0: U32, +q1: U32, +q2: U32,
       +m = lmask5(d0, d1, d2, d3, d4)
       +o1 = G.off_gpack(c, gg)
       +o2 = G.off_gmask(c, gg)
-      +o3 = U32.add(G.off_gcls(c, gg), n)
-      +cl = gcls5(d0, d1, d2, d3, d4)
       a[U32.add(o1, n)] <- p
       a[U32.add(o2, n)] <- m
-      a[o3] <- cl
       fill_g_go(t, U32.add(n, U32.mul(isnl, A.eq01(k, 5))),
                 A.sel(isnl, 0, U32.add(k, 1)), d0, d1, d2, d3, d4, c, gg, a)
 
