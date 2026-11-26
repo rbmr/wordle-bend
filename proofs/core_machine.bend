@@ -321,3 +321,58 @@ def CMm.mark_touch_go(+d: Nat, a: Array<U32>, +xs: +List<U32>,
   CMm.write_touch_code(d, Array.set(U32, a, code, 1), CS.CS.set(xs, c, 1),
     xs0, c, code, t, c <> nl, tl, htn, hcode, hd, hk2, hlen2, hs1, hc1, ht1,
     ha1, htle)
+
+# ------------------------------------------------------ the clear-pass step ---
+#
+# The clear pass reads a code from the touched list and writes its count cell to
+# `0` (`rem_all` in the ghost list, since duplicate candidate lines put the same
+# code in it more than once).  The touched list itself is not modified.
+
+def CMm.clear_step_go(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +rest: +List<Nat>,
+    +nl: +List<Nat>,
+    +hcode: {code == U32.from_nat(c) : U32},
+    r: CMem.CM.Store(d, 0n, Array.set(U32, a, U32.from_nat(c), 0),
+         CS.CS.set(xs, c, 0))
+       & (CR.CR.Count(0n, 256n, CS.CS.set(xs, c, 0), CR.CR.rem_all(c, nl))
+          & (CR.CR.Touch(0n, CS.CS.set(xs, c, 0), c <> rest)
+             & CR.CR.Agree(CS.CS.set(xs, c, 0), xs0)))) ->
+  CMem.CM.Store(d, 0n, Array.set(U32, a, code, 0), CS.CS.set(xs, c, 0))
+  & (CR.CR.Count(0n, 256n, CS.CS.set(xs, c, 0), CR.CR.rem_all(c, nl))
+     & (CR.CR.Touch(0n, CS.CS.set(xs, c, 0), c <> rest)
+        & CR.CR.Agree(CS.CS.set(xs, c, 0), xs0))):
+  (hs1, restp) = r
+  +ea : {Array.set(U32, a, code, 0)
+         == Array.set(U32, a, U32.from_nat(c), 0) : Array<U32>} =
+    Equal.cong(U32, Array<U32>, z => Array.set(U32, a, z, 0),
+      code, U32.from_nat(c), hcode)
+  (CMem.CM.store_transport(d, 0n, Array.set(U32, a, U32.from_nat(c), 0),
+     Array.set(U32, a, code, 0), CS.CS.set(xs, c, 0),
+     Equal.sym(Array<U32>, Array.set(U32, a, code, 0),
+       Array.set(U32, a, U32.from_nat(c), 0), ea), hs1),
+   restp)
+
+def CMm.clear_step(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +c: Nat, +code: U32, +rest: +List<Nat>, +nl: +List<Nat>,
+    +hcode: {code == U32.from_nat(c) : U32},
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk: {Nat.is_lt(c, FT.FT.pow2(d)) == True{} : Bool},
+    +hlen: {Nat.is_le(Nat.add(0n, FT.FT.pow2(d)), CS.CS.len(xs)) == True{}
+            : Bool},
+    +hs: CMem.CM.Store(d, 0n, a, xs),
+    hcount: CR.CR.Count(0n, 256n, xs, nl),
+    htouch: CR.CR.Touch(0n, xs, c <> rest),
+    ha: CR.CR.Agree(xs, xs0),
+    +hc256: {Nat.is_lt(c, 256n) == True{} : Bool},
+    +hend: {Nat.is_lt(Nat.add(0n, 256n), CS.CS.len(xs)) == True{} : Bool}) ->
+  CMem.CM.Store(d, 0n, Array.set(U32, a, code, 0), CS.CS.set(xs, c, 0))
+  & (CR.CR.Count(0n, 256n, CS.CS.set(xs, c, 0), CR.CR.rem_all(c, nl))
+     & (CR.CR.Touch(0n, CS.CS.set(xs, c, 0), c <> rest)
+        & CR.CR.Agree(CS.CS.set(xs, c, 0), xs0))):
+  +hlt768 : {Nat.is_lt(c, 768n) == True{} : Bool} =
+    NatProof.Nat.is_lt_le_trans(c, 256n, 768n, hc256, {==})
+  CMm.clear_step_go(d, a, xs, xs0, c, code, rest, nl, hcode,
+    (CWrite.CW.store_set(d, a, xs, c, 0, hd, hk, hs, hlen),
+     (CR.CR.count_clear(256n, 0n, c, xs, nl, hcount, hc256, hend),
+      (CR.CR.touch_set_below(c <> rest, 0n, c, xs, 0, htouch, hc256),
+       CR.CR.agree_after_set(xs, xs0, c, 0, ha, hlt768)))))
