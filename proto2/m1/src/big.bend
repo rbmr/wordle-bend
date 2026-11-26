@@ -199,7 +199,13 @@ def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
 
 def kmax(a: Array<U32>, +o: U32, +k: U32, +init: U32, +eff: U32, +dep: U32,
          +c: U32, +gg: U32) -> Array<U32>:
-  +fuel = Nat.add(Nat.mul(U32.to_nat(gg), 16n), 512n)
+  # Every examined guess costs at most ~12 filter phases plus one distinct count
+  # over the k candidates (dcount's own budget is 8k+80 iterations), and there
+  # are gg guesses. The budget used to be gg*16+512, which cannot cover the
+  # loop: the scan stopped after a few hundred guesses and `uused` kept a stale
+  # value, so k_max_seq's result was never actually used.
+  +per = Nat.add(Nat.mul(U32.to_nat(k), 8n), 96n)
+  +fuel = Nat.add(Nat.mul(U32.to_nat(gg), per), 1024n)
   km_go(fuel, 90, 0, o, k, init, eff, dep, c, gg, 0, 0, 1,
         Array.get(U32, a, P.actcell(c, gg)))
 
