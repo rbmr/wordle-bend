@@ -426,3 +426,122 @@ def CR.count_set_new(+n: Nat, +i: Nat, +d: Nat, +xs: +List<U32>,
            CR.count_shift(np, 1n+i, Nat.add(1n+i, dp), Nat.add(i, 1n+dp),
              esucc, xs, nl,
              CR.count_set_new(np, 1n+i, dp, xs, nl, htail, hd, hend2)))
+
+# The clear-pass ghost operation: remove every occurrence of a code.  The clear
+# pass writes a touched code's count cell to `0`; duplicate candidate lines put
+# the same code in the ghost list more than once, so a single clear removes all
+# of them (`rem` would leave the second copy marked, and the count cell would
+# then disagree with the ghost list).
+def CR.rem_cons(b: Bool, +y: Nat, +r: +List<Nat>) -> +List<Nat>:
+  match b:
+    case True{}:
+      r
+    case False{}:
+      y <> r
+
+def CR.rem_all(+x: Nat, +xs: +List<Nat>) -> +List<Nat>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case Con{y, rest}:
+      +r = CR.rem_all(x, rest)
+      CR.rem_cons(Nat.is_eq(x, y), y, r)
+
+# `rem_all` at a member: the head disappears (the machine's `Nat.is_eq` decides
+# it at run time; here the hypothesis is the value the decision produced).
+def CR.rem_all_hit(+x: Nat, +y: Nat, +xs: +List<Nat>,
+    +he: {Nat.is_eq(x, y) == True{} : Bool}) ->
+  {CR.rem_all(x, y <> xs) == CR.rem_all(x, xs) : +List<Nat>}:
+  Equal.trans(+List<Nat>, CR.rem_all(x, y <> xs),
+    CR.rem_cons(True{}, y, CR.rem_all(x, xs)), CR.rem_all(x, xs),
+    Equal.cong(Bool, +List<Nat>, b => CR.rem_cons(b, y, CR.rem_all(x, xs)),
+      Nat.is_eq(x, y), True{}, he),
+    {==})
+
+def CR.rem_all_miss(+x: Nat, +y: Nat, +xs: +List<Nat>,
+    +he: {Nat.is_eq(x, y) == False{} : Bool}) ->
+  {CR.rem_all(x, y <> xs) == y <> CR.rem_all(x, xs) : +List<Nat>}:
+  Equal.trans(+List<Nat>, CR.rem_all(x, y <> xs),
+    CR.rem_cons(False{}, y, CR.rem_all(x, xs)), y <> CR.rem_all(x, xs),
+    Equal.cong(Bool, +List<Nat>, b => CR.rem_cons(b, y, CR.rem_all(x, xs)),
+      Nat.is_eq(x, y), False{}, he),
+    {==})
+
+# The head step of "the removed code is no longer a member".
+def CR.mem_rem_cons(+x: Nat, +y: Nat, +r: +List<Nat>, b: Bool,
+    +hb: {b == Nat.is_eq(x, y) : Bool},
+    +h: {CR.mem(x, r) == False{} : Bool}) ->
+  {CR.mem(x, CR.rem_cons(b, y, r)) == False{} : Bool}:
+  match b:
+    case True{}:
+      h
+    case False{}:
+      +he : {Nat.is_eq(x, y) == False{} : Bool} =
+        Equal.sym(Bool, False{}, Nat.is_eq(x, y), hb)
+      +e1 : {Bool.or(Nat.is_eq(x, y), CR.mem(x, r))
+             == Bool.or(False{}, CR.mem(x, r)) : Bool} =
+        Equal.cong(Bool, Bool, a => Bool.or(a, CR.mem(x, r)),
+          Nat.is_eq(x, y), False{}, he)
+      +e2 : {Bool.or(False{}, CR.mem(x, r)) == Bool.or(False{}, False{}) : Bool} =
+        Equal.cong(Bool, Bool, a => Bool.or(False{}, a),
+          CR.mem(x, r), False{}, h)
+      Equal.trans(Bool, Bool.or(Nat.is_eq(x, y), CR.mem(x, r)),
+        Bool.or(False{}, CR.mem(x, r)), False{}, e1,
+        Equal.trans(Bool, Bool.or(False{}, CR.mem(x, r)),
+          Bool.or(False{}, False{}), False{}, e2, {==}))
+
+# `rem_all` removes the code from the ghost membership list for good, so the
+# cleared cell's `to_u32(mem ...)` is `to_u32(False) = 0`.
+def CR.mem_rem_all_self(+x: Nat, +xs: +List<Nat>) ->
+  {CR.mem(x, CR.rem_all(x, xs)) == False{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{y, rest}:
+      +h = CR.mem_rem_all_self(x, rest)
+      CR.mem_rem_cons(x, y, CR.rem_all(x, rest), Nat.is_eq(x, y), {==}, h)
+
+# `is_eq(c, y) = True` is `c == y`, and `x != c` then gives `is_eq(x, y) = False`.
+def CR.ne_of_eq_true(+x: Nat, +c: Nat, +y: Nat,
+    +he: {Nat.is_eq(c, y) == True{} : Bool},
+    +hne: {Nat.is_eq(x, c) == False{} : Bool}) ->
+  {Nat.is_eq(x, y) == False{} : Bool}:
+  +ecy : {c == y : Nat} = NatProof.NatPrf.is_eq_true(c, y, he)
+  +eg : {Nat.is_eq(x, y) == Nat.is_eq(x, c) : Bool} =
+    Equal.cong(Nat, Bool, z => Nat.is_eq(x, z), y, c, Equal.sym(Nat, c, y, ecy))
+  Equal.trans(Bool, Nat.is_eq(x, y), Nat.is_eq(x, c), False{}, eg, hne)
+
+# The head step of "any other code keeps its membership": removing `c` from the
+# ghost list does not change whether `x != c` occurs.
+def CR.mem_rem_cons_ne(+x: Nat, +c: Nat, +y: Nat, +r: +List<Nat>, b: Bool,
+    +hb: {b == Nat.is_eq(c, y) : Bool},
+    +hne: {Nat.is_eq(x, c) == False{} : Bool},
+    +h: {CR.mem(x, CR.rem_all(c, r)) == CR.mem(x, r) : Bool}) ->
+  {CR.mem(x, CR.rem_cons(b, y, CR.rem_all(c, r)))
+   == CR.mem(x, y <> r) : Bool}:
+  match b:
+    case True{}:
+      +he : {Nat.is_eq(c, y) == True{} : Bool} =
+        Equal.sym(Bool, True{}, Nat.is_eq(c, y), hb)
+      +hfy : {Nat.is_eq(x, y) == False{} : Bool} = CR.ne_of_eq_true(x, c, y, he, hne)
+      +e0 : {CR.mem(x, y <> r) == Bool.or(False{}, CR.mem(x, r)) : Bool} =
+        Equal.cong(Bool, Bool, a => Bool.or(a, CR.mem(x, r)),
+          Nat.is_eq(x, y), False{}, hfy)
+      Equal.trans(Bool, CR.mem(x, CR.rem_cons(True{}, y, CR.rem_all(c, r))),
+        CR.mem(x, r), CR.mem(x, y <> r), h,
+        Equal.sym(Bool, CR.mem(x, y <> r), CR.mem(x, r),
+          Equal.trans(Bool, CR.mem(x, y <> r),
+            Bool.or(False{}, CR.mem(x, r)), CR.mem(x, r), e0, {==})))
+    case False{}:
+      Equal.cong(Bool, Bool, a => Bool.or(Nat.is_eq(x, y), a),
+        CR.mem(x, CR.rem_all(c, r)), CR.mem(x, r), h)
+
+def CR.mem_rem_all_ne(+x: Nat, +c: Nat, +xs: +List<Nat>,
+    +hne: {Nat.is_eq(x, c) == False{} : Bool}) ->
+  {CR.mem(x, CR.rem_all(c, xs)) == CR.mem(x, xs) : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{y, rest}:
+      +h = CR.mem_rem_all_ne(x, c, rest, hne)
+      CR.mem_rem_cons_ne(x, c, y, rest, Nat.is_eq(c, y), {==}, hne, h)
