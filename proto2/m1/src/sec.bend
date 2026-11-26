@@ -98,29 +98,35 @@ def cnt_go(+fuel: Nat, +ph: U32, +j: U32, +lim: U32, +g: U32, +i: U32,
           (a2, +v) = p
           a3 = Array.set(U32, a2, dirty(dep, c, gg), 0)
           +nb0 = ne_at(dep, c, gg)
-          +idx9 = A.sel(A.eq01(v, 0), sb, nb0)
-          cnt_go(p2, A.sel(A.eq01(v, 0), 0, 7), 0, v, g, 0, n, sb, skip, dep,
+          +z = U32.shrn(U32.sub(v, 1), 31n)
+          +idx9 = U32.add(nb0, U32.mul(z, U32.sub(sb, nb0)))
+          cnt_go(p2, U32.mul(U32.sub(1, z), 7), 0, v, g, 0, n, sb, skip, dep,
                  c, gg, 0, 0, 0, 0, 0, 0, 0, Array.get(U32, a3, idx9))
         case 7:
           # p holds ne[j]: clear that response's count cell.
           (a2, +r0) = p
           a3 = Array.set(U32, a2, U32.add(cnt_at(dep, c, gg), r0), 0)
           +j2 = U32.inc(j)
-          +last = A.eq01(j2, lim)
+          +last = U32.sub(1, U32.shrn(U32.sub(j2, lim), 31n))
           +nb = ne_at(dep, c, gg)
-          cnt_go(p2, A.sel(last, 0, 7), j2, lim, g, 0, n, sb, skip, dep, c,
-                 gg, 0, 0, 0, 0, 0, 0, 0,
-                 Array.get(U32, a3, A.sel(last, sb, U32.add(nb, j2))))
+          +tb = U32.add(nb, j2)
+          +idx7 = U32.add(tb, U32.mul(last, U32.sub(sb, tb)))
+          cnt_go(p2, U32.mul(U32.sub(1, last), 7), j2, lim, g, 0, n, sb, skip,
+                 dep, c, gg, 0, 0, 0, 0, 0, 0, 0,
+                 Array.get(U32, a3, idx7))
         case 0:
           (a2, +v) = p
           +i2 = U32.inc(i)
-          +last = A.eq01(i2, n)
-          +sk = A.eq01(i, skip)
-          +idx = A.sel(sk, A.sel(last, 0, U32.add(sb, i2)),
-                       U32.add(U32.mul(g, c), v))
-          cnt_go(p2, A.sel(sk, A.sel(last, 3, 0), 1), j, lim, g,
-                 A.sel(sk, i2, i), n, sb, skip, dep, c, gg, t, dup, hw, n3, sq,
-                 A.sel(sk, 0, v), r, Array.get(U32, a2, idx))
+          +last = U32.sub(1, U32.shrn(U32.sub(i2, n), 31n))
+          +sk = U32.sub(1, U32.or(U32.shrn(U32.sub(i, skip), 31n),
+                                  U32.shrn(U32.sub(skip, i), 31n)))
+          +ti = U32.mul(U32.sub(1, last), U32.add(sb, i2))
+          +fi = U32.add(U32.mul(g, c), v)
+          +idx = U32.add(fi, U32.mul(sk, U32.sub(ti, fi)))
+          cnt_go(p2, U32.add(U32.sub(1, sk), U32.mul(sk, U32.mul(last, 3))),
+                 j, lim, g, U32.add(i, sk), n, sb, skip, dep, c, gg, t, dup,
+                 hw, n3, sq, U32.mul(U32.sub(1, sk), v), r,
+                 Array.get(U32, a2, idx))
         case 1:
           (a2, +fb) = p
           +cb = cnt_at(dep, c, gg)
@@ -128,20 +134,26 @@ def cnt_go(+fuel: Nat, +ph: U32, +j: U32, +lim: U32, +g: U32, +i: U32,
                  sq, x, fb, Array.get(U32, a2, U32.add(cb, fb)))
         case 2:
           (a2, +old) = p
-          +new = A.eq01(old, 0)
+          +new = U32.shrn(U32.sub(old, 1), 31n)
           +cb = cnt_at(dep, c, gg)
           +nb = ne_at(dep, c, gg)
-          +neidx = A.sel(new, U32.add(nb, t), U32.add(nb, 255))
+          +tb = U32.add(nb, t)
+          +neidx = U32.add(U32.add(nb, 255),
+                           U32.mul(new, U32.sub(tb, U32.add(nb, 255))))
           a3 = Array.set(U32, a2, U32.add(cb, r), U32.inc(old))
           a4 = Array.set(U32, a3, neidx, r)
           +i2 = U32.inc(i)
-          +last = A.eq01(i2, n)
-          +idx = A.sel(last, 0, U32.add(sb, i2))
-          cnt_go(p2, A.sel(last, 3, 0), j, lim, g, i2, n, sb, skip, dep, c, gg,
+          +last = U32.sub(1, U32.shrn(U32.sub(i2, n), 31n))
+          +idx2 = U32.mul(U32.sub(1, last), U32.add(sb, i2))
+          +eqw = U32.sub(1, U32.or(U32.shrn(U32.sub(r, 121), 31n),
+                                   U32.shrn(U32.sub(121, r), 31n)))
+          +eq2 = U32.sub(1, U32.or(U32.shrn(U32.sub(old, 2), 31n),
+                                   U32.shrn(U32.sub(2, old), 31n)))
+          cnt_go(p2, U32.mul(last, 3), j, lim, g, i2, n, sb, skip, dep, c, gg,
                  U32.add(t, new), U32.add(dup, U32.sub(1, new)),
-                 U32.max(hw, A.eq01(r, 121)), U32.add(n3, A.eq01(old, 2)),
-                 U32.add(sq, U32.inc(U32.mul(old, 2))), 0, 0,
-                 Array.get(U32, a4, idx))
+                 U32.or(hw, eqw), U32.add(n3, eq2),
+                 U32.add(sq, U32.add(U32.mul(old, 2), 1)), 0, 0,
+                 Array.get(U32, a4, idx2))
         case _:
           (a2, _) = p
           a5 = Array.set(U32, a2, pkcell(c, gg),
@@ -306,9 +318,9 @@ def sc_go(+fuel: Nat, +ph: U32, +i: U32, +n: U32, +sb: U32, +g: U32,
           a3 = Array.set(U32, a2, U32.add(ub, r), U32.inc(pos))
           a4 = Array.set(U32, a3, pos, x)
           +i2 = U32.inc(i)
-          +last = A.eq01(i2, n)
-          +idx = A.sel(last, 0, U32.add(sb, i2))
-          sc_go(p2, A.sel(last, 3, 0), i2, n, sb, g, dep, dst, c, gg, 0, 0,
+          +last = U32.sub(1, U32.shrn(U32.sub(i2, n), 31n))
+          +idx = U32.mul(U32.sub(1, last), U32.add(sb, i2))
+          sc_go(p2, U32.mul(last, 3), i2, n, sb, g, dep, dst, c, gg, 0, 0,
                 Array.get(U32, a4, idx))
         case _:
           (a2, _) = p
