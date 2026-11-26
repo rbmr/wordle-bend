@@ -57,7 +57,7 @@ def forest_g(+m: Nat, +roots: Nat, +k: Nat, +a1: Nat) -> Nat:
 # --- forest_bound -----------------------------------------------------------
 
 def forest_kinks(+fuel: Nat, +m: Nat, +roots: Nat, +k: Nat, +hi: Nat,
-                 +pow: Nat, +best: Nat, done: Bool, cap_ge: Bool,
+                 +pow: Nat, +best: Nat, done: Bool, cap_lt: Bool,
                  kink_le_hi: Bool, +kink: Nat) -> Nat:
   match fuel:
     case 0n:
@@ -67,7 +67,7 @@ def forest_kinks(+fuel: Nat, +m: Nat, +roots: Nat, +k: Nat, +hi: Nat,
         case True{}:
           best
         case False{}:
-          match cap_ge:
+          match cap_lt:
             case True{}:
               +pow2 = Nat.mul(pow, k)
               +coeff2 = Nat.sub(pow2, 1n)
@@ -75,7 +75,7 @@ def forest_kinks(+fuel: Nat, +m: Nat, +roots: Nat, +k: Nat, +hi: Nat,
               +kink2 = Nat.div(Nat.sub(cap2, m), coeff2)
               forest_kinks(f, m, roots, k, hi, pow2, best,
                 Nat.is_le(m, Nat.sub(cap2, Nat.mul(coeff2, hi))),
-                Nat.is_le(cap2, m), Nat.is_le(Nat.add(kink2, 1n), hi), kink2)
+                Nat.is_lt(cap2, m), Nat.is_le(Nat.add(kink2, 1n), hi), kink2)
             case False{}:
               match kink_le_hi:
                 case True{}:
@@ -88,7 +88,7 @@ def forest_kinks(+fuel: Nat, +m: Nat, +roots: Nat, +k: Nat, +hi: Nat,
                   +kink2 = Nat.div(Nat.sub(cap2, m), coeff2)
                   forest_kinks(f, m, roots, k, hi, pow2, b2,
                     Nat.is_le(m, Nat.sub(cap2, Nat.mul(coeff2, hi))),
-                    Nat.is_le(cap2, m), Nat.is_le(Nat.add(kink2, 1n), hi),
+                    Nat.is_lt(cap2, m), Nat.is_le(Nat.add(kink2, 1n), hi),
                     kink2)
                 case False{}:
                   +b1 = nat_min(best, forest_g(m, roots, k, kink))
@@ -98,7 +98,7 @@ def forest_kinks(+fuel: Nat, +m: Nat, +roots: Nat, +k: Nat, +hi: Nat,
                   +kink2 = Nat.div(Nat.sub(cap2, m), coeff2)
                   forest_kinks(f, m, roots, k, hi, pow2, b1,
                     Nat.is_le(m, Nat.sub(cap2, Nat.mul(coeff2, hi))),
-                    Nat.is_le(cap2, m), Nat.is_le(Nat.add(kink2, 1n), hi),
+                    Nat.is_lt(cap2, m), Nat.is_le(Nat.add(kink2, 1n), hi),
                     kink2)
 
 def forest_bound_b(+m: Nat, +roots: Nat, +k: Nat,
@@ -115,12 +115,15 @@ def forest_bound_b(+m: Nat, +roots: Nat, +k: Nat,
           +b0 = forest_g(m, roots, k, 0n)
           +bh = forest_g(m, roots, k, hi)
           +best = nat_min(b0, bh)
-          +cap = Nat.mul(roots, k)
+          # Rust's kink loop starts at D = 3: pow = k and cap = roots*k^2
+          # (cap = roots*pow*k). Starting one depth later missed every D = 3
+          # kink and made the bound too high (an unsound prune at large n).
+          +cap = Nat.mul(roots, Nat.mul(k, k))
           +coeff = Nat.sub(k, 1n)
           +kink = Nat.div(Nat.sub(cap, m), coeff)
           forest_kinks(24n, m, roots, k, hi, k, best,
             Nat.is_le(m, Nat.sub(cap, Nat.mul(coeff, hi))),
-            Nat.is_le(cap, m), False{}, kink)
+            Nat.is_lt(cap, m), Nat.is_le(Nat.add(kink, 1n), hi), kink)
 
 def forest_bound(+m: Nat, +roots: Nat, +k: Nat) -> Nat:
   match m:

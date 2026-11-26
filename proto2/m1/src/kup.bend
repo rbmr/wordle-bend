@@ -124,7 +124,7 @@ def kup(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cand: U32, +m: U32,
           +p3 = U32.mul(p2, fct(a2, e2, d2, bu, cd))
           +p4 = U32.mul(p3, fct(a3, e3, d3, bu, cd))
           +p5 = U32.mul(p4, fct(a4, e4, d4, bu, cd))
-          +res = U32.min(U32.min(p5, k), 242)
+          +res = U32.min(U32.min(p5, k), 243)
           +b1b = U32.or(bu, cd)
           +br0 = brmask(a0)
           +b10 = U32.and(br0, b1b)
@@ -229,7 +229,9 @@ def kup(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cand: U32, +m: U32,
 # ones; that cannot happen for five-letter words (the union has at most 26 bits
 # and Rust's check is `c_mask == u32::MAX`, i.e. all 32), so the shortcut is
 # unreachable here. It is kept in the product form: the product is min'ed with
-# n and 242, which is what that branch returns.
+# n and num_responses (243 = 3^5 response codes, not 242). The cap must be 243:
+# a bucket of >= 243 candidates can realise every code, and a k one below the
+# true branching factor makes bucket_capacity_bound too high (unsound prune).
 def k_upper(a: Array<U32>, +o: U32, +k: U32, +c: U32, +gg: U32) -> Array<U32>:
   +fuel = Nat.add(Nat.mul(U32.to_nat(k), 12n), 64n)
   kup(fuel, 0, 0, o, k, 0, 0, 0, 0, maxu(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
