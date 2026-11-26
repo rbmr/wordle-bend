@@ -58,6 +58,7 @@ import ./proofs/core_nat.bend as CoreNat
 import ./proofs/core_store.bend as CoreStore
 import ./proofs/core_write.bend as CoreWrite
 import ./proofs/core_region.bend as CoreRegion
+import ./proofs/core_machine.bend as CoreMachine
 import ./proofs/core_dcount.bend as CoreDCount
 import ./proofs/core_cells.bend as CoreCells
 

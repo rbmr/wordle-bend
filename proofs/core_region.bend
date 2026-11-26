@@ -928,6 +928,47 @@ def CR.touch_set_below(+tl: +List<Nat>, +j: Nat, +w: Nat, +xs: +List<U32>,
       (hhead2,
        CR.touch_set_below(rest, 1n+j, w, xs, v, htail, CR.lt_shift(j, w, hw)))
 
+# A write at or above the touched region's end leaves it unchanged; the
+# machine's result-cell write is at 512 and the region ends at `256 + len tl`.
+def CR.touch_set_above(+tl: +List<Nat>, +j: Nat, +w: Nat, +xs: +List<U32>,
+    +v: U32,
+    hc: CR.Touch(j, xs, tl),
+    +hle: {Nat.is_lt(Nat.add(256n, Nat.add(j, CR.nlen(tl))), w)
+           == True{} : Bool}) ->
+  CR.Touch(j, CS.CS.set(xs, w, v), tl):
+  match tl:
+    case Nil{}:
+      hc
+    case Con{d, rest}:
+      (hhead, htail) = hc
+      +hend : {Nat.is_lt(Nat.add(256n, j),
+        Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest)))) == True{} : Bool} =
+        CR.lt_append(j, CR.nlen(rest))
+      +h2 : {Nat.is_lt(Nat.add(256n, j), w) == True{} : Bool} =
+        NatProof.Nat.is_lt_le_trans(Nat.add(256n, j),
+          Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))), w, hend,
+          NatProof.Nat.is_le_of_lt(Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))),
+            w, hle))
+      +hne : {Nat.is_eq(w, Nat.add(256n, j)) == False{} : Bool} =
+        CN.core_nat_eq_false_sym(Nat.add(256n, j), w,
+          CN.core_nat_eq_false_of_lt(Nat.add(256n, j), w, h2))
+      +hhead2 : {CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j))
+                 == U32.from_nat(d) : U32} =
+        Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(256n, j)),
+          CS.CS.nth(xs, Nat.add(256n, j)), U32.from_nat(d),
+          CS.CS.nth_set_diff(xs, w, Nat.add(256n, j), v, hne), hhead)
+      +esucc : {Nat.add(j, Nat.add(1n, CR.nlen(rest)))
+                == Nat.add(1n+j, CR.nlen(rest)) : Nat} =
+        NatProof.NatPrf.add_succ(j, CR.nlen(rest))
+      +hle2 : {Nat.is_lt(Nat.add(256n, Nat.add(1n+j, CR.nlen(rest))), w)
+               == True{} : Bool} =
+        CR.lt_rewrite_l(Nat.add(256n, Nat.add(j, 1n+CR.nlen(rest))),
+          Nat.add(256n, Nat.add(1n+j, CR.nlen(rest))), w,
+          CR.add_cong_r(256n, Nat.add(j, Nat.add(1n, CR.nlen(rest))),
+            Nat.add(1n+j, CR.nlen(rest)), esucc), hle)
+      (hhead2,
+       CR.touch_set_above(rest, 1n+j, w, xs, v, htail, hle2))
+
 # A write at the result cell establishes `CR.Res`.
 def CR.res_set(+xs: +List<U32>, +t: U32,
     +hi: {Nat.is_lt(512n, CS.CS.len(xs)) == True{} : Bool}) ->
