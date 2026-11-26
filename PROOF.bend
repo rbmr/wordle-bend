@@ -52,6 +52,8 @@ import ./proofs/lb_adsplit.bend as LBProof7
 import ./proofs/lb_capacity_sound.bend as LBProof8
 import ./src/solve_k.bend as SolveK
 import ./proofs/par_chunk.bend as ParChunk
+import ./proofs/core_list.bend as CoreList
+import ./proofs/core_dcount.bend as CoreDCount
 
 def Bool.disc(b: Bool) -> Type:
   match b:
