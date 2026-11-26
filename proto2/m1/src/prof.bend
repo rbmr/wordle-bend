@@ -121,3 +121,83 @@ def mt_go(+fuel: Nat, +ph: U32, +i: U32, +l: U32, +g2u: U32, +e3u: U32,
 def mtab(a: Array<U32>, +c: U32, +gg: U32) -> Array<U32>:
   +fuel = Nat.mul(8192n, 2n)
   mt_go(fuel, 10, 0, 0, 0, 0, 0, 0, 0, 0, c, gg, Array.get(U32, a, 0))
+
+# ------------------------------------------------ distinct-response count ------
+#
+# heuristic::count_unique_responses_from_row_u8 as a lean machine: the number of
+# distinct responses of guess `g` over set[o..o+k), with no bucket statistics
+# (the branching scans need only the count). Count cells are cleared through a
+# touched list, so the region is all-zero on entry and on exit.
+#
+# Layout: counts at prof+224 (256 cells), touched list at prof+480 (256),
+# result at prof+736.
+def dn_cell(+c: U32, +gg: U32, +r: U32) -> U32:
+  U32.add(U32.add(G.off_prof(c, gg), 224), r)
+
+def dnt_cell(+c: U32, +gg: U32, +j: U32) -> U32:
+  U32.add(U32.add(G.off_prof(c, gg), 480), j)
+
+def dnres(+c: U32, +gg: U32) -> U32:
+  U32.add(G.off_prof(c, gg), 736)
+
+# ph 0 set[o+i] -> 1 fb[g*c+cand] -> 2 cnt[r] -> 3 count (two writes, advance)
+# -> 4..5 clear the touched cells -> 6 write the result.
+def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +g: U32, +o: U32, +k: U32,
+          +t: U32, +cand: U32, +r: U32, +old: U32, +c: U32, +gg: U32,
+          p: Array<U32> & U32) -> Array<U32>:
+  match fuel:
+    case 0n:
+      (a2, _) = p
+      a2
+    case 1n+f:
+      match ph:
+        case 0:
+          (a2, _) = p
+          dn_go(f, 1, i, j, g, o, k, t, cand, r, old, c, gg,
+                Array.get(U32, a2, U32.add(o, i)))
+        case 1:
+          (a2, +v) = p
+          dn_go(f, 2, i, j, g, o, k, t, v, r, old, c, gg,
+                Array.get(U32, a2, U32.add(U32.mul(g, c), v)))
+        case 2:
+          (a2, +v) = p
+          dn_go(f, 3, i, j, g, o, k, t, cand, v, old, c, gg,
+                Array.get(U32, a2, dn_cell(c, gg, v)))
+        case 3:
+          (a2, +v) = p
+          +new = A.eq01(v, 0)
+          a3 = Array.set(U32, a2, dn_cell(c, gg, r), U32.inc(v))
+          a4 = Array.set(U32, a3, dnt_cell(c, gg, t), r)
+          +i2 = U32.inc(i)
+          +t2 = U32.add(t, new)
+          +done = A.ge01(i2, k)
+          +idx = A.sel(done, dn_cell(c, gg, 0), U32.add(o, i2))
+          dn_go(f, A.sel(done, 4, 0), i2, 0, g, o, k, t2, cand, r, old, c, gg,
+                Array.get(U32, a4, idx))
+        case 4:
+          (a2, _) = p
+          +done = A.ge01(j, t)
+          +idx = A.sel(done, dn_cell(c, gg, 0), dnt_cell(c, gg, j))
+          dn_go(f, A.sel(done, 6, 5), i, j, g, o, k, t, cand, r, old, c, gg,
+                Array.get(U32, a2, idx))
+        case 5:
+          (a2, +v) = p
+          a3 = Array.set(U32, a2, dn_cell(c, gg, v), 0)
+          +j2 = U32.inc(j)
+          +done = A.ge01(j2, t)
+          +idx = A.sel(done, dn_cell(c, gg, 0), dnt_cell(c, gg, j2))
+          dn_go(f, A.sel(done, 6, 4), i, j2, g, o, k, t, cand, r, old, c, gg,
+                Array.get(U32, a3, idx))
+        case 6:
+          (a2, _) = p
+          a3 = Array.set(U32, a2, dnres(c, gg), t)
+          dn_go(f, 7, i, j, g, o, k, t, cand, r, old, c, gg,
+                Array.get(U32, a3, 0))
+        case _:
+          (a2, _) = p
+          a2
+
+def dcount(a: Array<U32>, +g: U32, +o: U32, +k: U32, +c: U32,
+           +gg: U32) -> Array<U32>:
+  +fuel = Nat.add(Nat.mul(U32.to_nat(k), 8n), 80n)
+  dn_go(fuel, 0, 0, 0, g, o, k, 0, 0, 0, 0, c, gg, Array.get(U32, a, o))

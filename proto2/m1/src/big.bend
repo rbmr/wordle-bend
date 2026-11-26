@@ -65,9 +65,9 @@ def kc_go(+fuel: Nat, +ph: U32, +i: U32, +o: U32, +k: U32, +mx: U32,
                 Array.get(U32, a2, idx))
         case 2:
           (a2, _) = p
-          a3 = S.cnt(g, o, k, nosk(), dep, c, gg, a2)
+          a3 = P.dcount(a2, g, o, k, c, gg)
           kc_go(f, 3, i, o, k, mx, eff, dep, c, gg, g,
-                Array.get(U32, a3, S.pkcell(c, gg)))
+                Array.get(U32, a3, P.dnres(c, gg)))
         case 3:
           (a2, +pk) = p
           +t = U32.and(pk, 4095)
@@ -174,12 +174,12 @@ def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
                 Array.get(U32, a2, idx))
         case 2:
           (a2, _) = p
-          a3 = S.cnt(g, o, k, nosk(), dep, c, gg, a2)
+          a3 = P.dcount(a2, g, o, k, c, gg)
           km_go(f, 3, g, o, k, mx, eff, dep, c, gg, act, pk, pr,
-                Array.get(U32, a3, S.pkcell(c, gg)))
+                Array.get(U32, a3, P.dnres(c, gg)))
         case 3:
           (a2, +pk2) = p
-          +t = U32.and(pk2, 4095)
+          +t = pk2
           +mx2 = U32.max(mx, t)
           +g2 = U32.inc(g)
           +idx = A.sel(A.ge01(g2, gg), 0, U32.add(G.off_gmask(c, gg), g2))
