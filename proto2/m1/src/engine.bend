@@ -485,28 +485,28 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                0, stk, Array.get(U32, a2, pr_lb(c, gg)))
         case 192:
           (a2, +v) = p
-          step(f, c, gg, 0, 193, ss, n, beta, pmk, dep, best, lb, v, v1k, v2k,
+          step(f, c, gg, 0, 193, ss, n, beta, pmk, dep, best, v, lmk, v1k, v2k,
                mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
                0, stk, Array.get(U32, a2, pr_lmk(c, gg)))
         case 193:
           (a2, +v) = p
-          step(f, c, gg, 0, 194, ss, n, beta, pmk, dep, best, lb, lmk, v, v2k,
+          step(f, c, gg, 0, 194, ss, n, beta, pmk, dep, best, lb, v, v1k, v2k,
                mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
                0, stk, Array.get(U32, a2, pr_v1k(c, gg)))
         case 194:
           (a2, +v) = p
-          step(f, c, gg, 0, 195, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v,
+          step(f, c, gg, 0, 195, ss, n, beta, pmk, dep, best, lb, lmk, v, v2k,
                mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
                0, stk, Array.get(U32, a2, pr_v2k(c, gg)))
         case 195:
           (a2, +v) = p
-          step(f, c, gg, 0, 196, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
-               v, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+          step(f, c, gg, 0, 196, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
                0, stk, Array.get(U32, a2, pr_mv(c, gg)))
         case 196:
           (a2, +v) = p
           step(f, c, gg, 0, 197, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
-               mv, v, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               v, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
                0, stk, Array.get(U32, a2, pr_nt(c, gg)))
         case 197:
           (a2, +v) = p
