@@ -422,6 +422,12 @@ def CR.count_set_new(+n: Nat, +i: Nat, +d: Nat, +xs: +List<U32>,
                     == True{} : Bool} =
             CR.is_lt_rewrite(Nat.add(i, 1n+np), Nat.add(1n+i, np),
               CS.CS.len(xs), esucc2, hend)
+          +esucc2 : {Nat.add(i, 1n+np) == Nat.add(1n+i, np) : Nat} =
+            NatProof.NatPrf.add_succ(i, np)
+          +hend2 : {Nat.is_lt(Nat.add(1n+i, np), CS.CS.len(xs))
+                    == True{} : Bool} =
+            CR.is_lt_rewrite(Nat.add(i, 1n+np), Nat.add(1n+i, np),
+              CS.CS.len(xs), esucc2, hend)
           (hhead2,
            CR.count_shift(np, 1n+i, Nat.add(1n+i, dp), Nat.add(i, 1n+dp),
              esucc, xs, nl,
@@ -545,3 +551,163 @@ def CR.mem_rem_all_ne(+x: Nat, +c: Nat, +xs: +List<Nat>,
     case Con{y, rest}:
       +h = CR.mem_rem_all_ne(x, c, rest, hne)
       CR.mem_rem_cons_ne(x, c, y, rest, Nat.is_eq(c, y), {==}, hne, h)
+
+# Removing a code below the region's base from the ghost list leaves the region
+# unchanged (the membership of every cell in the region is untouched).
+def CR.count_rem_before(+n: Nat, +i: Nat, +w: Nat, +xs: +List<U32>,
+    +nl: +List<Nat>,
+    hc: CR.Count(i, n, xs, nl),
+    +hw: {Nat.is_lt(w, i) == True{} : Bool}) ->
+  CR.Count(i, n, xs, CR.rem_all(w, nl)):
+  match n:
+    case 0n:
+      hc
+    case 1n+np:
+      (hhead, htail) = hc
+      +hne : {Nat.is_eq(i, w) == False{} : Bool} =
+        CN.core_nat_eq_false_sym(w, i, CN.core_nat_eq_false_of_lt(w, i, hw))
+      +hg : {Bool.to_u32(CR.mem(i, CR.rem_all(w, nl)))
+             == Bool.to_u32(CR.mem(i, nl)) : U32} =
+        Equal.cong(Bool, U32, b => Bool.to_u32(b),
+          CR.mem(i, CR.rem_all(w, nl)), CR.mem(i, nl),
+          CR.mem_rem_all_ne(i, w, nl, hne))
+      +hh2 : {CS.CS.nth(xs, i)
+              == Bool.to_u32(CR.mem(i, CR.rem_all(w, nl))) : U32} =
+        Equal.trans(U32, CS.CS.nth(xs, i), Bool.to_u32(CR.mem(i, nl)),
+          Bool.to_u32(CR.mem(i, CR.rem_all(w, nl))), hhead,
+          Equal.sym(U32, Bool.to_u32(CR.mem(i, CR.rem_all(w, nl))),
+            Bool.to_u32(CR.mem(i, nl)), hg))
+      +hw2 : {Nat.is_lt(w, 1n+i) == True{} : Bool} =
+        NatProof.Nat.is_lt_succ_of_le(w, i,
+          NatProof.Nat.is_le_of_lt(w, i, hw))
+      (hh2, CR.count_rem_before(np, 1n+i, w, xs, nl, htail, hw2))
+
+# The head write of the clear pass: writing `0` at a marked cell and removing
+# the code from the ghost list (`count_head` is the same step for `1`).
+def CR.count_head_clear(+i: Nat, +np: Nat, +xs: +List<U32>, +nl: +List<Nat>,
+    hc: CR.Count(i, 1n+np, xs, nl),
+    +hi: {Nat.is_lt(i, CS.CS.len(xs)) == True{} : Bool}) ->
+  CR.Count(i, 1n+np, CS.CS.set(xs, i, 0), CR.rem_all(i, nl)):
+  (hhead, htail) = hc
+  +hsame : {CS.CS.nth(CS.CS.set(xs, i, 0), i) == 0 : U32} =
+    CS.CS.nth_set_same(xs, i, 0, hi)
+  +hfalse : {CR.mem(i, CR.rem_all(i, nl)) == False{} : Bool} =
+    CR.mem_rem_all_self(i, nl)
+  +hrhs : {Bool.to_u32(CR.mem(i, CR.rem_all(i, nl))) == 0 : U32} =
+    Equal.trans(U32, Bool.to_u32(CR.mem(i, CR.rem_all(i, nl))),
+      Bool.to_u32(False{}), 0,
+      Equal.cong(Bool, U32, b => Bool.to_u32(b),
+        CR.mem(i, CR.rem_all(i, nl)), False{}, hfalse),
+      {==})
+  +hhead2 : {CS.CS.nth(CS.CS.set(xs, i, 0), i)
+             == Bool.to_u32(CR.mem(i, CR.rem_all(i, nl))) : U32} =
+    Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, i, 0), i), 0,
+      Bool.to_u32(CR.mem(i, CR.rem_all(i, nl))), hsame,
+      Equal.sym(U32, Bool.to_u32(CR.mem(i, CR.rem_all(i, nl))), 0, hrhs))
+  +hlt1 : {Nat.is_lt(i, 1n+i) == True{} : Bool} =
+    NatProof.Nat.is_lt_succ_self(i)
+  ht1 : CR.Count(1n+i, np, xs, CR.rem_all(i, nl)) =
+    CR.count_rem_before(np, 1n+i, i, xs, nl, htail, hlt1)
+  ht2 : CR.Count(1n+i, np, CS.CS.set(xs, i, 0), CR.rem_all(i, nl)) =
+    CR.count_set_before(np, 1n+i, i, 0, xs, CR.rem_all(i, nl), ht1, hlt1)
+  (hhead2, ht2)
+
+# Moving a clear-region proof from one write index to a propositionally equal
+# one (`count_shift` for the clear write and the `rem_all` ghost list).
+def CR.count_clear_shift(+n: Nat, +i: Nat, +w1: Nat, +w2: Nat,
+    +e: {w1 == w2 : Nat}, +xs: +List<U32>, +nl: +List<Nat>,
+    hc: CR.Count(i, n, CS.CS.set(xs, w1, 0), CR.rem_all(w1, nl))) ->
+  CR.Count(i, n, CS.CS.set(xs, w2, 0), CR.rem_all(w2, nl)):
+  match n:
+    case 0n:
+      hc
+    case 1n+np:
+      (hhead, htail) = hc
+      +ea : {CS.CS.nth(CS.CS.set(xs, w2, 0), i)
+             == CS.CS.nth(CS.CS.set(xs, w1, 0), i) : U32} =
+        Equal.cong(Nat, U32, z => CS.CS.nth(CS.CS.set(xs, z, 0), i),
+          w2, w1, Equal.sym(Nat, w1, w2, e))
+      +eb : {Bool.to_u32(CR.mem(i, CR.rem_all(w1, nl)))
+             == Bool.to_u32(CR.mem(i, CR.rem_all(w2, nl))) : U32} =
+        Equal.cong(Nat, U32, z => Bool.to_u32(CR.mem(i, CR.rem_all(z, nl))),
+          w1, w2, e)
+      +hh2 : {CS.CS.nth(CS.CS.set(xs, w2, 0), i)
+              == Bool.to_u32(CR.mem(i, CR.rem_all(w2, nl))) : U32} =
+        Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w2, 0), i),
+          CS.CS.nth(CS.CS.set(xs, w1, 0), i),
+          Bool.to_u32(CR.mem(i, CR.rem_all(w2, nl))), ea,
+          Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w1, 0), i),
+            Bool.to_u32(CR.mem(i, CR.rem_all(w1, nl))),
+            Bool.to_u32(CR.mem(i, CR.rem_all(w2, nl))), hhead, eb))
+      (hh2, CR.count_clear_shift(np, 1n+i, w1, w2, e, xs, nl, htail))
+
+# The clear-pass update of the count region: writing `0` at the cell of code
+# `i + d` (with `d < n`) and removing that code from the ghost list.  No
+# membership hypothesis is needed: clearing an unmarked cell and removing an
+# absent code agree cell by cell (`rem_all` is the identity when the code is
+# absent, and the cell is already `0`).
+def CR.count_clear(+n: Nat, +i: Nat, +d: Nat, +xs: +List<U32>,
+    +nl: +List<Nat>,
+    hc: CR.Count(i, n, xs, nl),
+    +hd: {Nat.is_lt(d, n) == True{} : Bool},
+    +hend: {Nat.is_lt(Nat.add(i, n), CS.CS.len(xs)) == True{} : Bool}) ->
+  CR.Count(i, n, CS.CS.set(xs, Nat.add(i, d), 0), CR.rem_all(Nat.add(i, d), nl)):
+  match n:
+    case 0n:
+      Empty.absurd(
+        CR.Count(i, 0n, CS.CS.set(xs, Nat.add(i, d), 0),
+          CR.rem_all(Nat.add(i, d), nl)),
+        NatProof.Nat.not_lt_zero(d, hd))
+    case 1n+np:
+      match d:
+        case 0n:
+          +hi : {Nat.is_lt(i, CS.CS.len(xs)) == True{} : Bool} =
+            NatProof.Nat.is_lt_le_trans(i, Nat.add(i, 1n+np), CS.CS.len(xs),
+              CR.lt_add_pos(i, 1n+np, {==}),
+              NatProof.Nat.is_le_of_lt(Nat.add(i, 1n+np), CS.CS.len(xs), hend))
+          +ez : {Nat.add(i, 0n) == i : Nat} = NatProof.NatPrf.add_zero(i)
+          CR.count_clear_shift(1n+np, i, i, Nat.add(i, 0n),
+            Equal.sym(Nat, Nat.add(i, 0n), i, ez), xs, nl,
+            CR.count_head_clear(i, np, xs, nl, hc, hi))
+        case 1n+dp:
+          (hhead, htail) = hc
+          +hlt : {Nat.is_lt(i, Nat.add(i, 1n+dp)) == True{} : Bool} =
+            CR.lt_add_pos(i, 1n+dp, {==})
+          +hne : {Nat.is_eq(i, Nat.add(i, 1n+dp)) == False{} : Bool} =
+            CN.core_nat_eq_false_of_lt(i, Nat.add(i, 1n+dp), hlt)
+          +hnes : {Nat.is_eq(Nat.add(i, 1n+dp), i) == False{} : Bool} =
+            CN.core_nat_eq_false_sym(i, Nat.add(i, 1n+dp), hne)
+          +hh : {CS.CS.nth(CS.CS.set(xs, Nat.add(i, 1n+dp), 0), i)
+                 == CS.CS.nth(xs, i) : U32} =
+            CS.CS.nth_set_diff(xs, Nat.add(i, 1n+dp), i, 0, hnes)
+          +hh2 : {CS.CS.nth(CS.CS.set(xs, Nat.add(i, 1n+dp), 0), i)
+                  == Bool.to_u32(CR.mem(i, nl)) : U32} =
+            Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, Nat.add(i, 1n+dp), 0), i),
+              CS.CS.nth(xs, i), Bool.to_u32(CR.mem(i, nl)), hh, hhead)
+          +hg : {Bool.to_u32(CR.mem(i, CR.rem_all(Nat.add(i, 1n+dp), nl)))
+                 == Bool.to_u32(CR.mem(i, nl)) : U32} =
+            Equal.cong(Bool, U32, b => Bool.to_u32(b),
+              CR.mem(i, CR.rem_all(Nat.add(i, 1n+dp), nl)), CR.mem(i, nl),
+              CR.mem_rem_all_ne(i, Nat.add(i, 1n+dp), nl, hne))
+          +hhead2 : {CS.CS.nth(CS.CS.set(xs, Nat.add(i, 1n+dp), 0), i)
+                     == Bool.to_u32(CR.mem(i, CR.rem_all(Nat.add(i, 1n+dp), nl)))
+                     : U32} =
+            Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, Nat.add(i, 1n+dp), 0), i),
+              Bool.to_u32(CR.mem(i, nl)),
+              Bool.to_u32(CR.mem(i, CR.rem_all(Nat.add(i, 1n+dp), nl))), hh2,
+              Equal.sym(U32,
+                Bool.to_u32(CR.mem(i, CR.rem_all(Nat.add(i, 1n+dp), nl))),
+                Bool.to_u32(CR.mem(i, nl)), hg))
+          +esucc : {Nat.add(1n+i, dp) == Nat.add(i, 1n+dp) : Nat} =
+            Equal.sym(Nat, Nat.add(i, 1n+dp), Nat.add(1n+i, dp),
+              NatProof.NatPrf.add_succ(i, dp))
+          +esucc2 : {Nat.add(i, 1n+np) == Nat.add(1n+i, np) : Nat} =
+            NatProof.NatPrf.add_succ(i, np)
+          +hend2 : {Nat.is_lt(Nat.add(1n+i, np), CS.CS.len(xs))
+                    == True{} : Bool} =
+            CR.is_lt_rewrite(Nat.add(i, 1n+np), Nat.add(1n+i, np),
+              CS.CS.len(xs), esucc2, hend)
+          (hhead2,
+           CR.count_clear_shift(np, 1n+i, Nat.add(1n+i, dp), Nat.add(i, 1n+dp),
+             esucc, xs, nl,
+             CR.count_clear(np, 1n+i, dp, xs, nl, htail, hd, hend2)))
