@@ -4,6 +4,8 @@ import ../src/geo.bend as G
 import ../src/tab.bend as T
 import ../src/sec.bend as S
 import ../src/big.bend as Bg
+import ../src/kup.bend as K
+import ../src/prof.bend as P
 
 # For each of the first 24 candidates in the set, print "i g t" with t the
 # distinct-response count of its guess over the set. Compare with ref.py.
@@ -70,7 +72,9 @@ def run(+gp: String, +cp: String) -> IO(Unit):
     a1 : Array<U32> = M.build_all(c, gg, gtext, ctext, a)
     +sb : U32 = S.set_at(0, c, gg)
     a2 : Array<U32> = fill_range(32n, 0, 24, 0, sb, a1)
-    a3 : Array<U32> = Bg.kcand(a2, sb, 24, 1000, 0, c, gg)
+    a2u : Array<U32> = K.k_upper(a2, sb, 24, c, gg)
+    a2m : Array<U32> = P.mtab(a2u, c, gg)
+    a3 : Array<U32> = Bg.kcand(a2m, sb, 24, 1000, 0, c, gg)
     a4 : Array<U32> <- prn(Array.get(U32, a3, Bg.uused(c, gg)), "kcand")
     a5 : Array<U32> = Bg.kmax(a4, sb, 24, 0, 1000, 0, c, gg)
     a6 : Array<U32> <- prn(Array.get(U32, a5, Bg.uused(c, gg)), "kmax")

@@ -61,12 +61,13 @@ def kc_go(+fuel: Nat, +ph: U32, +i: U32, +o: U32, +k: U32, +mx: U32,
         case 1:
           (a2, +v) = p
           +idx = U32.add(G.off_c2g(c, gg), v)
-          kc_go(f, 2, i, o, k, mx, eff, dep, c, gg, v,
+          kc_go(f, 4, i, o, k, mx, eff, dep, c, gg, g,
                 Array.get(U32, a2, idx))
-        case 2:
-          (a2, _) = p
-          a3 = P.dcount(a2, g, o, k, c, gg)
-          kc_go(f, 3, i, o, k, mx, eff, dep, c, gg, g,
+        case 4:
+          # The guess index is the value read at phase 1, not the set element.
+          (a2, +v) = p
+          a3 = P.dcount(a2, v, o, k, c, gg)
+          kc_go(f, 3, i, o, k, mx, eff, dep, c, gg, v,
                 Array.get(U32, a3, P.dnres(c, gg)))
         case 3:
           (a2, +pk) = p
@@ -106,24 +107,30 @@ def kcand(a: Array<U32>, +o: U32, +k: U32, +eff: U32, +dep: U32, +c: U32,
 # 20..24 the five m_tab factors; 8 the factor-product filter; 5 advance
 # without counting; 1/2/3 count; 4 write.
 def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
-          +eff: U32, +dep: U32, +c: U32, +gg: U32, +act: U32, +pk: U32,
-          +pr: U32, p: Array<U32> & U32) -> Array<U32>:
+          +eff: U32, +dep: U32, +c: U32, +gg: U32, +act: U32, +cl: U32,
+          +pk: U32, +pr: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
     case 0n:
       (a2, _) = p
       a2
     case 1n+f:
       match ph:
-        case 90:
+        case 89:
           (a2, +v) = p
-          km_go(f, 0, g, o, k, mx, eff, dep, c, gg, v, pk, pr,
+          km_go(f, 90, g, o, k, mx, eff, dep, c, gg, v, 0, 0, 0,
+                Array.get(U32, a2, 0))
+        case 90:
+          # The active mask arrived at 89; the pair here is only a warm-up read
+          # of cell 0 (every phase must consume one read and issue the next).
+          (a2, _) = p
+          km_go(f, 0, g, o, k, mx, eff, dep, c, gg, act, cl, pk, pr,
                 Array.get(U32, a2, 0))
         case 0:
           (a2, _) = p
           +over = A.ge01(g, gg)
           +stop = U32.max(over, A.ge01(mx, eff))
           +idx = A.sel(stop, 0, U32.add(G.off_gmask(c, gg), g))
-          km_go(f, A.sel(stop, 4, 1), g, o, k, mx, eff, dep, c, gg, act, pk,
+          km_go(f, A.sel(stop, 4, 1), g, o, k, mx, eff, dep, c, gg, act, cl, pk,
                 pr, Array.get(U32, a2, idx))
         case 1:
           # Filter 1: too many guess letters outside the active letter mask.
@@ -131,51 +138,60 @@ def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
           +non = U32.xor(act, maxu())
           +mo = P.mnover(mx)
           +skip1 = A.ge01(P.pc32(U32.and(gm, non)), mo)
-          +idx = A.sel(skip1, 0, U32.add(G.off_gpack(c, gg), g))
-          km_go(f, A.sel(skip1, 5, 20), g, o, k, mx, eff, dep, c, gg, act, pk,
-                pr, Array.get(U32, a2, idx))
+          +idx = A.sel(skip1, 0, U32.add(G.off_gcls(c, gg), g))
+          km_go(f, A.sel(skip1, 5, 15), g, o, k, mx, eff, dep, c, gg, act, cl,
+                pk, pr, Array.get(U32, a2, idx))
+        case 15:
+          (a2, +v) = p
+          km_go(f, 20, g, o, k, mx, eff, dep, c, gg, act, v, pk, pr,
+                Array.get(U32, a2, U32.add(G.off_gpack(c, gg), g)))
         case 20:
           (a2, +v) = p
-          km_go(f, 21, g, o, k, mx, eff, dep, c, gg, act, v, v,
-                Array.get(U32, a2, P.mcell(c, gg, 0, U32.and(v, 31))))
+          +q = U32.add(U32.mul(U32.and(cl, 3), 32), U32.and(v, 31))
+          km_go(f, 21, g, o, k, mx, eff, dep, c, gg, act, cl, v, 1,
+                Array.get(U32, a2, P.mcell(c, gg, 0, q)))
         case 21:
           (a2, +v) = p
-          +l = U32.and(U32.shrn(pk, 5n), 31)
-          km_go(f, 22, g, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                Array.get(U32, a2, P.mcell(c, gg, 1, l)))
+          +q = U32.add(U32.mul(U32.and(U32.shrn(cl, 2n), 3), 32),
+                       U32.and(U32.shrn(pk, 5n), 31))
+          km_go(f, 22, g, o, k, mx, eff, dep, c, gg, act, cl, pk, U32.mul(pr, v),
+                Array.get(U32, a2, P.mcell(c, gg, 1, q)))
         case 22:
           (a2, +v) = p
-          +l = U32.and(U32.shrn(pk, 10n), 31)
-          km_go(f, 23, g, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                Array.get(U32, a2, P.mcell(c, gg, 2, l)))
+          +q = U32.add(U32.mul(U32.and(U32.shrn(cl, 4n), 3), 32),
+                       U32.and(U32.shrn(pk, 10n), 31))
+          km_go(f, 23, g, o, k, mx, eff, dep, c, gg, act, cl, pk, U32.mul(pr, v),
+                Array.get(U32, a2, P.mcell(c, gg, 2, q)))
         case 23:
           (a2, +v) = p
-          +l = U32.and(U32.shrn(pk, 15n), 31)
-          km_go(f, 24, g, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                Array.get(U32, a2, P.mcell(c, gg, 3, l)))
+          +q = U32.add(U32.mul(U32.and(U32.shrn(cl, 6n), 3), 32),
+                       U32.and(U32.shrn(pk, 15n), 31))
+          km_go(f, 24, g, o, k, mx, eff, dep, c, gg, act, cl, pk, U32.mul(pr, v),
+                Array.get(U32, a2, P.mcell(c, gg, 3, q)))
         case 24:
           (a2, +v) = p
-          +l = U32.and(U32.shrn(pk, 20n), 31)
-          km_go(f, 8, g, o, k, mx, eff, dep, c, gg, act, pk, U32.mul(pr, v),
-                Array.get(U32, a2, P.mcell(c, gg, 4, l)))
+          +q = U32.add(U32.mul(U32.and(U32.shrn(cl, 8n), 3), 32),
+                       U32.and(U32.shrn(pk, 20n), 31))
+          km_go(f, 8, g, o, k, mx, eff, dep, c, gg, act, cl, pk, U32.mul(pr, v),
+                Array.get(U32, a2, P.mcell(c, gg, 4, q)))
         case 8:
           # Filter 2: the letter-profile product is an upper bound on the
           # number of distinct responses; skip when it cannot beat `mx`.
           (a2, _) = p
           +skip2 = A.ge01(mx, pr)
-          km_go(f, A.sel(skip2, 5, 2), g, o, k, mx, eff, dep, c, gg, act, pk,
+          km_go(f, A.sel(skip2, 5, 2), g, o, k, mx, eff, dep, c, gg, act, cl, pk,
                 pr, Array.get(U32, a2, 0))
         case 5:
           # Skipped: advance the guess without counting it.
           (a2, _) = p
           +g2 = U32.inc(g)
           +idx = A.sel(A.ge01(g2, gg), 0, U32.add(G.off_gmask(c, gg), g2))
-          km_go(f, 0, g2, o, k, mx, eff, dep, c, gg, act, pk, pr,
+          km_go(f, 0, g2, o, k, mx, eff, dep, c, gg, act, cl, pk, pr,
                 Array.get(U32, a2, idx))
         case 2:
           (a2, _) = p
           a3 = P.dcount(a2, g, o, k, c, gg)
-          km_go(f, 3, g, o, k, mx, eff, dep, c, gg, act, pk, pr,
+          km_go(f, 3, g, o, k, mx, eff, dep, c, gg, act, cl, pk, pr,
                 Array.get(U32, a3, P.dnres(c, gg)))
         case 3:
           (a2, +pk2) = p
@@ -183,12 +199,12 @@ def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
           +mx2 = U32.max(mx, t)
           +g2 = U32.inc(g)
           +idx = A.sel(A.ge01(g2, gg), 0, U32.add(G.off_gmask(c, gg), g2))
-          km_go(f, 0, g2, o, k, mx2, eff, dep, c, gg, act, pk, pr,
+          km_go(f, 0, g2, o, k, mx2, eff, dep, c, gg, act, cl, pk, pr,
                 Array.get(U32, a2, idx))
         case 4:
           (a2, _) = p
           a3 = Array.set(U32, a2, uused(c, gg), mx)
-          km_go(f, 7, g, o, k, mx, eff, dep, c, gg, act, pk, pr,
+          km_go(f, 7, g, o, k, mx, eff, dep, c, gg, act, cl, pk, pr,
                 Array.get(U32, a3, 0))
         case 7:
           (a2, _) = p
@@ -206,7 +222,7 @@ def kmax(a: Array<U32>, +o: U32, +k: U32, +init: U32, +eff: U32, +dep: U32,
   # value, so k_max_seq's result was never actually used.
   +per = Nat.add(Nat.mul(U32.to_nat(k), 8n), 96n)
   +fuel = Nat.add(Nat.mul(U32.to_nat(gg), per), 1024n)
-  km_go(fuel, 90, 0, o, k, init, eff, dep, c, gg, 0, 0, 1,
+  km_go(fuel, 89, 0, o, k, init, eff, dep, c, gg, 0, 0, 0, 0,
         Array.get(U32, a, P.actcell(c, gg)))
 
 # ------------------------------------------------ orchestrator ----------------

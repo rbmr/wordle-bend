@@ -47,11 +47,16 @@ def off_gpack(+c: U32, +g: U32) -> U32:
 def off_cpack(+c: U32, +g: U32) -> U32:
   U32.add(off_gpack(c, g), g)
 
+# Per-guess letter classes (2 bits per position, 10 bits used): Rust's
+# guess_profile_chars class, which selects one of the three m_tab planes.
+def off_gcls(+c: U32, +g: U32) -> U32:
+  U32.add(off_cpack(c, g), c)
+
 def hh_size() -> U32:
   131072
 
 def off_hh(+c: U32, +g: U32) -> U32:
-  U32.add(off_cpack(c, g), c)
+  U32.add(off_gcls(c, g), g)
 
 def cap_size(+c: U32) -> U32:
   U32.mul(caprows(), U32.inc(c))
@@ -140,8 +145,16 @@ def off_prof(+c: U32, +g: U32) -> U32:
 def greedy_depth_slot(+c: U32) -> U32:
   U32.add(c, 1280)
 
-def off_greedy(+c: U32, +g: U32) -> U32:
+# Rust's m_tab is [[1u8; 96]; 8]: five positions x three class planes x 32
+# letters; the guess's profile class at position i selects the plane.
+def mtab_size() -> U32:
+  480
+
+def off_mtab(+c: U32, +g: U32) -> U32:
   U32.add(off_prof(c, g), prof_size())
+
+def off_greedy(+c: U32, +g: U32) -> U32:
+  U32.add(off_mtab(c, g), mtab_size())
 
 def greedy_size(+c: U32) -> U32:
   U32.mul(256, greedy_depth_slot(c))
