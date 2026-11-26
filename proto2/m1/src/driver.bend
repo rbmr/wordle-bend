@@ -224,25 +224,42 @@ def par(a: Array<U32>, +c: U32, +gg: U32, +ss: U32, +beta: U32,
         +pmk: U32, +gen: U32) -> Array<U32>:
   par2(Array.get(U32, a, E.pr_best(c, gg)), c, gg, ss, beta, pmk, gen)
 
+# Sequential search: one state machine over the whole candidate set.
+def seq_search(a: Array<U32>, +c: U32, +gg: U32, +beta: U32, +pmk: U32,
+               +sb: U32) -> Array<U32>:
+  E.step(fuel_for(c, gg), c, gg, 0, 0, sb, c, beta, pmk, 0, beta, 0, 0, 0, 0,
+         4294967295, 0, 0, 0, 0, 0, 0, 0, 0, beta, U32.mul(gg, 1024), 0, 0, 0,
+         0, 0, Nil{}, Array.get(U32, a, 0))
+
+# Parallel root: the probe stops the root state after the phase-2 tuple sort,
+# then four lane workers on cloned arrays walk contiguous quarters of the tuple
+# list and the merge keeps the minimum value and the summed counters.
+def par_search(a: Array<U32>, +c: U32, +gg: U32, +beta: U32, +pmk: U32,
+               +sb: U32) -> Array<U32>:
+  a0 = Array.set(U32, a, E.pr_best(c, gg), 4294967295)
+  a1 = Array.set(U32, a0, E.pr_flag(c, gg), 1)
+  a2 = E.step(fuel_for(c, gg), c, gg, 0, 180, sb, c, beta, pmk, 0, beta, 0, 0,
+              0, 0, 4294967295, 0, 0, 0, 0, 0, 0, 0, 0, beta,
+              U32.mul(gg, 1024), 0, 0, 0, 0, 0, Nil{}, Array.get(U32, a1, 0))
+  par(a2, c, gg, sb, beta, pmk, U32.mul(gg, 1024))
+
+def choose(+par: U32, a: Array<U32>, +c: U32, +gg: U32, +beta: U32,
+           +pmk: U32, +sb: U32) -> Array<U32>:
+  match par:
+    case 1:
+      par_search(a, c, gg, beta, pmk, sb)
+    case _:
+      seq_search(a, c, gg, beta, pmk, sb)
+
 def after_greedy(p: Array<U32> & U32, +c: U32, +gg: U32, +mx: U32,
-                 +beta0: U32) -> IO(Unit):
+                 +beta0: U32, +par: U32) -> IO(Unit):
   (a, +gb) = p
   +beta = A.sel(A.eq01(gb, 4294967295), beta0, U32.min(gb, beta0))
   do IO<Unit>:
     Unit <- IO.print("greedy=" ++ U32.show(gb) ++ " beta=" ++ U32.show(beta))
     +sb : U32 = S.set_at(0, c, gg)
     +pmk : U32 = U32.max(mx, 2)
-    # Probe: run the state up to the phase-2 sort. pr_flag (1) makes the
-    # depth-0 state stop at phase 178 and leave the resumable registers in
-    # cells 731..737; pr_best also starts at MAXU as the "never reached the
-    # sort" sentinel for par.
-    a0 : Array<U32> = Array.set(U32, a, E.pr_best(c, gg), 4294967295)
-    a1 : Array<U32> = Array.set(U32, a0, E.pr_flag(c, gg), 1)
-    a2 : Array<U32> = E.step(fuel_for(c, gg), c, gg, 0, 180, sb, c, beta, pmk,
-                             0, beta, 0, 0, 0, 0, 4294967295, 0, 0, 0, 0, 0,
-                             0, 0, 0, beta, U32.mul(gg, 1024), 0, 0, 0, 0, 0,
-                             Nil{}, Array.get(U32, a1, 0))
-    a3 : Array<U32> = par(a2, c, gg, sb, beta, pmk, U32.mul(gg, 1024))
+    a3 : Array<U32> = choose(par, a, c, gg, beta, pmk, sb)
     +cm : U32 = G.off_qgen(c, gg)
     a4 : Array<U32> <- prn(Array.get(U32, a3, U32.add(cm, 609)), "cost")
     a4b : Array<U32> <- prn(Array.get(U32, a4, U32.add(cm, 610)), "states")
@@ -252,7 +269,7 @@ def after_greedy(p: Array<U32> & U32, +c: U32, +gg: U32, +mx: U32,
     IO.pure(Unit, Unit{})
 
 def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32,
-              +dbg: U32) -> IO(Unit):
+              +dbg: U32, +par: U32) -> IO(Unit):
   (a, +pk) = p
   +mx = U32.and(pk, 255)
   +sq = U32.shrn(pk, 8n)
@@ -270,9 +287,10 @@ def after_max(p: Array<U32> & U32, +c: U32, +gg: U32, +beta0: U32,
                               c, gg)
     a3 : Array<U32> = R.greedy(a2h, c, gg)
     Unit <- after_greedy(Array.get(U32, a3, R.rescell(c, gg)), c, gg, mx,
-                         beta2)
+                         beta2, par)
     IO.pure(Unit, Unit{})
 
-def run(+c: U32, +gg: U32, +beta0: U32, a: Array<U32>) -> IO(Unit):
-  after_max(Array.get(U32, maxk(c, gg, a), mxcell(c, gg)), c, gg, beta0, 1)
+def run(+c: U32, +gg: U32, +beta0: U32, a: Array<U32>, +par: U32) -> IO(Unit):
+  after_max(Array.get(U32, maxk(c, gg, a), mxcell(c, gg)), c, gg, beta0, 1,
+            par)
 

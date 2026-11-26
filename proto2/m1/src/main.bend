@@ -189,13 +189,27 @@ def run(+mode: U32, +c: U32, +gg: U32, +gtext: String, +ctext: String) -> IO(Uni
     +n : U32 = mode_n(mode, c, gg, total)
     report_go(a1, mode, qk, qn, b, n, c, gg)
 
+# With no further arguments the program runs the search (this is the pc2 entry
+# point); with a mode argument it runs the table checks below.
+def go_search(+gtext: String, +ctext: String, +c: U32, +gg: U32,
+              +par: U32) -> IO(Unit):
+  do IO<Unit>:
+    total : U32 = G.total_size(c, gg)
+    a : Array<U32> = Array.new(U32, depth_for(total), 0)
+    a1 : Array<U32> = build_all(c, gg, gtext, ctext, a)
+    D.run(c, gg, U32.mul(c, U32.inc(c)), a1, par)
+
 def go5(+gtext: String, +ctext: String, +c: U32, +gg: U32,
         m: Maybe<&2, U32>) -> IO(Unit):
   match m:
     case None{}:
       run(0, c, gg, gtext, ctext)
     case Some{+m2}:
-      run(m2, c, gg, gtext, ctext)
+      match m2:
+        case 70000:
+          go_search(gtext, ctext, c, gg, 1)
+        case _:
+          run(m2, c, gg, gtext, ctext)
 
 def go4(+gtext: String, +ctext: String, +c: U32, +gg: U32,
         +mode: String) -> IO(Unit):
@@ -203,18 +217,11 @@ def go4(+gtext: String, +ctext: String, +c: U32, +gg: U32,
 
 # With no further arguments the program runs the search (this is the pc2 entry
 # point); with a mode argument it runs the table checks below.
-def go_search(+gtext: String, +ctext: String, +c: U32, +gg: U32) -> IO(Unit):
-  do IO<Unit>:
-    total : U32 = G.total_size(c, gg)
-    a : Array<U32> = Array.new(U32, depth_for(total), 0)
-    a1 : Array<U32> = build_all(c, gg, gtext, ctext, a)
-    D.run(c, gg, U32.mul(c, U32.inc(c)), a1)
-
 def go3b(+gtext: String, +ctext: String, +c: U32, +gg: U32,
          rest: List<&1, String>) -> IO(Unit):
   match rest:
     case Nil{}:
-      go_search(gtext, ctext, c, gg)
+      go_search(gtext, ctext, c, gg, 0)
     case Con{m, _}:
       go4(gtext, ctext, c, gg, m)
 
