@@ -87,6 +87,49 @@ def rn(+c: U32, +gg: U32) -> U32:
 def rg(+c: U32, +gg: U32) -> U32:
   qcell(c, gg, 707)
 
+# Root-parallel scratch. The probe run stops after the phase-2 tuple sort
+# (phase 178) and writes the state it would have resumed with; four lane
+# workers load it again at phase 190 and walk one quarter of the tuples each.
+def pr_best(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 731)
+
+def pr_lb(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 732)
+
+def pr_lmk(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 733)
+
+def pr_v1k(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 734)
+
+def pr_v2k(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 735)
+
+def pr_mv(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 736)
+
+def pr_nt(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 737)
+
+# The probe's counters, kept where the workers do not write: the merge adds
+# them to the sum of the four lanes (each lane starts its counters at zero).
+def pr_nst(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 738)
+
+def pr_ngs(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 739)
+
+def pr_nht(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 740)
+
+def pr_npr(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 741)
+
+# 1 in the array the driver passes to the probe; read only by a depth-0 state
+# after the phase-2 sort, so a nested node can never stop there.
+def pr_flag(+c: U32, +gg: U32) -> U32:
+  qcell(c, gg, 742)
+
 # p1/p2 tuple buffer bases for this depth.
 def p1base(+dep: U32, +c: U32, +gg: U32) -> U32:
   U32.add(G.off_p1t(c, gg), U32.mul(dep, U32.mul(c, 3)))
@@ -389,48 +432,142 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                Array.get(U32, a2, S.cap_at(lmk, n, c, gg)))
         case 63:
           (a2, _) = p
+          step(f, c, gg, 0, 183, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk, Array.get(U32, a2, pr_flag(c, gg)))
+        case 183:
+          (a2, +v) = p
           +b0 = p2base(dep, c, gg)
           a3 = P.sort3(a2, b0, nt)
-          step(f, c, gg, 0, 170, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+          # A depth-0 state of the probe stops here and lets the driver resume
+          # four lane workers at phase 190 (see 178).
+          +probe = U32.mul(A.eq01(dep, 0), A.eq01(v, 1))
+          step(f, c, gg, 0, A.sel(probe, 178, 170), ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, 0, 2, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs, nht,
                npr, stk, Array.get(U32, a3, b0))
+        # -------------------------------------------------- probe stop ---
+        case 178:
+          # Save everything the tuple walk would resume with, so four lane
+          # workers can start at 170 without redoing the scans.
+          (a2, _) = p
+          a3 = Array.set(U32, a2, pr_best(c, gg), best)
+          a4 = Array.set(U32, a3, pr_lb(c, gg), lb)
+          a5 = Array.set(U32, a4, pr_lmk(c, gg), lmk)
+          a6 = Array.set(U32, a5, pr_v1k(c, gg), v1k)
+          a7 = Array.set(U32, a6, pr_v2k(c, gg), v2k)
+          a8 = Array.set(U32, a7, pr_mv(c, gg), mv)
+          a9 = Array.set(U32, a8, pr_nt(c, gg), nt)
+          a10 = Array.set(U32, a9, pr_nst(c, gg), nst)
+          a11 = Array.set(U32, a10, pr_ngs(c, gg), ngs)
+          a12 = Array.set(U32, a11, pr_nht(c, gg), nht)
+          a13 = Array.set(U32, a12, pr_npr(c, gg), npr)
+          step(f, c, gg, 0, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, best, nst, ngs,
+               nht, npr, stk, Array.get(U32, a13, 0))
+        case 180:
+          # Probe entry: the driver has set the depth-0 stop flag (pr_flag).
+          (a2, _) = p
+          step(f, c, gg, 0, 0, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
+               ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        # -------------------------------------- lane worker entry (190..197) ---
+        # Load the probe cells one per phase, then enter the tuple walk with
+        # ti = 0, counters 0, and the lane mode the driver passed.
+        case 190:
+          (a2, _) = p
+          step(f, c, gg, 0, 191, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_best(c, gg)))
+        case 191:
+          (a2, +v) = p
+          step(f, c, gg, 0, 192, ss, n, beta, pmk, dep, v, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_lb(c, gg)))
+        case 192:
+          (a2, +v) = p
+          step(f, c, gg, 0, 193, ss, n, beta, pmk, dep, best, lb, v, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_lmk(c, gg)))
+        case 193:
+          (a2, +v) = p
+          step(f, c, gg, 0, 194, ss, n, beta, pmk, dep, best, lb, lmk, v, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_v1k(c, gg)))
+        case 194:
+          (a2, +v) = p
+          step(f, c, gg, 0, 195, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_v2k(c, gg)))
+        case 195:
+          (a2, +v) = p
+          step(f, c, gg, 0, 196, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               v, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_mv(c, gg)))
+        case 196:
+          (a2, +v) = p
+          step(f, c, gg, 0, 197, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, v, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, 0, 0, 0,
+               0, stk, Array.get(U32, a2, pr_nt(c, gg)))
+        case 197:
+          (a2, +v) = p
+          step(f, c, gg, 0, 170, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, v, 0, mode, g, cost, bcur, t, lbk, cut, gen, 0, 0, 0, 0, 0,
+               stk, Array.get(U32, a2, 0))
         # -------------------------------------------------- tuple walk ---
         case 170:
           (a2, _) = p
           +done = A.ge01(ti, nt)
-          +base = A.sel(A.eq01(mode, 1), p1base(dep, c, gg),
+          +base = A.sel(A.eq01(U32.and(mode, 3), 1), p1base(dep, c, gg),
                         p2base(dep, c, gg))
           +idx = A.sel(done, 0, U32.add(base, U32.mul(ti, 3)))
-          +next = A.sel(done, A.sel(A.eq01(mode, 1), 50, 70), 171)
+          +next = A.sel(done, A.sel(A.eq01(U32.and(mode, 3), 1), 50, 70), 171)
           step(f, c, gg, 0, next, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
                nht, npr, stk, Array.get(U32, a2, idx))
         case 171:
           (a2, +v) = p
           +prune = A.ge01(v, best)
-          +base = A.sel(A.eq01(mode, 1), p1base(dep, c, gg),
+          +base = A.sel(A.eq01(U32.and(mode, 3), 1), p1base(dep, c, gg),
                         p2base(dep, c, gg))
           +idx = A.sel(prune, 0, U32.add(U32.add(base, U32.mul(ti, 3)), 2))
-          +next = A.sel(prune, A.sel(A.eq01(mode, 1), 50, 70), 172)
+          +next = A.sel(prune, A.sel(A.eq01(U32.and(mode, 3), 1), 50, 70), 172)
           step(f, c, gg, 0, next, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
                U32.min(mv, v), nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
                ret, nst, ngs, nht, U32.add(npr, U32.mul(prune, U32.sub(nt, ti))),
                stk, Array.get(U32, a2, idx))
         case 172:
+          # Lane filter: mode's bit 2 marks a parallel root worker (the driver
+          # passes 6 + 8*lane), and then only tuples whose guess index is
+          # congruent to the lane are evaluated. A sequential state keeps
+          # mode = 1/2, so every tuple is evaluated.
           (a2, +v) = p
+          +lane = U32.shrn(mode, 3n)
+          +par = U32.and(U32.shrn(mode, 2n), 1)
+          +hit = U32.max(U32.sub(1, par), A.eq01(U32.and(ti, 3), lane))
+          step(f, c, gg, 0, A.sel(hit, 177, 176), ss, n, beta, pmk, dep, best, lb, lmk,
+               v1k, v2k, mv, nt, ti, mode, A.sel(hit, v, g), cost, bcur, t,
+               lbk, cut, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a2, 0))
+        case 176:
+          (a2, _) = p
+          step(f, c, gg, 0, 170, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, U32.inc(ti), mode, g, cost, bcur, t, lbk, cut, gen, ret,
+               nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 177:
+          (a2, _) = p
           stk2 : List<Fr> = Con{Sf{ss, n, beta, pmk, dep, best, lb, lmk, v1k,
                                    v2k, mv, nt, ti, mode, 173}, stk}
           # Rust passes the state's local_max_k (the largest bucket seen in
           # phase 1/2) to min_guess, which uses that row of the capacity table.
           step(f, c, gg, 1, 300, ss, n, beta, lmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, v, 0, 0, 0, 0, best, gen, ret, nst, ngs, nht, npr,
+               nt, ti, mode, g, 0, 0, 0, 0, best, gen, ret, nst, ngs, nht, npr,
                stk2, Array.get(U32, a2, 0))
         case 173:
           (a2, _) = p
           +btr = A.lt01(ret, best)
           +best2 = A.sel(btr, ret, best)
           +stop = U32.and(btr, A.ge01(lb, ret))
-          +next = A.sel(stop, A.sel(A.eq01(mode, 1), 50, 70), 170)
+          +next = A.sel(stop, A.sel(A.eq01(U32.and(mode, 3), 1), 50, 70), 170)
           step(f, c, gg, 0, next, ss, n, beta, pmk, dep, best2, lb, lmk, v1k, v2k,
                U32.min(mv, ret), nt, U32.add(ti, U32.sub(1, stop)), mode, g,
                cost, bcur, t, lbk, cut, gen, ret, nst, ngs, nht, npr, stk,
