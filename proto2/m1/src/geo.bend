@@ -67,8 +67,10 @@ def off_cap(+c: U32, +g: U32) -> U32:
 def off_tt(+c: U32, +g: U32) -> U32:
   U32.add(off_cap(c, g), cap_size(c))
 
+# Each slot is four cells: key word 1, key word 2, the packed value (value,
+# exact bit, set size) and the witness offset of the set it was computed from.
 def tt_size() -> U32:
-  U32.mul(6, ttb())
+  U32.mul(8, ttb())
 
 def off_sets(+c: U32, +g: U32) -> U32:
   U32.add(off_tt(c, g), tt_size())
@@ -157,8 +159,16 @@ def off_greedy(+c: U32, +g: U32) -> U32:
 def greedy_size(+c: U32) -> U32:
   U32.mul(256, greedy_depth_slot(c))
 
-def total_size(+c: U32, +g: U32) -> U32:
+# Append-only witness arena for the transposition table (see ttw.bend): every
+# cached entry names a copy of its set, and a hit must compare against it.
+def wit_size() -> U32:
+  8388608
+
+def off_wit(+c: U32, +g: U32) -> U32:
   U32.add(off_greedy(c, g), greedy_size(c))
+
+def total_size(+c: U32, +g: U32) -> U32:
+  U32.add(off_wit(c, g), wit_size())
 
 # ------------------------------------------------------------- small ops ----
 

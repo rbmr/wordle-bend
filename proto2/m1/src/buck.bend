@@ -18,6 +18,7 @@ import ./geo.bend as G
 import ./arith.bend as A
 import ./heur.bend as H
 import ./big.bend as Bg
+import ./ttw.bend as W
 
 def res_used(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 717)
@@ -28,9 +29,10 @@ def res_ex(+c: U32, +gg: U32) -> U32:
 def res_out(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 719)
 
-# Scratch cells a skipped write is redirected to (never read).
+# Scratch cells a skipped write is redirected to (never read). Four of them:
+# key word 1, key word 2, the packed value and the witness word.
 def res_sc(+c: U32, +gg: U32) -> U32:
-  U32.add(G.off_qgen(c, gg), 724)
+  U32.add(G.off_qgen(c, gg), 621)
 
 def res_ck(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 729)
@@ -38,8 +40,8 @@ def res_ck(+c: U32, +gg: U32) -> U32:
 def cmk1(+dep: U32, +c: U32, +gg: U32) -> U32:
   U32.add(G.off_cmk(c, gg), U32.mul(dep, 1024))
 
-def pack_ex(+v: U32, +ex: U32) -> U32:
-  U32.add(U32.and(v, 262143), U32.mul(ex, 262144))
+def pack_ex(+v: U32, +ex: U32, +n: U32) -> U32:
+  U32.add(U32.add(U32.and(v, 262143), U32.mul(ex, 262144)), U32.shln(n, 19n))
 
 # 1 when the entry may be replaced by (v, nex), matching Rust's same-state
 # rules: an old exact entry is never replaced by a bound, and a tighter old
@@ -86,28 +88,50 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           (a2, _) = p
           +k1b = U32.or(h1, 1)
           +base0 = U32.add(G.off_tt(c, gg),
-                           U32.mul(U32.and(k1b, ttmaskb()), 6))
+                           U32.mul(U32.and(k1b, ttmaskb()), 8))
           +cm1 = cmk1(dep, c, gg)
           a3 = Array.set(U32, a2, cm1, h1)
           a4 = Array.set(U32, a3, U32.inc(cm1), h2)
           ev(f, 4, j, o, k, cv, pmk, pn, h1, h2, k1b, h2, base0, used, ex, dep, c,
-             gg, cand, val, Array.get(U32, a4, U32.add(base0, 3)))
+             gg, cand, val, Array.get(U32, a4, U32.add(base0, 4)))
         case 4:
           (a2, +v) = p
           +hit = A.eq01(v, k1)
           ev(f, A.sel(hit, 5, 7), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
-             Array.get(U32, a2, A.sel(hit, U32.add(base, 4), base)))
+             Array.get(U32, a2, A.sel(hit, U32.add(base, 5), base)))
         case 5:
           (a2, +v) = p
           +hit = A.eq01(v, k2h)
-          ev(f, A.sel(hit, 6, 7), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
+          ev(f, A.sel(hit, 34, 7), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
-             Array.get(U32, a2, A.sel(hit, U32.add(base, 5), base)))
+             Array.get(U32, a2, A.sel(hit, U32.add(base, 6), base)))
         case 6:
+          # Key matched: the value counts only if the stored set is this set.
           (a2, +v) = p
-          +val0 = U32.and(v, 262143)
-          +ex0 = U32.and(U32.shrn(v, 18n), 1)
+          ev(f, 34, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, U32.and(U32.shrn(v, 18n), 1), dep, c,
+             gg, cand, v, Array.get(U32, a2, U32.add(base, 7)))
+        case 34:
+          # The stored set size must match and there must be a witness copy;
+          # `h1` is free here, so it carries the witness word into 38.
+          (a2, +w) = p
+          +okw = U32.mul(A.eq01(U32.shrn(val, 19n), k), A.nz(w))
+          ev(f, A.sel(okw, 38, 12), j, o, k, cv, pmk, pn, w, h2, k1, k2h, base,
+             used, ex, dep, c, gg, cand, val, Array.get(U32, a2, 0))
+        case 38:
+          (a2, _) = p
+          a3 = W.wcmp(a2, o, U32.sub(U32.add(G.off_wit(c, gg), h1), 1), k, c, gg)
+          ev(f, 35, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c,
+             gg, cand, val, Array.get(U32, a3, W.wflagcell(c, gg)))
+        case 35:
+          # wflagcell is 1 only when every candidate of the set matches.
+          (a2, +f2) = p
+          ev(f, A.sel(f2, 37, 12), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
+             ex, dep, c, gg, cand, val, Array.get(U32, a2, 0))
+        case 37:
+          (a2, _) = p
+          +val0 = U32.and(val, 262143)
+          +ex0 = U32.and(U32.shrn(val, 18n), 1)
           +used0 = U32.max(val0, cv)
           +ck = U32.max(U32.min(k, pmk), 2)
           a3 = Array.set(U32, a2, res_used(c, gg), used0)
@@ -129,15 +153,8 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
              Array.get(U32, a2, A.sel(hit, U32.add(base, 2), base)))
         case 9:
           (a2, +v) = p
-          +val0 = U32.and(v, 262143)
-          +ex0 = U32.and(U32.shrn(v, 18n), 1)
-          +used0 = U32.max(val0, cv)
-          +ck = U32.max(U32.min(k, pmk), 2)
-          a3 = Array.set(U32, a2, res_used(c, gg), used0)
-          a4 = Array.set(U32, a3, res_ck(c, gg), ck)
-          a5 = Array.set(U32, a4, res_ex(c, gg), U32.add(ex0, U32.mul(ck, 2)))
-          ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used0, ex0, dep, c,
-             gg, cand, val, Array.get(U32, a5, 0))
+          ev(f, 34, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, U32.and(U32.shrn(v, 18n), 1), dep, c,
+             gg, cand, v, Array.get(U32, a2, U32.add(base, 3)))
         case 12:
           (a2, _) = p
           ev(f, A.sel(A.ge01(15, k), 16, 15), j, o, k, cv, pmk, pn, h1, h2, k1, k2h,
@@ -176,41 +193,48 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
         case 20:
           (a2, _) = p
           ev(f, 21, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
-             cand, val, Array.get(U32, a2, U32.add(base, 3)))
+             cand, val, Array.get(U32, a2, U32.add(base, 4)))
         case 21:
           (a2, +v) = p
           +same = A.eq01(v, k1)
           ev(f, A.sel(same, 22, 24), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, cand, val,
-             Array.get(U32, a2, U32.add(base, A.sel(same, 4, 5))))
+             Array.get(U32, a2, U32.add(base, A.sel(same, 5, 6))))
         case 22:
           (a2, +v) = p
           +same = A.eq01(v, k2h)
           ev(f, A.sel(same, 23, 24), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base,
              used, ex, dep, c, gg, cand, val,
-             Array.get(U32, a2, U32.add(base, 5)))
+             Array.get(U32, a2, U32.add(base, 6)))
         case 23:
           (a2, +v) = p
           +old = U32.and(v, 262143)
           +oex = U32.and(U32.shrn(v, 18n), 1)
           +upd = upd2(oex, old, used, ex)
+          ev(f, A.sel(upd, 39, 14), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base,
+             used, ex, dep, c, gg, cand, val, Array.get(U32, a2, 0))
+        case 39:
+          (a2, _) = p
+          a3 = W.wcopy(a2, o, k, c, gg)
+          ev(f, 42, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c,
+             gg, cand, val, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 42:
+          (a2, +wo) = p
           +sc = res_sc(c, gg)
-          +i1 = A.sel(upd, U32.add(base, 3), sc)
-          +i2 = A.sel(upd, U32.add(base, 4), U32.add(sc, 1))
-          +i3 = A.sel(upd, U32.add(base, 5), U32.add(sc, 2))
-          a3 = Array.set(U32, a2, i1, k1)
-          a4 = Array.set(U32, a3, i2, k2h)
-          a5 = Array.set(U32, a4, i3, pack_ex(used, ex))
+          a3 = Array.set(U32, a2, U32.add(base, 4), k1)
+          a4 = Array.set(U32, a3, U32.add(base, 5), k2h)
+          a5 = Array.set(U32, a4, U32.add(base, 6), pack_ex(used, ex, k))
+          a6 = Array.set(U32, a5, U32.add(base, 7), wo)
           ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
-             cand, val, Array.get(U32, a5, 0))
+             cand, val, Array.get(U32, a6, 0))
         case 24:
           (a2, +v) = p
           +old = U32.and(v, 262143)
           +rep = A.ge01(used, old)
-          +nb = A.sel(rep, 3, 0)
+          +nb = A.sel(rep, 4, 0)
           ev(f, A.sel(rep, 30, 25), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used,
              ex, dep, c, gg, nb, val,
-             Array.get(U32, a2, U32.add(base, A.sel(rep, 3, 0))))
+             Array.get(U32, a2, U32.add(base, A.sel(rep, 4, 0))))
         case 25:
           (a2, +v) = p
           +same = A.eq01(v, k1)
@@ -228,23 +252,39 @@ def ev(+fuel: Nat, +ph: U32, +j: U32, +o: U32, +k: U32, +cv: U32,
           +old = U32.and(v, 262143)
           +oex = U32.and(U32.shrn(v, 18n), 1)
           +upd = upd2(oex, old, used, ex)
-          +sc = res_sc(c, gg)
-          +i1 = A.sel(upd, base, sc)
-          +i2 = A.sel(upd, U32.add(base, 1), U32.add(sc, 1))
-          +i3 = A.sel(upd, U32.add(base, 2), U32.add(sc, 2))
-          a3 = Array.set(U32, a2, i1, k1)
-          a4 = Array.set(U32, a3, i2, k2h)
-          a5 = Array.set(U32, a4, i3, pack_ex(used, ex))
+          ev(f, A.sel(upd, 40, 14), j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base,
+             used, ex, dep, c, gg, cand, val, Array.get(U32, a2, 0))
+        case 40:
+          (a2, _) = p
+          a3 = W.wcopy(a2, o, k, c, gg)
+          ev(f, 43, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c,
+             gg, cand, val, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 43:
+          (a2, +wo) = p
+          a3 = Array.set(U32, a2, base, k1)
+          a4 = Array.set(U32, a3, U32.add(base, 1), k2h)
+          a5 = Array.set(U32, a4, U32.add(base, 2), pack_ex(used, ex, k))
+          a6 = Array.set(U32, a5, U32.add(base, 3), wo)
           ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
-             cand, val, Array.get(U32, a5, 0))
+             cand, val, Array.get(U32, a6, 0))
         case 30:
           (a2, _) = p
+          ev(f, 41, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
+             cand, val, Array.get(U32, a2, 0))
+        case 41:
+          (a2, _) = p
+          a3 = W.wcopy(a2, o, k, c, gg)
+          ev(f, 44, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c,
+             gg, cand, val, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 44:
+          (a2, +wo) = p
           a3 = Array.set(U32, a2, U32.add(base, cand), k1)
           a4 = Array.set(U32, a3, U32.add(U32.add(base, cand), 1), k2h)
           a5 = Array.set(U32, a4, U32.add(U32.add(base, cand), 2),
-                         pack_ex(used, ex))
+                         pack_ex(used, ex, k))
+          a6 = Array.set(U32, a5, U32.add(U32.add(base, cand), 3), wo)
           ev(f, 14, j, o, k, cv, pmk, pn, h1, h2, k1, k2h, base, used, ex, dep, c, gg,
-             cand, val, Array.get(U32, a5, 0))
+             cand, val, Array.get(U32, a6, 0))
         case 14:
           (a2, _) = p
           a2

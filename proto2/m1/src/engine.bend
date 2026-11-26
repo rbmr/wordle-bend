@@ -30,6 +30,7 @@ import ./bounds.bend as B
 import ./kup.bend as K
 import ./p12.bend as P
 import ./buck.bend as Be
+import ./ttw.bend as W
 
 def noskip() -> U32:
   4294967295
@@ -61,8 +62,9 @@ def cell_nht(+c: U32, +gg: U32) -> U32:
 def cell_npr(+c: U32, +gg: U32) -> U32:
   U32.add(G.off_qgen(c, gg), 613)
 
-def pack_val(+v: U32, +beta: U32) -> U32:
-  U32.add(U32.and(v, 262143), U32.mul(A.lt01(v, beta), 262144))
+def pack_val(+v: U32, +beta: U32, +n: U32) -> U32:
+  U32.add(U32.add(U32.and(v, 262143), U32.mul(A.lt01(v, beta), 262144)),
+          U32.shln(n, 19n))
 
 def upd_ok(+oex: U32, +old: U32, +v: U32, +beta: U32) -> U32:
   +nex = A.lt01(v, beta)
@@ -204,24 +206,24 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 92:
           (a2, +h2) = p
           +base = U32.add(G.off_tt(c, gg),
-                          U32.mul(U32.and(bcur, ttmask()), 6))
+                          U32.mul(U32.and(bcur, ttmask()), 8))
           step(f, c, gg, 0, 93, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, base, bcur, h2, lbk, cut, gen, ret, nst, ngs,
-               nht, npr, stk, Array.get(U32, a2, U32.add(base, 3)))
+               nht, npr, stk, Array.get(U32, a2, U32.add(base, 4)))
         case 93:
           (a2, +k1) = p
           +hit1 = A.eq01(k1, bcur)
           step(f, c, gg, 0, A.sel(hit1, 94, 95), ss, n, beta, pmk, dep, best, lb, lmk,
                v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
                ret, nst, ngs, nht, npr, stk,
-               Array.get(U32, a2, A.sel(hit1, U32.add(cost, 4), cost)))
+               Array.get(U32, a2, A.sel(hit1, U32.add(cost, 5), cost)))
         case 94:
           (a2, +k2) = p
           +hit2 = A.eq01(k2, t)
           step(f, c, gg, 0, A.sel(hit2, 96, 95), ss, n, beta, pmk, dep, best, lb, lmk,
                v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
                ret, nst, ngs, nht, npr, stk,
-               Array.get(U32, a2, A.sel(hit2, U32.add(cost, 5), cost)))
+               Array.get(U32, a2, A.sel(hit2, U32.add(cost, 6), cost)))
         case 95:
           (a2, +k1) = p
           +hit1 = A.eq01(k1, bcur)
@@ -237,22 +239,43 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                ret, nst, ngs, nht, npr, stk,
                Array.get(U32, a2, A.sel(hit2, U32.add(cost, 2), 0)))
         case 96:
+          # A key match is only a candidate hit: the stored set must be this
+          # set. `lbk` and `ti` are free before the guess scan, so they carry
+          # the packed value and the witness word.
           (a2, +v) = p
-          +val = U32.and(v, 262143)
-          +ex = U32.and(U32.shrn(v, 18n), 1)
-          +take = U32.max(ex, A.ge01(val, beta))
-          step(f, c, gg, 0, A.sel(take, 120, 89), ss, n, beta, pmk, dep, best,
-               U32.max(lb, val), lmk, v1k, v2k, mv, nt, ti, mode, g, cost,
-               bcur, t, lbk, cut, gen, A.sel(take, val, ret), nst, ngs,
-               U32.add(nht, 1), npr, stk, Array.get(U32, a2, 0))
+          step(f, c, gg, 0, 124, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, 0, mode, g, cost, bcur, t, v, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a2, U32.add(cost, 7)))
         case 99:
           (a2, +v) = p
-          +val = U32.and(v, 262143)
-          +ex = U32.and(U32.shrn(v, 18n), 1)
+          step(f, c, gg, 0, 124, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, 0, mode, g, cost, bcur, t, v, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a2, U32.add(cost, 3)))
+        case 124:
+          (a2, +w) = p
+          +okw = U32.mul(A.eq01(U32.shrn(lbk, 19n), n), A.nz(w))
+          step(f, c, gg, 0, A.sel(okw, 125, 98), ss, n, beta, pmk, dep, best, lb, lmk,
+               v1k, v2k, mv, nt, w, mode, g, cost, bcur, t, lbk, cut, gen, ret,
+               nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 125:
+          (a2, _) = p
+          a3 = W.wcmp(a2, ss, U32.sub(U32.add(G.off_wit(c, gg), ti), 1), n, c, gg)
+          step(f, c, gg, 0, 126, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, W.wflagcell(c, gg)))
+        case 126:
+          (a2, +f2) = p
+          step(f, c, gg, 0, A.sel(f2, 127, 98), ss, n, beta, pmk, dep, best, lb, lmk,
+               v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
+               ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 127:
+          (a2, _) = p
+          +val = U32.and(lbk, 262143)
+          +ex = U32.and(U32.shrn(lbk, 18n), 1)
           +take = U32.max(ex, A.ge01(val, beta))
           step(f, c, gg, 0, A.sel(take, 120, 89), ss, n, beta, pmk, dep, best,
                U32.max(lb, val), lmk, v1k, v2k, mv, nt, ti, mode, g, cost,
-               bcur, t, lbk, cut, gen, A.sel(take, val, ret), nst, ngs,
+               bcur, t, 0, cut, gen, A.sel(take, val, ret), nst, ngs,
                U32.add(nht, 1), npr, stk, Array.get(U32, a2, 0))
         case 98:
           (a2, _) = p
@@ -613,55 +636,72 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 102:
           (a2, +h2) = p
           +base = U32.add(G.off_tt(c, gg),
-                          U32.mul(U32.and(bcur, ttmask()), 6))
+                          U32.mul(U32.and(bcur, ttmask()), 8))
           step(f, c, gg, 0, 103, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, base, bcur, h2, lbk, cut, gen, ret, nst,
-               ngs, nht, npr, stk, Array.get(U32, a2, U32.add(base, 3)))
+               ngs, nht, npr, stk, Array.get(U32, a2, U32.add(base, 4)))
         case 103:
           (a2, +k1) = p
           +same = A.eq01(k1, bcur)
           step(f, c, gg, 0, A.sel(same, 104, 105), ss, n, beta, pmk, dep, best, lb,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
                gen, ret, nst, ngs, nht, npr, stk,
-               Array.get(U32, a2, A.sel(same, U32.add(cost, 4), U32.add(cost, 5))))
+               Array.get(U32, a2, A.sel(same, U32.add(cost, 5), U32.add(cost, 6))))
         case 104:
           (a2, +k2) = p
           +same = A.eq01(k2, t)
           step(f, c, gg, 0, A.sel(same, 106, 105), ss, n, beta, pmk, dep, best, lb,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
                gen, ret, nst, ngs, nht, npr, stk,
-               Array.get(U32, a2, U32.add(cost, 5)))
+               Array.get(U32, a2, U32.add(cost, 6)))
         case 105:
           (a2, +v1) = p
           +old = U32.and(v1, 262143)
           +go1 = A.ge01(ret, old)
           +empty = A.eq01(bcur, 0)
           +put = U32.max(go1, empty)
-          +sc = U32.add(G.off_qgen(c, gg), 640)
-          +i1 = A.sel(put, U32.add(cost, 3), sc)
-          +i2 = A.sel(put, U32.add(cost, 4), U32.add(sc, 1))
-          +i3 = A.sel(put, U32.add(cost, 5), U32.add(sc, 2))
-          a3 = Array.set(U32, a2, i1, bcur)
-          a4 = Array.set(U32, a3, i2, t)
-          a5 = Array.set(U32, a4, i3, pack_val(ret, beta))
-          step(f, c, gg, 0, A.sel(put, 120, 109), ss, n, beta, pmk, dep, best, lb,
+          step(f, c, gg, 0, A.sel(put, 134, 109), ss, n, beta, pmk, dep, best, lb,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
-               gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a5, 0))
+               gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 134:
+          (a2, _) = p
+          a3 = W.wcopy(a2, ss, n, c, gg)
+          step(f, c, gg, 0, 135, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 135:
+          # Slot 1 (depth preferred): key pair, packed value, witness word.
+          (a2, +wo) = p
+          a3 = Array.set(U32, a2, U32.add(cost, 4), bcur)
+          a4 = Array.set(U32, a3, U32.add(cost, 5), t)
+          a5 = Array.set(U32, a4, U32.add(cost, 6), pack_val(ret, beta, n))
+          a6 = Array.set(U32, a5, U32.add(cost, 7), wo)
+          step(f, c, gg, 0, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a6, 0))
         case 106:
           (a2, +v1) = p
           +old = U32.and(v1, 262143)
           +oex = U32.and(U32.shrn(v1, 18n), 1)
           +upd = upd_ok(oex, old, ret, beta)
-          +sc = U32.add(G.off_qgen(c, gg), 640)
-          +i1 = A.sel(upd, U32.add(cost, 3), sc)
-          +i2 = A.sel(upd, U32.add(cost, 4), U32.add(sc, 1))
-          +i3 = A.sel(upd, U32.add(cost, 5), U32.add(sc, 2))
-          a3 = Array.set(U32, a2, i1, bcur)
-          a4 = Array.set(U32, a3, i2, t)
-          a5 = Array.set(U32, a4, i3, pack_val(ret, beta))
+          step(f, c, gg, 0, A.sel(upd, 136, 120), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
+               gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 136:
+          (a2, _) = p
+          a3 = W.wcopy(a2, ss, n, c, gg)
+          step(f, c, gg, 0, 137, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 137:
+          (a2, +wo) = p
+          a3 = Array.set(U32, a2, U32.add(cost, 4), bcur)
+          a4 = Array.set(U32, a3, U32.add(cost, 5), t)
+          a5 = Array.set(U32, a4, U32.add(cost, 6), pack_val(ret, beta, n))
+          a6 = Array.set(U32, a5, U32.add(cost, 7), wo)
           step(f, c, gg, 0, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
-               nht, npr, stk, Array.get(U32, a5, 0))
+               nht, npr, stk, Array.get(U32, a6, 0))
         case 109:
           (a2, _) = p
           step(f, c, gg, 0, 110, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
@@ -673,7 +713,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           step(f, c, gg, 0, A.sel(same, 111, 112), ss, n, beta, pmk, dep, best, lb,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
                gen, ret, nst, ngs, nht, npr, stk,
-               Array.get(U32, a2, A.sel(same, U32.add(cost, 1), U32.add(cost, 0))))
+               Array.get(U32, a2, A.sel(same, U32.add(cost, 1), U32.add(cost, 2))))
         case 111:
           (a2, +k2) = p
           +same = A.eq01(k2, t)
@@ -686,24 +726,44 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           +old = U32.and(v1, 262143)
           +oex = U32.and(U32.shrn(v1, 18n), 1)
           +upd = upd_ok(oex, old, ret, beta)
-          +sc = U32.add(G.off_qgen(c, gg), 640)
-          +i1 = A.sel(upd, cost, sc)
-          +i2 = A.sel(upd, U32.add(cost, 1), U32.add(sc, 1))
-          +i3 = A.sel(upd, U32.add(cost, 2), U32.add(sc, 2))
-          a3 = Array.set(U32, a2, i1, bcur)
-          a4 = Array.set(U32, a3, i2, t)
-          a5 = Array.set(U32, a4, i3, pack_val(ret, beta))
-          step(f, c, gg, 0, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
-               nht, npr, stk, Array.get(U32, a5, 0))
-        case 112:
+          step(f, c, gg, 0, A.sel(upd, 138, 120), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
+               gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 138:
           (a2, _) = p
+          a3 = W.wcopy(a2, ss, n, c, gg)
+          step(f, c, gg, 0, 139, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 139:
+          (a2, +wo) = p
           a3 = Array.set(U32, a2, cost, bcur)
           a4 = Array.set(U32, a3, U32.add(cost, 1), t)
-          a5 = Array.set(U32, a4, U32.add(cost, 2), pack_val(ret, beta))
+          a5 = Array.set(U32, a4, U32.add(cost, 2), pack_val(ret, beta, n))
+          a6 = Array.set(U32, a5, U32.add(cost, 3), wo)
           step(f, c, gg, 0, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
                nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
-               nht, npr, stk, Array.get(U32, a5, 0))
+               nht, npr, stk, Array.get(U32, a6, 0))
+        case 112:
+          (a2, _) = p
+          step(f, c, gg, 0, 140, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a2, 0))
+        case 140:
+          (a2, _) = p
+          a3 = W.wcopy(a2, ss, n, c, gg)
+          step(f, c, gg, 0, 141, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, W.wrescell(c, gg)))
+        case 141:
+          (a2, +wo) = p
+          a3 = Array.set(U32, a2, cost, bcur)
+          a4 = Array.set(U32, a3, U32.add(cost, 1), t)
+          a5 = Array.set(U32, a4, U32.add(cost, 2), pack_val(ret, beta, n))
+          a6 = Array.set(U32, a5, U32.add(cost, 3), wo)
+          step(f, c, gg, 0, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a6, 0))
         # ------------------------------------------------------ guess ----
         case 300:
           (a2, _) = p
