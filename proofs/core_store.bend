@@ -20,6 +20,7 @@ import ./nat.bend as NatProof
 import ./fast_tbl.bend as FT
 import ./core_list.bend as CS
 import ./core_nat.bend as CN
+import ./core_cells.bend as OldCells
 
 def CM.Store(+d: Nat, +base: Nat, a: Array<U32>, +xs: +List<U32>) -> Data:
   match d:
@@ -597,3 +598,165 @@ def CM.store_read_go(+d: Nat, +base: Nat, a: Array<U32>, +xs: +List<U32>,
                       U32.shr(U32.shr(Arr.Arr.pow2_u32(1n+p))))),
                   (y, CS.CS.nth(xs, Nat.add(base, U32.to_nat(i)))), hpg),
                 {==})
+
+# The machine's read: `Array.get(a, U32.from_nat(k))` returns the whole pair
+# `(a, nth(xs, k))`, so one read gives the value and leaves the array modelled.
+# The duplication is a parameter and is destructured in a def of its own,
+# because a destructuring cannot scrutinise a call result.
+def CM.store_read_body(+d: Nat, -a: Array<U32>, +xs: +List<U32>, +k: Nat,
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk: {Nat.is_lt(k, FT.FT.pow2(d)) == True{} : Bool},
+    +hs: CM.Store(d, 0n, a, xs),
+    a1: Array<U32>, a2: Array<U32>, a3: Array<U32>, a4: Array<U32>,
+    p1: {a1 == a : Array<U32>} & {a2 == a1 : Array<U32>},
+    p2: {a3 == a2 : Array<U32>} & {a4 == a3 : Array<U32>}) ->
+  {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k)))
+   == CS.CS.nth(xs, k) : U32}:
+  (+e1, +e2) = p1
+  (+e3, +e4) = p2
+  +e2a : {a2 == a : Array<U32>} = Equal.trans(Array<U32>, a2, a1, a, e2, e1)
+  +e4a : {a4 == a : Array<U32>} = Equal.trans(Array<U32>, a4, a3, a,
+            e4, Equal.trans(Array<U32>, a3, a2, a, e3, e2a))
+  +e41 : {a4 == a1 : Array<U32>} = Equal.trans(Array<U32>, a4, a3, a1, e4,
+            Equal.trans(Array<U32>, a3, a2, a1, e3, e2))
+  +e24 : {a2 == a4 : Array<U32>} = Equal.trans(Array<U32>, a2, a1, a4,
+            e2, Equal.sym(Array<U32>, a4, a1, e41))
+  +hs1 = CM.store_transport(d, 0n, a, a1, xs, Equal.sym(Array<U32>, a1, a, e1), hs)
+  +hd1 = CM.store_depth(d, 0n, a1, xs, hs1)
+  +hd2 = Arr.Arr.depth_transport(U32, d, a1, a2,
+            Equal.sym(Array<U32>, a2, a1, e2), hd1)
+  +ed = Arr.Arr.get_depth(U32, d, a2, U32.from_nat(k), hd2)
+  +zi : {Arr.Arr.u32_zero_from(d, U32.from_nat(k)) == True{} : Bool} =
+    FT.FT.u32_zero_from_from_nat(d, k, hd, hk)
+  +em : {U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1))
+         == U32.from_nat(k) : U32} =
+    Arr.Arr.u32_and_mask(d, U32.from_nat(k), zi)
+  +etn : {U32.to_nat(U32.from_nat(k)) == k : Nat} =
+    FT.FT.u32_to_nat_from_nat(d, k, hd, hk)
+  +hs4 = CM.store_transport(d, 0n, a, a4, xs, Equal.sym(Array<U32>, a4, a, e4a), hs)
+  +ego = CM.store_read_go(d, 0n, a4, xs, U32.from_nat(k),
+            U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d))), {==},
+            hd, zi, hs4)
+  +h1 : {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k)))
+          == Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a2, U32.from_nat(k)))
+          : U32} =
+    Equal.cong(Array<U32>, U32,
+      x => Arr.Arr.snd(Array<U32>, U32, Array.get(U32, x, U32.from_nat(k))),
+      a, a2, Equal.sym(Array<U32>, a2, a, e2a))
+  +h2 : {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a2, U32.from_nat(k)))
+          == Arr.Arr.snd(Array<U32>, U32,
+               Array.get.go(U32, a2, Arr.Arr.pow2_u32(d),
+                 U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+                 U32.is_lt(U32.and(U32.from_nat(k),
+                     U32.sub(Arr.Arr.pow2_u32(d), 1)),
+                   U32.shr(Arr.Arr.pow2_u32(d))))) : U32} =
+    ed
+  +h3 : {Arr.Arr.snd(Array<U32>, U32,
+            Array.get.go(U32, a2, Arr.Arr.pow2_u32(d),
+              U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+              U32.is_lt(U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+                U32.shr(Arr.Arr.pow2_u32(d)))))
+          == Arr.Arr.snd(Array<U32>, U32,
+               Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), U32.from_nat(k),
+                 U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d)))))
+          : U32} =
+    Equal.trans(U32,
+      Arr.Arr.snd(Array<U32>, U32,
+        Array.get.go(U32, a2, Arr.Arr.pow2_u32(d),
+          U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+          U32.is_lt(U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+            U32.shr(Arr.Arr.pow2_u32(d))))),
+      Arr.Arr.snd(Array<U32>, U32,
+        Array.get.go(U32, a4, Arr.Arr.pow2_u32(d),
+          U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+          U32.is_lt(U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+            U32.shr(Arr.Arr.pow2_u32(d))))),
+      Arr.Arr.snd(Array<U32>, U32,
+        Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), U32.from_nat(k),
+          U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d))))),
+      Equal.cong(Array<U32>, U32,
+        x => Arr.Arr.snd(Array<U32>, U32,
+               Array.get.go(U32, x, Arr.Arr.pow2_u32(d),
+                 U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+                 U32.is_lt(U32.and(U32.from_nat(k),
+                     U32.sub(Arr.Arr.pow2_u32(d), 1)),
+                   U32.shr(Arr.Arr.pow2_u32(d))))),
+        a2, a4, e24),
+      Equal.cong(U32, U32,
+        m => Arr.Arr.snd(Array<U32>, U32,
+               Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), m,
+                 U32.is_lt(m, U32.shr(Arr.Arr.pow2_u32(d))))),
+        U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+        U32.from_nat(k), em))
+  +h4 : {Arr.Arr.snd(Array<U32>, U32,
+            Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), U32.from_nat(k),
+              U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d)))))
+          == CS.CS.nth(xs, Nat.add(0n, U32.to_nat(U32.from_nat(k)))) : U32} =
+    Equal.cong(Array<U32> & U32, U32,
+      q => Arr.Arr.snd(Array<U32>, U32, q),
+      Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), U32.from_nat(k),
+        U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d)))),
+      (a4, CS.CS.nth(xs, Nat.add(0n, U32.to_nat(U32.from_nat(k))))),
+      ego)
+  +h5 : {CS.CS.nth(xs, Nat.add(0n, U32.to_nat(U32.from_nat(k))))
+          == CS.CS.nth(xs, k) : U32} =
+    Equal.cong(Nat, U32, m => CS.CS.nth(xs, m),
+      Nat.add(0n, U32.to_nat(U32.from_nat(k))), k, etn)
+  Equal.trans(U32,
+    Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k))),
+    Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a2, U32.from_nat(k))),
+    CS.CS.nth(xs, k),
+    h1,
+    Equal.trans(U32,
+      Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a2, U32.from_nat(k))),
+      Arr.Arr.snd(Array<U32>, U32,
+        Array.get.go(U32, a2, Arr.Arr.pow2_u32(d),
+          U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+          U32.is_lt(U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+            U32.shr(Arr.Arr.pow2_u32(d))))),
+      CS.CS.nth(xs, k),
+      h2,
+      Equal.trans(U32,
+        Arr.Arr.snd(Array<U32>, U32,
+          Array.get.go(U32, a2, Arr.Arr.pow2_u32(d),
+            U32.and(U32.from_nat(k), U32.sub(Arr.Arr.pow2_u32(d), 1)),
+            U32.is_lt(U32.and(U32.from_nat(k),
+                U32.sub(Arr.Arr.pow2_u32(d), 1)),
+              U32.shr(Arr.Arr.pow2_u32(d))))),
+        Arr.Arr.snd(Array<U32>, U32,
+          Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), U32.from_nat(k),
+            U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d))))),
+        CS.CS.nth(xs, k),
+        h3,
+        Equal.trans(U32,
+          Arr.Arr.snd(Array<U32>, U32,
+            Array.get.go(U32, a4, Arr.Arr.pow2_u32(d), U32.from_nat(k),
+              U32.is_lt(U32.from_nat(k), U32.shr(Arr.Arr.pow2_u32(d))))),
+          CS.CS.nth(xs, Nat.add(0n, U32.to_nat(U32.from_nat(k)))),
+          CS.CS.nth(xs, k),
+          h4, h5))))
+
+def CM.store_read_dp(+d: Nat, -a: Array<U32>, +xs: +List<U32>, +k: Nat,
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk: {Nat.is_lt(k, FT.FT.pow2(d)) == True{} : Bool},
+    +hs: CM.Store(d, 0n, a, xs),
+    dp: &a1: Array<U32> -> &a2: Array<U32> -> &a3: Array<U32> ->
+        &a4: Array<U32> ->
+        ({a1 == a : Array<U32>} & {a2 == a1 : Array<U32>})
+        & ({a3 == a2 : Array<U32>} & {a4 == a3 : Array<U32>})) ->
+  {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k)))
+   == CS.CS.nth(xs, k) : U32}:
+  (a1, r1) = dp
+  (a2, r2) = r1
+  (a3, r3) = r2
+  (a4, px) = r3
+  (p1, p2) = px
+  CM.store_read_body(d, a, xs, k, hd, hk, hs, a1, a2, a3, a4, p1, p2)
+
+def CM.store_read(+d: Nat, a: Array<U32>, +xs: +List<U32>, +k: Nat,
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk: {Nat.is_lt(k, FT.FT.pow2(d)) == True{} : Bool},
+    +hs: CM.Store(d, 0n, a, xs)) ->
+  {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k)))
+   == CS.CS.nth(xs, k) : U32}:
+  CM.store_read_dp(d, a, xs, k, hd, hk, hs, OldCells.CC.dup4(U32, a))
