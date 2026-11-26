@@ -27,6 +27,7 @@ import ./arith.bend as A
 import ./heur.bend as H
 import ./sec.bend as S
 import ./bounds.bend as B
+import ./kup.bend as K
 import ./p12.bend as P
 import ./buck.bend as Be
 
@@ -137,17 +138,26 @@ def p1base(+dep: U32, +c: U32, +gg: U32) -> U32:
 def p2base(+dep: U32, +c: U32, +gg: U32) -> U32:
   U32.add(G.off_p2t(c, gg), U32.mul(dep, U32.mul(gg, 3)))
 
-# Per-entry pass-1 results, 3 cells per bucket: used | exact<<20 | child_k<<21,
-# the bucket's hash word 1 and its hash word 2. The `flg` region is unused
-# elsewhere and has 1024 cells per depth, enough for the 243 possible buckets.
+# Per-entry pass-1 results, 4 cells per bucket: used | exact<<20 | child_k<<21,
+# the bucket's hash word 1, its hash word 2, and the k_upper computed by the
+# approximate-bound pre-pass. The `flg` region is unused elsewhere and has 1024
+# cells per depth, enough for the 243 possible buckets.
 def flgcell(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
-  U32.add(U32.add(G.off_flg(c, gg), U32.mul(dep, 1024)), U32.mul(j, 3))
+  U32.add(U32.add(G.off_flg(c, gg), U32.mul(dep, 1024)), U32.mul(j, 4))
 
 def flgh1(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
   U32.add(flgcell(dep, c, gg, j), 1)
 
 def flgh2(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
   U32.add(flgcell(dep, c, gg, j), 2)
+
+def flgk(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
+  U32.add(flgcell(dep, c, gg, j), 3)
+
+# Rust keeps the approximate tight lower bound per eval entry in `p_lbs`; the
+# unused `plb` region (1024 cells per depth) holds it here, 2 cells per bucket.
+def plbv(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
+  U32.add(U32.add(G.off_plb(c, gg), U32.mul(dep, 1024)), U32.mul(j, 2))
 
 # ------------------------------------------------------------------ frames ---
 
@@ -754,22 +764,92 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                nht, npr, stk, Array.get(U32, a2, 0))
         case 68:
           (a2, _) = p
-          # Enter pass 1: bcur = 0, ti = number of inexact buckets seen.
-          step(f, c, gg, 1, 7, ss, n, beta, pmk, dep, best, lb, 0, v1k, v2k, mv, 0,
+          # Enter the approximate-bound pre-pass (Rust's eval_approx_tight_lb,
+          # solver.rs: before any bucket is evaluated, every split bucket
+          # (p_len > 15) contributes bucket_capacity_bound(p_len, k_upper,
+          # parent_max_k) - cap to a fast lower bound; reaching the cutoff
+          # abandons the whole guess). `lb` carries Rust's fast_cost through
+          # the pre-pass and pass 1, so the cutoff fires where Rust's does.
+          step(f, c, gg, 1, 400, ss, n, beta, pmk, dep, best, cost, 0, v1k, 0, mv, 0,
                0, mode, g, cost, 0, t, 0, cut, gen, ret, nst, ngs, nht, npr,
                stk, Array.get(U32, a2, 0))
+        # --------------------- approximate tight bound over split buckets -----
+        # Rust: for each eval bucket with p_len > 15,
+        #   k_upper = compute_branching_factor_upper_bound(p)
+        #   approx_tight_lb = bucket_capacity_bound(p_len, k_upper, parent_max_k)
+        #                     .max(cap[parent_max_k][p_len])
+        #   fast_cost += approx_tight_lb - cap; if fast_cost >= cutoff return.
+        # k_upper is stored per entry for pass 1 (and, as in Rust, for the
+        # branch chain that follows).
+        case 400:
+          (a2, _) = p
+          +doneb = A.ge01(bcur, t)
+          +idx0 = A.sel(doneb, 0, U32.add(S.ent_at(dep, c, gg), bcur))
+          +bc2 = A.sel(doneb, 0, bcur)
+          step(f, c, gg, 1, A.sel(doneb, 510, 401), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bc2, t, lbk, cut, gen,
+               ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, idx0))
+        case 401:
+          (a2, +k3) = p
+          +small = U32.sub(1, A.ge01(k3, 16))
+          +bc = U32.add(bcur, small)
+          +idx0 = A.sel(small, 0, S.cap_at(pmk, k3, c, gg))
+          step(f, c, gg, 1, A.sel(small, 400, 402), ss, n, beta, pmk, dep, best,
+               lb, lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bc, t, k3, cut,
+               gen, k3, nst, ngs, nht, npr, stk, Array.get(U32, a2, idx0))
+        case 402:
+          (a2, +cv) = p
+          +ob = S.off_at(dep, c, gg)
+          step(f, c, gg, 1, 403, ss, n, beta, pmk, dep, best, lb, cv, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a2, U32.add(ob, bcur)))
+        case 403:
+          (a2, +o) = p
+          a3 = K.k_upper(a2, o, ret, c, gg)
+          step(f, c, gg, 1, 404, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, o, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a3, K.kcell(c, gg)))
+        case 404:
+          (a2, +ku0) = p
+          +ku = U32.max(ku0, 2)
+          +bcb = U32.from_nat(B.bucket_capacity_bound(U32.to_nat(ret), U32.to_nat(ku),
+                                                      U32.to_nat(pmk)))
+          +approx = U32.max(bcb, lmk)
+          +f2 = U32.add(lb, U32.sub(approx, lmk))
+          +bad = A.ge01(f2, cut)
+          a3 = Array.set(U32, a2, flgk(dep, c, gg, bcur), ku)
+          a3b = Array.set(U32, a3, plbv(dep, c, gg, bcur), approx)
+          step(f, c, gg, 1, A.sel(bad, 120, 400), ss, n, beta, pmk, dep, best,
+               f2, lmk, v1k, 0, mv, nt, ti, mode, g, cost, U32.inc(bcur), t, lbk,
+               cut, gen, A.sel(bad, f2, ret), nst, ngs, nht, U32.add(npr, bad),
+               stk, Array.get(U32, a3b, 0))
         # -------------------------------- pass 1: used values for every bucket ---
         # Rust's min_guess_val_inner computes `used` (TT hit or quick eval) for
         # every bucket with count >= 3, adds used - cap to the running cost, and
         # only then recurses. Nothing is recursed here.
-        case 7:
+        case 510:
+          # Head of the quick sub-pass: buckets with 3 <= k <= 15 first, so the
+          # running fast bound (lb) reaches Rust's value before any split
+          # bucket's branch chain runs (Rust: TT probe, approx pass, quick
+          # pass, chain pass, recursion pass - in that order).
           (a2, _) = p
           +doneb = A.ge01(bcur, t)
-          +over = A.ge01(cost, cut)
+          +over = A.ge01(lb, cut)
+          +go = A.sel(doneb, 511, A.sel(over, 120, 80))
+          step(f, c, gg, 1, go, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, 0, ti, mode, g, cost, A.sel(doneb, 0, bcur), t, lbk, cut, gen,
+               A.sel(over, lb, ret), nst, ngs, nht,
+               U32.add(npr, U32.mul(over, U32.sub(1, doneb))), stk,
+               Array.get(U32, a2, 0))
+        case 511:
+          # Head of the split sub-pass: k >= 16, branch chain or TT hit.
+          (a2, _) = p
+          +doneb = A.ge01(bcur, t)
+          +over = A.ge01(lb, cut)
           +go = A.sel(doneb, 200, A.sel(over, 120, 80))
           step(f, c, gg, 1, go, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
-               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
-               A.sel(over, cost, ret), nst, ngs, nht,
+               mv, 1, ti, mode, g, cost, bcur, t, lbk, cut, gen,
+               A.sel(over, lb, ret), nst, ngs, nht,
                U32.add(npr, U32.mul(over, U32.sub(1, doneb))), stk,
                Array.get(U32, a2, 0))
         case 80:
@@ -786,16 +866,19 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                npr, stk, Array.get(U32, a2, U32.add(zb, bcur)))
         case 9:
           (a2, +k) = p
-          +skipb = U32.max(A.eq01(lbk, 121), U32.sub(1, A.ge01(k, 3)))
+          +toosmall = U32.sub(1, A.ge01(k, 3))
+          +big = A.ge01(k, 16)
+          +badsize = U32.max(toosmall, A.sel(A.eq01(nt, 0), big, U32.sub(1, big)))
+          +skipb = U32.max(A.eq01(lbk, 121), badsize)
           step(f, c, gg, 1, A.sel(skipb, 32, 83), ss, n, beta, pmk, dep, best, lb,
                lmk, v1k, v2k, mv, nt, ti, mode, g, cost,
                A.sel(skipb, U32.inc(bcur), bcur), t, lbk, cut, gen, k, nst,
                ngs, nht, npr, stk, Array.get(U32, a2, 0))
         case 32:
           (a2, _) = p
-          step(f, c, gg, 1, 7, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
-               nht, npr, stk, Array.get(U32, a2, 0))
+          step(f, c, gg, 1, A.sel(nt, 511, 510), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
+               ret, nst, ngs, nht, npr, stk, Array.get(U32, a2, 0))
         case 83:
           (a2, _) = p
           +ob = S.off_at(dep, c, gg)
@@ -830,10 +913,18 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           +cellv = U32.add(U32.add(lmk, U32.mul(ex, 1048576)),
                            U32.mul(ck, 2097152))
           a3 = Array.set(U32, a2, flgcell(dep, c, gg, bcur), cellv)
-          step(f, c, gg, 1, 209, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+          step(f, c, gg, 1, 213, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
                mv, nt, U32.add(ti, U32.sub(1, ex)), mode, g, U32.add(cost, v2k),
                bcur, t, lbk, cut, gen, ret, nst, ngs, nht, npr, stk,
-               Array.get(U32, a3, hsh1(U32.inc(dep), c, gg)))
+               Array.get(U32, a3, plbv(dep, c, gg, bcur)))
+        case 213:
+          # fast += used - approx (split buckets), used - cap (quick buckets).
+          (a2, +ap) = p
+          +ap2 = A.sel(A.ge01(ret, 16), ap, v1k)
+          +fast2 = U32.add(lb, G.sat_sub(lmk, ap2))
+          step(f, c, gg, 1, 209, ss, n, beta, pmk, dep, best, fast2, lmk, v1k,
+               v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk, Array.get(U32, a2, hsh1(U32.inc(dep), c, gg)))
         case 209:
           # Be.eval wrote the bucket hash into the child's per-depth cell; copy
           # both words into the per-entry cells for pass 2.
@@ -846,9 +937,9 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
         case 210:
           (a2, +h2) = p
           a3 = Array.set(U32, a2, flgh2(dep, c, gg, bcur), h2)
-          step(f, c, gg, 1, 7, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
-               nt, ti, mode, g, cost, U32.inc(bcur), t, lbk, cut, gen, ret, nst,
-               ngs, nht, npr, stk, Array.get(U32, a3, 0))
+          step(f, c, gg, 1, A.sel(nt, 511, 510), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, nt, ti, mode, g, cost, U32.inc(bcur), t, lbk,
+               cut, gen, ret, nst, ngs, nht, npr, stk, Array.get(U32, a3, 0))
         # End of pass 1: every bucket's used value is in `cost`.
         case 200:
           (a2, _) = p
