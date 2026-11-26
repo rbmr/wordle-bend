@@ -318,3 +318,78 @@ def CM.store_get_go(+d: Nat, +base: Nat, a: Array<U32>, +xs: +List<U32>,
                   CM.store_get_go(p, Nat.add(base, FT.FT.pow2(p)), y2, xs, ip,
                     U32.is_lt(ip, U32.shr(Arr.Arr.pow2_u32(p))), {==},
                     plt, zip, hy2))
+
+# The two facts a machine read needs, in the form `Array.get` has them.  Both
+# consume the array once, so they take a duplication of it: one copy carries
+# the depth the read needs, the other is the array the read is about.
+def CM.store_fst(+d: Nat, a: Array<U32>, +xs: +List<U32>, +k: Nat,
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hs: CM.Store(d, 0n, a, xs),
+    d2: &a1: Array<U32> -> &a2: Array<U32> ->
+        {a1 == a : Array<U32>} & {a2 == a1 : Array<U32>}) ->
+  {Arr.Arr.fst(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k)))
+   == a : Array<U32>}:
+  (a1, r1) = d2
+  (a2, pe) = r1
+  (+e1, +e2) = pe
+  +hs1 = CM.store_transport(d, 0n, a, a1, xs, Equal.sym(Array<U32>, a1, a, e1), hs)
+  +hd1 = CM.store_depth(d, 0n, a1, xs, hs1)
+  +hd2 = Arr.Arr.depth_transport(U32, d, a1, a2,
+            Equal.sym(Array<U32>, a2, a1, e2), hd1)
+  +efst = Arr.Arr.get_fst(U32, d, a2, U32.from_nat(k), hd2)
+  +e2a : {a2 == a : Array<U32>} =
+    Equal.trans(Array<U32>, a2, a1, a, e2, e1)
+  Equal.trans(Array<U32>,
+    Arr.Arr.fst(Array<U32>, U32, Array.get(U32, a, U32.from_nat(k))),
+    Arr.Arr.fst(Array<U32>, U32, Array.get(U32, a2, U32.from_nat(k))),
+    a,
+    Equal.cong(Array<U32>, Array<U32>,
+      x => Arr.Arr.fst(Array<U32>, U32, Array.get(U32, x, U32.from_nat(k))),
+      a, a2, Equal.sym(Array<U32>, a2, a, e2a)),
+    Equal.trans(Array<U32>,
+      Arr.Arr.fst(Array<U32>, U32, Array.get(U32, a2, U32.from_nat(k))),
+      a2, a, efst, e2a))
+
+# Three copies plus the pairwise equalities.  A machine read needs one copy for
+# the depth, one for the `Array.get` reduction and one for the value lemma.
+def CM.dup3_node(-x: Array<U32>, -y: Array<U32>,
+    dl: &x1: Array<U32> -> &x2: Array<U32> -> &x3: Array<U32> ->
+        ({x1 == x : Array<U32>} & {x2 == x1 : Array<U32>})
+        & {x3 == x2 : Array<U32>},
+    dr: &y1: Array<U32> -> &y2: Array<U32> -> &y3: Array<U32> ->
+        ({y1 == y : Array<U32>} & {y2 == y1 : Array<U32>})
+        & {y3 == y2 : Array<U32>}) ->
+  &a1: Array<U32> -> &a2: Array<U32> -> &a3: Array<U32> ->
+  ({a1 == ANode{x, y} : Array<U32>} & {a2 == a1 : Array<U32>})
+  & {a3 == a2 : Array<U32>}:
+  (x1, r1) = dl
+  (x2, r2) = r1
+  (x3, px) = r2
+  ((ex1, ex2), ex3) = px
+  (y1, s1) = dr
+  (y2, s2) = s1
+  (y3, py) = s2
+  ((ey1, ey2), ey3) = py
+  +e1 : {ANode{x1, y1} == ANode{x, y} : Array<U32>} =
+    Equal.trans(Array<U32>, ANode{x1, y1}, ANode{x, y1}, ANode{x, y},
+      Equal.cong(Array<U32>, Array<U32>, l => ANode{l, y1}, x1, x, ex1),
+      Equal.cong(Array<U32>, Array<U32>, r => ANode{x, r}, y1, y, ey1))
+  +e2 : {ANode{x2, y2} == ANode{x1, y1} : Array<U32>} =
+    Equal.trans(Array<U32>, ANode{x2, y2}, ANode{x1, y2}, ANode{x1, y1},
+      Equal.cong(Array<U32>, Array<U32>, l => ANode{l, y2}, x2, x1, ex2),
+      Equal.cong(Array<U32>, Array<U32>, r => ANode{x1, r}, y2, y1, ey2))
+  +e3 : {ANode{x3, y3} == ANode{x2, y2} : Array<U32>} =
+    Equal.trans(Array<U32>, ANode{x3, y3}, ANode{x2, y3}, ANode{x2, y2},
+      Equal.cong(Array<U32>, Array<U32>, l => ANode{l, y3}, x3, x2, ex3),
+      Equal.cong(Array<U32>, Array<U32>, r => ANode{x2, r}, y3, y2, ey3))
+  (ANode{x1, y1}, (ANode{x2, y2}, (ANode{x3, y3}, ((e1, e2), e3))))
+
+def CM.dup3(a: Array<U32>) ->
+  &a1: Array<U32> -> &a2: Array<U32> -> &a3: Array<U32> ->
+  ({a1 == a : Array<U32>} & {a2 == a1 : Array<U32>})
+  & {a3 == a2 : Array<U32>}:
+  match a:
+    case ALeaf{+x}:
+      (ALeaf{x}, (ALeaf{x}, (ALeaf{x}, (({==}, {==}), {==}))))
+    case ANode{x, y}:
+      CM.dup3_node(x, y, CM.dup3(x), CM.dup3(y))
