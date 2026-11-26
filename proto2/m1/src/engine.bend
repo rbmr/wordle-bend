@@ -576,12 +576,16 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           (a2, +v) = p
           +lane = U32.shrn(mode, 3n)
           +par = U32.and(U32.shrn(mode, 2n), 1)
-          # Witness lane (0) takes ti%16 == 0, the other three lanes the
-          # remaining fifteen sixteenths in fifths.
-          +r8 = U32.and(ti, 15)
-          +part = U32.add(A.nz(r8),
-                          U32.add(A.ge01(r8, 6), A.ge01(r8, 11)))
-          +hit = U32.max(U32.sub(1, par), A.eq01(part, lane))
+          # Witness lane (0) takes the first eight tuples, which are the most
+          # promising by (lb, exp); the other three lanes take everything else
+          # round-robin. The witness bound is what the lanes' pass-1 fast abort
+          # needs, so it must be the optimum: an eight-tuple prefix finds it,
+          # a 1/16 stride does not (measured: 1472 vs 1467 -> 2x the visits).
+          +w0 = A.lt01(ti, 8)
+          +r3 = U32.mod(U32.sub(ti, U32.min(ti, 8)), 3)
+          +tail = U32.mul(U32.sub(1, w0), A.eq01(r3, U32.sub(lane, 1)))
+          +lanepick = A.sel(A.eq01(lane, 0), w0, tail)
+          +hit = U32.max(U32.sub(1, par), lanepick)
           step(f, c, gg, 0, A.sel(hit, 177, 176), ss, n, beta, pmk, dep, best, lb, lmk,
                v1k, v2k, mv, nt, ti, mode, A.sel(hit, v, g), cost, bcur, t,
                lbk, cut, gen, ret, nst, ngs, nht, npr, stk,
