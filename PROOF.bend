@@ -53,6 +53,7 @@ import ./proofs/lb_capacity_sound.bend as LBProof8
 import ./src/solve_k.bend as SolveK
 import ./proofs/par_chunk.bend as ParChunk
 import ./proofs/core_list.bend as CoreList
+import ./proofs/core_arith.bend as CoreArith
 import ./proofs/core_nat.bend as CoreNat
 import ./proofs/core_store.bend as CoreStore
 import ./proofs/core_region.bend as CoreRegion
