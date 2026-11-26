@@ -146,6 +146,12 @@ def dnres(+c: U32, +gg: U32) -> U32:
 # The region bases are precomputed once per call of dcount (`pb` = off_prof,
 # `fb` = g*c): the offset chain is ~30 arithmetic ops (three multiplies by c and
 # five by the depth count), and this is the hottest loop of the port.
+#
+# Every decision here is a *primitive* expression, not a call of an arith.bend
+# helper: a non-recursive Bend def compiles to a real C function (with its own
+# spin counter and an out-parameter array), and one candidate visit passes
+# through ~8 of them. `x >> 31` on the wrapping difference is the sign test:
+# `ge01(a,b) = 1 - ((a-b)>>31)` and `eq01(x,0) = (x-1)>>31`.
 def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +fb: U32, +o: U32, +k: U32,
           +t: U32, +r: U32, +pb: U32, p: Array<U32> & U32) -> Array<U32>:
   match fuel:
@@ -166,28 +172,32 @@ def dn_go(+fuel: Nat, +ph: U32, +i: U32, +j: U32, +fb: U32, +o: U32, +k: U32,
                 Array.get(U32, a2, U32.add(U32.add(pb, 224), v)))
         case 3:
           (a2, +v) = p
-          +new = A.eq01(v, 0)
+          +new = U32.shrn(U32.sub(v, 1), 31n)
           a3 = Array.set(U32, a2, U32.add(U32.add(pb, 224), r), U32.inc(v))
           a4 = Array.set(U32, a3, U32.add(U32.add(pb, 480), t), r)
           +i2 = U32.inc(i)
           +t2 = U32.add(t, new)
-          +done = A.ge01(i2, k)
-          +idx = A.sel(done, U32.add(pb, 224), U32.add(o, i2))
-          dn_go(f, A.sel(done, 4, 0), i2, 0, fb, o, k, t2, r, pb,
+          +done = U32.sub(1, U32.shrn(U32.sub(i2, k), 31n))
+          +sb = U32.add(o, i2)
+          +cb = U32.add(pb, 224)
+          +idx = U32.add(sb, U32.mul(done, U32.sub(cb, sb)))
+          dn_go(f, U32.mul(done, 4), i2, 0, fb, o, k, t2, r, pb,
                 Array.get(U32, a4, idx))
         case 4:
           (a2, _) = p
-          +done = A.ge01(j, t)
-          +idx = A.sel(done, U32.add(pb, 224), U32.add(U32.add(pb, 480), j))
-          dn_go(f, A.sel(done, 6, 5), i, j, fb, o, k, t, r, pb,
+          +done = U32.sub(1, U32.shrn(U32.sub(j, t), 31n))
+          +tb = U32.add(U32.add(pb, 480), j)
+          +idx = U32.add(tb, U32.mul(done, U32.sub(U32.add(pb, 224), tb)))
+          dn_go(f, U32.add(5, done), i, j, fb, o, k, t, r, pb,
                 Array.get(U32, a2, idx))
         case 5:
           (a2, +v) = p
           a3 = Array.set(U32, a2, U32.add(U32.add(pb, 224), v), 0)
           +j2 = U32.inc(j)
-          +done = A.ge01(j2, t)
-          +idx = A.sel(done, U32.add(pb, 224), U32.add(U32.add(pb, 480), j2))
-          dn_go(f, A.sel(done, 6, 4), i, j2, fb, o, k, t, r, pb,
+          +done = U32.sub(1, U32.shrn(U32.sub(j2, t), 31n))
+          +tb = U32.add(U32.add(pb, 480), j2)
+          +idx = U32.add(tb, U32.mul(done, U32.sub(U32.add(pb, 224), tb)))
+          dn_go(f, U32.add(4, U32.mul(done, 2)), i, j2, fb, o, k, t, r, pb,
                 Array.get(U32, a3, idx))
         case 6:
           (a2, _) = p
