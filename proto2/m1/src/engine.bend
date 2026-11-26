@@ -94,6 +94,18 @@ def p1base(+dep: U32, +c: U32, +gg: U32) -> U32:
 def p2base(+dep: U32, +c: U32, +gg: U32) -> U32:
   U32.add(G.off_p2t(c, gg), U32.mul(dep, U32.mul(gg, 3)))
 
+# Per-entry pass-1 results, 3 cells per bucket: used | exact<<20 | child_k<<21,
+# the bucket's hash word 1 and its hash word 2. The `flg` region is unused
+# elsewhere and has 1024 cells per depth, enough for the 243 possible buckets.
+def flgcell(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
+  U32.add(U32.add(G.off_flg(c, gg), U32.mul(dep, 1024)), U32.mul(j, 3))
+
+def flgh1(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
+  U32.add(flgcell(dep, c, gg, j), 1)
+
+def flgh2(+dep: U32, +c: U32, +gg: U32, +j: U32) -> U32:
+  U32.add(flgcell(dep, c, gg, j), 2)
+
 # ------------------------------------------------------------------ frames ---
 
 type Fr is Type:
@@ -600,17 +612,22 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
                nht, npr, stk, Array.get(U32, a2, 0))
         case 68:
           (a2, _) = p
-          step(f, c, gg, 1, 7, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv, nt,
-               ti, mode, g, cost, 0, t, lbk, cut, gen, ret, nst, ngs, nht, npr,
+          # Enter pass 1: bcur = 0, ti = number of inexact buckets seen.
+          step(f, c, gg, 1, 7, ss, n, beta, pmk, dep, best, lb, 0, v1k, v2k, mv, 0,
+               0, mode, g, cost, 0, t, 0, cut, gen, ret, nst, ngs, nht, npr,
                stk, Array.get(U32, a2, 0))
+        # -------------------------------- pass 1: used values for every bucket ---
+        # Rust's min_guess_val_inner computes `used` (TT hit or quick eval) for
+        # every bucket with count >= 3, adds used - cap to the running cost, and
+        # only then recurses. Nothing is recursed here.
         case 7:
           (a2, _) = p
           +doneb = A.ge01(bcur, t)
           +over = A.ge01(cost, cut)
-          +stop = U32.max(doneb, over)
-          step(f, c, gg, 1, A.sel(stop, 120, 80), ss, n, beta, pmk, dep, best, lb,
-               lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut,
-               gen, A.sel(stop, cost, ret), nst, ngs, nht,
+          +go = A.sel(doneb, 200, A.sel(over, 120, 80))
+          step(f, c, gg, 1, go, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
+               A.sel(over, cost, ret), nst, ngs, nht,
                U32.add(npr, U32.mul(over, U32.sub(1, doneb))), stk,
                Array.get(U32, a2, 0))
         case 80:
@@ -667,37 +684,127 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           (a2, +pk) = p
           +ex = U32.and(pk, 1)
           +ck = U32.shrn(pk, 1n)
-          step(f, c, gg, 1, A.sel(ex, 7, 88), ss, n, beta, pmk, dep, best, lb,
-               lmk, v1k, v2k, mv, ck, ti, mode, g,
-               U32.add(cost, U32.mul(ex, v2k)),
-               A.sel(ex, U32.inc(bcur), bcur), t, lbk, cut, gen, ret, nst,
-               ngs, nht, npr, stk, Array.get(U32, a2, 0))
-        case 88:
+          # Save used | exact<<20 | child_k<<21 and the bucket hash for pass 2.
+          +cellv = U32.add(U32.add(lmk, U32.mul(ex, 1048576)),
+                           U32.mul(ck, 2097152))
+          a3 = Array.set(U32, a2, flgcell(dep, c, gg, bcur), cellv)
+          step(f, c, gg, 1, 209, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, U32.add(ti, U32.sub(1, ex)), mode, g, U32.add(cost, v2k),
+               bcur, t, lbk, cut, gen, ret, nst, ngs, nht, npr, stk,
+               Array.get(U32, a3, hsh1(U32.inc(dep), c, gg)))
+        case 209:
+          # Be.eval wrote the bucket hash into the child's per-depth cell; copy
+          # both words into the per-entry cells for pass 2.
+          (a2, +h1) = p
+          a3 = Array.set(U32, a2, flgh1(dep, c, gg, bcur), h1)
+          step(f, c, gg, 1, 210, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk,
+               Array.get(U32, a3, hsh2(U32.inc(dep), c, gg)))
+        case 210:
+          (a2, +h2) = p
+          a3 = Array.set(U32, a2, flgh2(dep, c, gg, bcur), h2)
+          step(f, c, gg, 1, 7, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, U32.inc(bcur), t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk, Array.get(U32, a3, 0))
+        # End of pass 1: every bucket's used value is in `cost`.
+        case 200:
           (a2, _) = p
-          +b = U32.sub(cost, v1k)
+          +nonex = A.eq01(ti, 0)
+          +over = A.ge01(cost, cut)
+          +stop = U32.max(nonex, over)
+          step(f, c, gg, 1, A.sel(stop, 120, 201), ss, n, beta, pmk, dep, best,
+               lb, lmk, v1k, v2k, mv, nt, ti, mode, g, cost, 0, t, lbk, cut,
+               gen, A.sel(stop, cost, ret), nst, ngs, nht,
+               U32.add(npr, U32.mul(over, U32.sub(1, nonex))), stk,
+               Array.get(U32, a2, 0))
+        # ------------------------------- pass 2: recurse into inexact buckets ---
+        case 201:
+          (a2, _) = p
+          +doneb = A.ge01(bcur, t)
+          +over = A.ge01(cost, cut)
+          +stop = U32.max(doneb, over)
+          step(f, c, gg, 1, A.sel(doneb, 120, A.sel(over, 120, 202)), ss, n, beta,
+               pmk, dep, best, lb, lmk, v1k, v2k, mv, nt, ti, mode, g, cost,
+               bcur, t, lbk, cut, gen, A.sel(stop, cost, ret), nst, ngs, nht,
+               U32.add(npr, U32.mul(over, U32.sub(1, doneb))), stk,
+               Array.get(U32, a2, 0))
+        case 202:
+          (a2, _) = p
+          +zb = S.ent_at(dep, c, gg)
+          step(f, c, gg, 1, 203, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a2, U32.add(zb, bcur)))
+        case 203:
+          # Buckets with fewer than 3 candidates were skipped in pass 1 and must
+          # be skipped here too (their saved cell is stale).
+          (a2, +k) = p
+          +skipb = U32.sub(1, A.ge01(k, 3))
+          step(f, c, gg, 1, A.sel(skipb, 201, 204), ss, n, beta, pmk, dep, best,
+               lb, lmk, k, v2k, mv, nt, ti, mode, g, cost,
+               U32.add(bcur, skipb), t, lbk, cut, gen, k, nst, ngs, nht, npr,
+               stk, Array.get(U32, a2, 0))
+        case 204:
+          (a2, _) = p
+          step(f, c, gg, 1, 205, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk,
+               Array.get(U32, a2, flgcell(dep, c, gg, bcur)))
+        case 205:
+          (a2, +cell) = p
+          +ex = U32.and(U32.shrn(cell, 20n), 1)
+          step(f, c, gg, 1, A.sel(ex, 201, 206), ss, n, beta, pmk, dep, best, lb,
+               lmk, v1k, v2k, mv, nt, ti, mode, g, cost,
+               U32.add(bcur, ex), t, lbk, cut, gen, cell, nst, ngs, nht, npr,
+               stk, Array.get(U32, a2, 0))
+        case 206:
+          (a2, _) = p
+          +ob = S.off_at(dep, c, gg)
+          step(f, c, gg, 1, 207, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k, mv,
+               nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst, ngs,
+               nht, npr, stk, Array.get(U32, a2, U32.add(ob, bcur)))
+        case 207:
+          (a2, +o) = p
+          +used = U32.and(ret, 1048575)
+          +ck = U32.shrn(ret, 21n)
+          +b = G.sat_sub(cost, used)
           +cut2 = G.sat_sub(cut, b)
-          +prune = A.ge01(lmk, cut2)
-          step(f, c, gg, 1, A.sel(prune, 133, 134), ss, n, beta, pmk, dep, best,
-               lb, lmk, v1k, v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk,
-               cut2, gen, ret, nst, ngs, nht, U32.add(npr, prune), stk,
+          +prune = A.ge01(used, cut2)
+          step(f, c, gg, 1, A.sel(prune, 133, 208), ss, n, beta, pmk, dep, best,
+               lb, used, v1k, v2k, mv, ck, cut2, mode, g, cost, bcur, t, o,
+               cut, gen, ret, nst, ngs, nht, U32.add(npr, prune), stk,
                Array.get(U32, a2, 0))
         case 133:
           (a2, _) = p
-          step(f, c, gg, 1, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k,
-               v2k, mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen,
-               U32.add(cost, v2k), nst, ngs, nht, npr, stk,
-               Array.get(U32, a2, 0))
-        case 134:
+          step(f, c, gg, 1, 120, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, cost, nst,
+               ngs, nht, npr, stk, Array.get(U32, a2, 0))
+        case 208:
+          # lmk = used, v1k = bucket size, nt = child k, ti = effective beta.
           (a2, _) = p
-          +k2 = ret
+          step(f, c, gg, 1, 211, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk,
+               Array.get(U32, a2, flgh1(dep, c, gg, bcur)))
+        case 211:
+          # The child state reads its set hash from the per-depth cell, so the
+          # bucket's hash has to be written there just before the descent.
+          (a2, +h1) = p
+          a3 = Array.set(U32, a2, hsh1(U32.inc(dep), c, gg), h1)
+          step(f, c, gg, 1, 212, ss, n, beta, pmk, dep, best, lb, lmk, v1k, v2k,
+               mv, nt, ti, mode, g, cost, bcur, t, lbk, cut, gen, ret, nst,
+               ngs, nht, npr, stk, Array.get(U32, a3, flgh2(dep, c, gg, bcur)))
+        case 212:
+          (a2, +h2) = p
+          a3 = Array.set(U32, a2, hsh2(U32.inc(dep), c, gg), h2)
           # Rust passes the bucket's used value as known_quick unless the
           # bucket took the c_len>16 split path (parent > 16 and bucket > 15).
-          +known = U32.mul(U32.max(A.ge01(15, k2), A.ge01(16, n)), lmk)
-          stk2 : List<Fr> = Con{Gf{ss, n, beta, pmk, dep, mv, lb, g, cost,
-                                   U32.inc(bcur), t, v1k}, stk}
-          step(f, c, gg, 0, 0, lbk, k2, cut, nt, U32.inc(dep), cut, known, 0,
-               0, 0, 4294967295, 0, 0, 0, 0, 0, 0, 0, 0, cut, gen, ret, nst,
-               ngs, nht, npr, stk2, Array.get(U32, a2, 0))
+          +known = U32.mul(U32.max(A.ge01(15, v1k), A.ge01(16, n)), lmk)
+          stk2 : List<Fr> = Con{Gf{ss, n, beta, pmk, dep, cut, lb, g, cost,
+                                   U32.inc(bcur), t, lmk}, stk}
+          step(f, c, gg, 0, 0, lbk, v1k, ti, nt, U32.inc(dep), ti, known, 0,
+               0, 0, 4294967295, 0, 0, 0, 0, 0, 0, 0, 0, ti, gen, ret, nst,
+               ngs, nht, npr, stk2, Array.get(U32, a3, 0))
         # ---------------------------------------------------- deliver ----
         case 120:
           # kind 0: pop a guess frame (or finish at the root); kind 1: pop a
@@ -721,7 +828,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
               (a2, _) = p
               +cost3 = U32.sub(U32.add(cost2, ret), used2)
               +pr = A.ge01(cost3, best2)
-              step(f, c, gg, 1, A.sel(pr, 120, 7), ss2, n2, beta2, pmk2, dep2,
+              step(f, c, gg, 1, A.sel(pr, 120, 201), ss2, n2, beta2, pmk2, dep2,
                    best2, lb2, lmk, v1k, v2k, mv, nt, ti, mode, g2, cost3,
                    bcur2, t2, used2, best2, gen, A.sel(pr, cost3, ret), nst,
                    ngs, nht, U32.add(npr, pr), rest, Array.get(U32, a2, 0))
@@ -751,7 +858,7 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
               (a2, _) = p
               +cost3 = U32.sub(U32.add(cost2, ret), used2)
               +pr = A.ge01(cost3, best2)
-              step(f, c, gg, 1, A.sel(pr, 120, 7), ss2, n2, beta2, pmk2, dep2,
+              step(f, c, gg, 1, A.sel(pr, 120, 201), ss2, n2, beta2, pmk2, dep2,
                    best2, lb2, lmk, v1k, v2k, mv, nt, ti, mode, g2, cost3,
                    bcur2, t2, used2, best2, gen, A.sel(pr, cost3, ret), nst,
                    ngs, nht, U32.add(npr, pr), rest, Array.get(U32, a2, 0))
