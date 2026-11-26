@@ -92,8 +92,12 @@ def kc_go(+fuel: Nat, +ph: U32, +i: U32, +o: U32, +k: U32, +mx: U32,
 
 def kcand(a: Array<U32>, +o: U32, +k: U32, +eff: U32, +dep: U32, +c: U32,
           +gg: U32) -> Array<U32>:
+  # Rust's compute_candidate_branching_factor_with_target clamps the target to
+  # min(candidates.len(), num_responses): the distinct count cannot exceed
+  # either, so the `mx >= effective_target` early exit is then sound.
+  +eff2 = U32.min(eff, U32.min(k, 243))
   +fuel = Nat.add(Nat.mul(U32.to_nat(k), Nat.mul(U32.to_nat(k), 16n)), 512n)
-  kc_go(fuel, 0, 0, o, k, 0, eff, dep, c, gg, 0,
+  kc_go(fuel, 0, 0, o, k, 0, eff2, dep, c, gg, 0,
         Array.get(U32, a, o))
 
 # ------------------------------------------------ k_max_seq -------------------
@@ -215,6 +219,11 @@ def km_go(+fuel: Nat, +ph: U32, +g: U32, +o: U32, +k: U32, +mx: U32,
 
 def kmax(a: Array<U32>, +o: U32, +k: U32, +init: U32, +eff: U32, +dep: U32,
          +c: U32, +gg: U32) -> Array<U32>:
+  # Rust's compute_max_branching_factor_seq_with_target derives
+  # effective_target = target.min(candidates.len()).min(num_responses) (243 for
+  # five letters). The clamp is what lets `mx >= effective_target` fire: the
+  # distinct count can never exceed either bound, so stopping there is exact.
+  +eff2 = U32.min(eff, U32.min(k, 243))
   # Every examined guess costs at most ~12 filter phases plus one distinct count
   # over the k candidates (dcount's own budget is 8k+80 iterations), and there
   # are gg guesses. The budget used to be gg*16+512, which cannot cover the
@@ -222,7 +231,7 @@ def kmax(a: Array<U32>, +o: U32, +k: U32, +init: U32, +eff: U32, +dep: U32,
   # value, so k_max_seq's result was never actually used.
   +per = Nat.add(Nat.mul(U32.to_nat(k), 8n), 96n)
   +fuel = Nat.add(Nat.mul(U32.to_nat(gg), per), 1024n)
-  km_go(fuel, 89, 0, o, k, init, eff, dep, c, gg, 0, 0, 0, 0,
+  km_go(fuel, 89, 0, o, k, init, eff2, dep, c, gg, 0, 0, 0, 0,
         Array.get(U32, a, P.actcell(c, gg)))
 
 # ------------------------------------------------ orchestrator ----------------
