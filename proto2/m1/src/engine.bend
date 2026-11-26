@@ -543,11 +543,11 @@ def step(+fuel: Nat, +c: U32, +gg: U32, +kind: U32, +ph: U32, +ss: U32, +n: U32,
           (a2, +v) = p
           +lane = U32.shrn(mode, 3n)
           +par = U32.and(U32.shrn(mode, 2n), 1)
-          # Witness lane (0) takes ti%8 == 0, the other lanes the rest:
-          # lanes 1,2 take two eighths each and lane 3 the last three.
-          +r8 = U32.and(ti, 7)
+          # Witness lane (0) takes ti%16 == 0, the other three lanes the
+          # remaining fifteen sixteenths in fifths.
+          +r8 = U32.and(ti, 15)
           +part = U32.add(A.nz(r8),
-                          U32.add(A.ge01(r8, 3), A.ge01(r8, 5)))
+                          U32.add(A.ge01(r8, 6), A.ge01(r8, 11)))
           +hit = U32.max(U32.sub(1, par), A.eq01(part, lane))
           step(f, c, gg, 0, A.sel(hit, 177, 176), ss, n, beta, pmk, dep, best, lb, lmk,
                v1k, v2k, mv, nt, ti, mode, A.sel(hit, v, g), cost, bcur, t,
