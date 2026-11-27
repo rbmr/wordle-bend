@@ -1212,3 +1212,67 @@ def CR.set_set_below(+o: Nat, +k: Nat, +d: Nat, +w: Nat, +v: U32,
         CR.is_lt_rewrite_r(w, 1n+Nat.add(o, d), Nat.add(o, 1n+d),
           Equal.sym(Nat, Nat.add(o, 1n+d), 1n+Nat.add(o, d), hsucc), hlt1)
       (hh2, CR.set_set_below(o, kp, 1n+d, w, v, xs, idxs, htail, hw2))
+
+# ------------------------------------------------- the clear-pass ghost list ---
+#
+# Phases 4-5 clear the count cells of the touched codes one cursor step at a
+# time.  The ghost code list is then `drop cj tl` (the cleared prefix removed)
+# and `tl` is duplicate-free, so one clear is exactly `rem_all(head, ...)`
+# followed by the head of the drop.  These three lemmas are that arithmetic.
+
+def CR.or_false_l(+a: Bool, +b: Bool,
+    +h: {Bool.or(a, b) == False{} : Bool}) -> {a == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({a == False{} : Bool},
+        Logic.Proof.true_ne_false(h))
+    case False{}:
+      {==}
+
+def CR.or_false_r(+a: Bool, +b: Bool,
+    +h: {Bool.or(a, b) == False{} : Bool}) -> {b == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({b == False{} : Bool},
+        Logic.Proof.true_ne_false(h))
+    case False{}:
+      h
+
+def CR.rem_all_of_not_mem(+c: Nat, +xs: +List<Nat>,
+    +h: {CR.mem(c, xs) == False{} : Bool}) ->
+  {CR.rem_all(c, xs) == xs : +List<Nat>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{y, rest}:
+      +he : {Nat.is_eq(c, y) == False{} : Bool} =
+        CR.or_false_l(Nat.is_eq(c, y), CR.mem(c, rest), h)
+      +hr : {CR.mem(c, rest) == False{} : Bool} =
+        CR.or_false_r(Nat.is_eq(c, y), CR.mem(c, rest), h)
+      +e1 : {CR.rem_cons(Nat.is_eq(c, y), y, CR.rem_all(c, rest))
+             == CR.rem_cons(False{}, y, CR.rem_all(c, rest)) : +List<Nat>} =
+        Equal.cong(Bool, +List<Nat>, z => CR.rem_cons(z, y, CR.rem_all(c, rest)),
+          Nat.is_eq(c, y), False{}, he)
+      +e2 : {CR.rem_cons(False{}, y, CR.rem_all(c, rest))
+             == CR.rem_cons(False{}, y, rest) : +List<Nat>} =
+        Equal.cong(+List<Nat>, +List<Nat>, z => CR.rem_cons(False{}, y, z),
+          CR.rem_all(c, rest), rest, CR.rem_all_of_not_mem(c, rest, hr))
+      Equal.trans(+List<Nat>, CR.rem_all(c, y <> rest),
+        CR.rem_cons(False{}, y, CR.rem_all(c, rest)), y <> rest, e1,
+        Equal.trans(+List<Nat>, CR.rem_cons(False{}, y, CR.rem_all(c, rest)),
+          CR.rem_cons(False{}, y, rest), y <> rest, e2, {==}))
+
+def CR.rem_all_head_cons(+c: Nat, +rest: +List<Nat>,
+    +h: {CR.mem(c, rest) == False{} : Bool}) ->
+  {CR.rem_all(c, c <> rest) == rest : +List<Nat>}:
+  +e1 : {CR.rem_cons(Nat.is_eq(c, c), c, CR.rem_all(c, rest))
+         == CR.rem_cons(True{}, c, CR.rem_all(c, rest)) : +List<Nat>} =
+    Equal.cong(Bool, +List<Nat>, z => CR.rem_cons(z, c, CR.rem_all(c, rest)),
+      Nat.is_eq(c, c), True{}, NatProof.NatPrf.is_eq_refl(c))
+  +e2 : {CR.rem_cons(True{}, c, CR.rem_all(c, rest))
+         == CR.rem_all(c, rest) : +List<Nat>} =
+    {==}
+  Equal.trans(+List<Nat>, CR.rem_all(c, c <> rest),
+    CR.rem_cons(True{}, c, CR.rem_all(c, rest)), rest, e1,
+    Equal.trans(+List<Nat>, CR.rem_cons(True{}, c, CR.rem_all(c, rest)),
+      CR.rem_all(c, rest), rest, e2, CR.rem_all_of_not_mem(c, rest, h)))
