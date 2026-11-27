@@ -376,3 +376,127 @@ def CMm.clear_step(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
      (CR.CR.count_clear(256n, 0n, c, xs, nl, hcount, hc256, hend),
       (CR.CR.touch_set_below(c <> rest, 0n, c, xs, 0, htouch, hc256),
        CR.CR.agree_after_set(xs, xs0, c, 0, ha, hlt768)))))
+
+# ------------------------------------------- the machine's read indices ---
+#
+# Phase 0 reads the candidate-set cell at `U32.add(o, i)`; the ghost replay
+# needs that index as `Nat.add(no, ni)`.  This is the read counterpart of the
+# write-index bridges above.
+
+def CMm.add_set_index(+o: U32, +i: U32, +no: Nat, +ni: Nat,
+    +ho: {o == U32.from_nat(no) : U32},
+    +hi: {i == U32.from_nat(ni) : U32}) ->
+  {U32.add(o, i) == U32.from_nat(Nat.add(no, ni)) : U32}:
+  +e1 : {U32.add(o, i) == U32.add(U32.from_nat(no), i) : U32} =
+    Equal.cong(U32, U32, z => U32.add(z, i), o, U32.from_nat(no), ho)
+  +e2 : {U32.add(U32.from_nat(no), i)
+         == U32.add(U32.from_nat(no), U32.from_nat(ni)) : U32} =
+    Equal.cong(U32, U32, z => U32.add(U32.from_nat(no), z), i,
+      U32.from_nat(ni), hi)
+  Equal.trans(U32, U32.add(o, i), U32.add(U32.from_nat(no), i),
+    U32.from_nat(Nat.add(no, ni)), e1,
+    Equal.trans(U32, U32.add(U32.from_nat(no), i),
+      U32.add(U32.from_nat(no), U32.from_nat(ni)),
+      U32.from_nat(Nat.add(no, ni)), e2,
+      FT.FT.u32_add_from_nat(no, ni)))
+
+# Phase 0's read: the value returned for candidate `ni` is the ghost index at
+# position `ni` of the candidate set.  `CM.store_read` supplies the cell value
+# and `CR.set_get` turns the cell into the candidate index; the only work is
+# the index bridge above and the `0 + ni` normalisation of `CR.Set`'s start.
+def CMm.read_set_value(+d: Nat, a: Array<U32>, +xs: +List<U32>,
+    +idxs: +List<Nat>, +o: U32, +i: U32, +no: Nat, +ni: Nat, +k: Nat,
+    +ho: {o == U32.from_nat(no) : U32},
+    +hi: {i == U32.from_nat(ni) : U32},
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk: {Nat.is_lt(Nat.add(no, ni), FT.FT.pow2(d)) == True{} : Bool},
+    +hs: CMem.CM.Store(d, 0n, a, xs),
+    hset: CR.CR.Set(no, k, 0n, xs, idxs),
+    +he: {Nat.is_lt(ni, k) == True{} : Bool}) ->
+  {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.add(o, i)))
+   == U32.from_nat(CR.CR.nnth(idxs, ni)) : U32}:
+  +eidx : {U32.add(o, i) == U32.from_nat(Nat.add(no, ni)) : U32} =
+    CMm.add_set_index(o, i, no, ni, ho, hi)
+  +hval : {Arr.Arr.snd(Array<U32>, U32,
+             Array.get(U32, a, U32.from_nat(Nat.add(no, ni))))
+           == CS.CS.nth(xs, Nat.add(no, ni)) : U32} =
+    CMem.CM.store_read(d, a, xs, Nat.add(no, ni), hd, hk, hs)
+  +hidx : {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.add(o, i)))
+           == Arr.Arr.snd(Array<U32>, U32,
+                Array.get(U32, a, U32.from_nat(Nat.add(no, ni)))) : U32} =
+    Equal.cong(U32, U32,
+      z => Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, z)),
+      U32.add(o, i), U32.from_nat(Nat.add(no, ni)), eidx)
+  +e0 : {Nat.add(0n, ni) == ni : Nat} = {==}
+  +e0a : {Nat.add(no, Nat.add(0n, ni)) == Nat.add(no, ni) : Nat} =
+    Equal.cong(Nat, Nat, z => Nat.add(no, z), Nat.add(0n, ni), ni, e0)
+  +hsetv : {CS.CS.nth(xs, Nat.add(no, Nat.add(0n, ni)))
+            == U32.from_nat(CR.CR.nnth(idxs, ni)) : U32} =
+    CR.CR.set_get(no, k, 0n, ni, xs, idxs, hset, he)
+  Equal.trans(U32, Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.add(o, i))),
+    Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(Nat.add(no, ni)))),
+    U32.from_nat(CR.CR.nnth(idxs, ni)), hidx,
+    Equal.trans(U32,
+      Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(Nat.add(no, ni)))),
+      CS.CS.nth(xs, Nat.add(no, ni)),
+      U32.from_nat(CR.CR.nnth(idxs, ni)), hval,
+      Equal.trans(U32, CS.CS.nth(xs, Nat.add(no, ni)),
+        CS.CS.nth(xs, Nat.add(no, Nat.add(0n, ni))),
+        U32.from_nat(CR.CR.nnth(idxs, ni)),
+        Equal.cong(Nat, U32, z => CS.CS.nth(xs, z),
+          Nat.add(no, ni), Nat.add(no, Nat.add(0n, ni)),
+          Equal.sym(Nat, Nat.add(no, Nat.add(0n, ni)), Nat.add(no, ni), e0a)),
+        hsetv)))
+
+# Phase 4's read: the touched-list cell at `U32.add(256, cj)`, with the clear
+# cursor `cj` as `from_nat(nj)`.  The value is the code at position `nj` of the
+# ghost touched list, which is what `CR.touch_get` supplies.
+def CMm.read_touch_value(+d: Nat, a: Array<U32>, +xs: +List<U32>,
+    +tl: +List<Nat>, +cj: U32, +nj: Nat,
+    +hcj: {cj == U32.from_nat(nj) : U32},
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk: {Nat.is_lt(Nat.add(256n, nj), FT.FT.pow2(d)) == True{} : Bool},
+    +hs: CMem.CM.Store(d, 0n, a, xs),
+    htouch: CR.CR.Touch(0n, xs, tl),
+    +he: {Nat.is_lt(nj, CR.CR.nlen(tl)) == True{} : Bool}) ->
+  {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.add(256, cj)))
+   == U32.from_nat(CR.CR.nnth(tl, nj)) : U32}:
+  +eidx1 : {U32.add(256, cj)
+            == U32.add(256, U32.from_nat(nj)) : U32} =
+    Equal.cong(U32, U32, z => U32.add(256, z), cj, U32.from_nat(nj), hcj)
+  +eidx2 : {U32.add(256, U32.from_nat(nj))
+            == U32.from_nat(Nat.add(256n, nj)) : U32} =
+    FT.FT.u32_add_from_nat(256n, nj)
+  +eidx : {U32.add(256, cj) == U32.from_nat(Nat.add(256n, nj)) : U32} =
+    Equal.trans(U32, U32.add(256, cj), U32.add(256, U32.from_nat(nj)),
+      U32.from_nat(Nat.add(256n, nj)), eidx1, eidx2)
+  +hval : {Arr.Arr.snd(Array<U32>, U32,
+             Array.get(U32, a, U32.from_nat(Nat.add(256n, nj))))
+           == CS.CS.nth(xs, Nat.add(256n, nj)) : U32} =
+    CMem.CM.store_read(d, a, xs, Nat.add(256n, nj), hd, hk, hs)
+  +hidx : {Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.add(256, cj)))
+           == Arr.Arr.snd(Array<U32>, U32,
+                Array.get(U32, a, U32.from_nat(Nat.add(256n, nj)))) : U32} =
+    Equal.cong(U32, U32,
+      z => Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, z)),
+      U32.add(256, cj), U32.from_nat(Nat.add(256n, nj)), eidx)
+  +e0 : {Nat.add(0n, nj) == nj : Nat} = {==}
+  +e0a : {Nat.add(256n, Nat.add(0n, nj)) == Nat.add(256n, nj) : Nat} =
+    Equal.cong(Nat, Nat, z => Nat.add(256n, z), Nat.add(0n, nj), nj, e0)
+  +htv : {CS.CS.nth(xs, Nat.add(256n, Nat.add(0n, nj)))
+          == U32.from_nat(CR.CR.nnth(tl, nj)) : U32} =
+    CR.CR.touch_get(tl, 0n, nj, xs, htouch, he)
+  Equal.trans(U32, Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.add(256, cj))),
+    Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(Nat.add(256n, nj)))),
+    U32.from_nat(CR.CR.nnth(tl, nj)), hidx,
+    Equal.trans(U32,
+      Arr.Arr.snd(Array<U32>, U32, Array.get(U32, a, U32.from_nat(Nat.add(256n, nj)))),
+      CS.CS.nth(xs, Nat.add(256n, nj)),
+      U32.from_nat(CR.CR.nnth(tl, nj)), hval,
+      Equal.trans(U32, CS.CS.nth(xs, Nat.add(256n, nj)),
+        CS.CS.nth(xs, Nat.add(256n, Nat.add(0n, nj))),
+        U32.from_nat(CR.CR.nnth(tl, nj)),
+        Equal.cong(Nat, U32, z => CS.CS.nth(xs, z),
+          Nat.add(256n, nj), Nat.add(256n, Nat.add(0n, nj)),
+          Equal.sym(Nat, Nat.add(256n, Nat.add(0n, nj)), Nat.add(256n, nj), e0a)),
+        htv)))
