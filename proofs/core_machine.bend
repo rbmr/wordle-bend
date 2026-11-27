@@ -667,3 +667,163 @@ def CMm.inv_set(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
   (_, r4) = r3
   (_, hset) = r4
   hset
+
+# ------------------------------------------------- phase 3 over the invariant -
+#
+# The two branches of the candidate pass produce the same array and differ only
+# in the ghost touched list, so each branch has its own def (a branch-selected
+# list cannot be repacked once).  Both hand the candidate range on: the two
+# scratch writes sit below it, so `CR.set_set_below` keeps it.
+#
+# `phase3_new` / `phase3_dup` already state the branch ghost state; what is left
+# is `Set`, which `set_scratch` discharges for both write indices.  The result of
+# `phase3_*` is taken as a *parameter* of a helper (`_go`), because a match
+# cannot scrutinise a computed value.
+
+def CMm.set_scratch(+o: Nat, +k: Nat, +w: Nat, +v: U32, +xs: +List<U32>,
+    +idxs: +List<Nat>,
+    hs: CR.CR.Set(o, k, 0n, xs, idxs),
+    +hw: {Nat.is_lt(w, o) == True{} : Bool}) ->
+  CR.CR.Set(o, k, 0n, CS.CS.set(xs, w, v), idxs):
+  CR.CR.set_set_below(o, k, 0n, w, v, xs, idxs, hs,
+    CR.CR.is_lt_rewrite_r(w, o, Nat.add(o, 0n),
+      Equal.sym(Nat, Nat.add(o, 0n), o, NatProof.NatPrf.add_zero(o)), hw))
+
+def CMm.phase3_new_pack(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    hset2: CR.CR.Set(o, k, 0n,
+             CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+               U32.from_nat(c)), idxs),
+    r2: CMem.CM.Store(d, 0n,
+          Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+          CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+            U32.from_nat(c)))
+        & (CR.CR.Count(0n, 256n,
+             CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+               U32.from_nat(c)), c <> nl)
+           & (CR.CR.Touch(0n,
+                CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                  U32.from_nat(c)), CR.CR.snoc(c, tl))
+              & ({CR.CR.nlen(CR.CR.snoc(c, tl))
+                  == CR.CR.nlen(CNL.CNL.dedup(c <> nl)) : Nat}
+                 & CR.CR.Agree(
+                     CS.CS.set(CS.CS.set(xs, c, 1),
+                       Nat.add(256n, CR.CR.nlen(tl)), U32.from_nat(c)),
+                     xs0))))) ->
+  CMm.Inv(d, Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)),
+    xs0, c <> nl, CR.CR.snoc(c, tl), o, k, idxs):
+  (hs, (hc, (hto, (hl, ha)))) = r2
+  (hs, (hc, (hto, (hl, (ha, hset2)))))
+
+def CMm.phase3_new_inv(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    +hm: {CR.CR.mem(c, nl) == False{} : Bool},
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat},
+    +hc256: {Nat.is_lt(c, 256n) == True{} : Bool},
+    +htl: {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), 512n) == True{} : Bool},
+    +ho: {Nat.is_le(768n, o) == True{} : Bool},
+    hset: CR.CR.Set(o, k, 0n, xs, idxs),
+    r: CMem.CM.Store(d, 0n,
+         Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+         CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+           U32.from_nat(c)))
+       & (CR.CR.Count(0n, 256n,
+            CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+              U32.from_nat(c)), c <> nl)
+          & (CR.CR.Touch(0n,
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), CR.CR.snoc(c, tl))
+             & CR.CR.Agree(
+                 CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                   U32.from_nat(c)), xs0)))) ->
+  CMm.Inv(d, Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)),
+    xs0, c <> nl, CR.CR.snoc(c, tl), o, k, idxs):
+  +ho256 : {Nat.is_le(256n, o) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(256n, 768n, o, {==}, ho)
+  +ho512 : {Nat.is_le(512n, o) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(512n, 768n, o, {==}, ho)
+  +hco : {Nat.is_lt(c, o) == True{} : Bool} =
+    NatProof.Nat.is_lt_le_trans(c, 256n, o, hc256, ho256)
+  +hto : {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), o) == True{} : Bool} =
+    NatProof.Nat.is_lt_le_trans(Nat.add(256n, CR.CR.nlen(tl)), 512n, o, htl,
+      ho512)
+  hset1 = CMm.set_scratch(o, k, c, 1, xs, idxs, hset, hco)
+  hset2 = CMm.set_scratch(o, k, Nat.add(256n, CR.CR.nlen(tl)), U32.from_nat(c),
+    CS.CS.set(xs, c, 1), idxs, hset1, hto)
+  CMm.phase3_new_pack(d, a, xs, xs0, c, code, t, nl, tl, o, k, idxs, hset2,
+    CMm.phase3_new(d, a, xs, xs0, c, code, t, nl, tl, hm, ht, r))
+
+def CMm.phase3_dup_pack(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    hset2: CR.CR.Set(o, k, 0n,
+             CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+               U32.from_nat(c)), idxs),
+    r2: CMem.CM.Store(d, 0n,
+          Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+          CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+            U32.from_nat(c)))
+        & (CR.CR.Count(0n, 256n,
+             CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+               U32.from_nat(c)), c <> nl)
+           & (CR.CR.Touch(0n,
+                CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                  U32.from_nat(c)), tl)
+              & ({CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(c <> nl)) : Nat}
+                 & CR.CR.Agree(
+                     CS.CS.set(CS.CS.set(xs, c, 1),
+                       Nat.add(256n, CR.CR.nlen(tl)), U32.from_nat(c)),
+                     xs0))))) ->
+  CMm.Inv(d, Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)),
+    xs0, c <> nl, tl, o, k, idxs):
+  (hs, (hc, (hto, (hl, ha)))) = r2
+  (hs, (hc, (hto, (hl, (ha, hset2)))))
+
+def CMm.phase3_dup_inv(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    +hm: {CR.CR.mem(c, nl) == True{} : Bool},
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat},
+    +hc256: {Nat.is_lt(c, 256n) == True{} : Bool},
+    +htl: {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), 512n) == True{} : Bool},
+    +ho: {Nat.is_le(768n, o) == True{} : Bool},
+    hset: CR.CR.Set(o, k, 0n, xs, idxs),
+    r: CMem.CM.Store(d, 0n,
+         Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+         CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+           U32.from_nat(c)))
+       & (CR.CR.Count(0n, 256n,
+            CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+              U32.from_nat(c)), c <> nl)
+          & (CR.CR.Touch(0n,
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), CR.CR.snoc(c, tl))
+             & CR.CR.Agree(
+                 CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                   U32.from_nat(c)), xs0)))) ->
+  CMm.Inv(d, Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)),
+    xs0, c <> nl, tl, o, k, idxs):
+  +ho256 : {Nat.is_le(256n, o) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(256n, 768n, o, {==}, ho)
+  +ho512 : {Nat.is_le(512n, o) == True{} : Bool} =
+    NatProof.Nat.is_le_trans(512n, 768n, o, {==}, ho)
+  +hco : {Nat.is_lt(c, o) == True{} : Bool} =
+    NatProof.Nat.is_lt_le_trans(c, 256n, o, hc256, ho256)
+  +hto : {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), o) == True{} : Bool} =
+    NatProof.Nat.is_lt_le_trans(Nat.add(256n, CR.CR.nlen(tl)), 512n, o, htl,
+      ho512)
+  hset1 = CMm.set_scratch(o, k, c, 1, xs, idxs, hset, hco)
+  hset2 = CMm.set_scratch(o, k, Nat.add(256n, CR.CR.nlen(tl)), U32.from_nat(c),
+    CS.CS.set(xs, c, 1), idxs, hset1, hto)
+  CMm.phase3_dup_pack(d, a, xs, xs0, c, code, t, nl, tl, o, k, idxs, hset2,
+    CMm.phase3_dup(d, a, xs, xs0, c, code, t, nl, tl, hm, ht, r))
