@@ -106,6 +106,78 @@ def CNL.nlen_snoc(+c: Nat, +tl: +List<Nat>) ->
         CR.CR.nlen(CR.CR.snoc(c, rest)), Nat.add(1n, CR.CR.nlen(rest)),
         CNL.nlen_snoc(c, rest))
 
+# The counter invariant of machine phase 3 does **not** need a
+# `len(dedup (snoc c tl))` lemma: the machine only appends the code to the
+# touched list on a first occurrence (`mem(c, nl) = False`), so the two lists
+# grow in the same step and the equality is `nlen_snoc` + `len_ndedup_add`.
+# This is the append case: `len tl = len(dedup nl)` is preserved.
+def CNL.touch_counter(+c: Nat, +nl: +List<Nat>, +tl: +List<Nat>,
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.dedup(nl)) : Nat},
+    +hm: {CR.CR.mem(c, nl) == False{} : Bool}) ->
+  {CR.CR.nlen(CR.CR.snoc(c, tl)) == CR.CR.nlen(CNL.dedup(c <> nl)) : Nat}:
+  +hn : {Bool.not(CR.CR.mem(c, nl)) == True{} : Bool} =
+    Equal.trans(Bool, Bool.not(CR.CR.mem(c, nl)), Bool.not(False{}), True{},
+      Equal.cong(Bool, Bool, z => Bool.not(z), CR.CR.mem(c, nl), False{}, hm),
+      {==})
+  +hv : {U32.to_nat(Bool.to_u32(Bool.not(CR.CR.mem(c, nl)))) == 1n : Nat} =
+    Equal.cong(Bool, Nat, z => U32.to_nat(Bool.to_u32(z)),
+      Bool.not(CR.CR.mem(c, nl)), True{}, hn)
+  +h3 : {CR.CR.nlen(CNL.dedup(c <> nl))
+         == Nat.add(CR.CR.nlen(CNL.dedup(nl)), 1n) : Nat} =
+    Equal.trans(Nat,
+      CR.CR.nlen(CNL.dedup(c <> nl)),
+      Nat.add(CR.CR.nlen(CNL.dedup(nl)),
+              U32.to_nat(Bool.to_u32(Bool.not(CR.CR.mem(c, nl))))),
+      Nat.add(CR.CR.nlen(CNL.dedup(nl)), 1n),
+      CNL.len_ndedup_add(c, nl),
+      CR.CR.add_cong_r(CR.CR.nlen(CNL.dedup(nl)),
+        U32.to_nat(Bool.to_u32(Bool.not(CR.CR.mem(c, nl)))), 1n, hv))
+  +h12 : {CR.CR.nlen(CR.CR.snoc(c, tl))
+          == Nat.add(1n, CR.CR.nlen(CNL.dedup(nl))) : Nat} =
+    Equal.trans(Nat, CR.CR.nlen(CR.CR.snoc(c, tl)),
+      Nat.add(1n, CR.CR.nlen(tl)),
+      Nat.add(1n, CR.CR.nlen(CNL.dedup(nl))),
+      CNL.nlen_snoc(c, tl),
+      CR.CR.add_cong_r(1n, CR.CR.nlen(tl), CR.CR.nlen(CNL.dedup(nl)), ht))
+  Equal.trans(Nat, CR.CR.nlen(CR.CR.snoc(c, tl)),
+    Nat.add(1n, CR.CR.nlen(CNL.dedup(nl))),
+    CR.CR.nlen(CNL.dedup(c <> nl)),
+    h12,
+    Equal.trans(Nat, Nat.add(1n, CR.CR.nlen(CNL.dedup(nl))),
+      Nat.add(CR.CR.nlen(CNL.dedup(nl)), 1n),
+      CR.CR.nlen(CNL.dedup(c <> nl)),
+      NatProof.NatPrf.add_comm(1n, CR.CR.nlen(CNL.dedup(nl))),
+      Equal.sym(Nat, CR.CR.nlen(CNL.dedup(c <> nl)),
+        Nat.add(CR.CR.nlen(CNL.dedup(nl)), 1n), h3)))
+
+# The duplicate case: the code is already counted, the machine does not append
+# to the touched list, and adding the duplicate to the processed list leaves
+# its deduplicated length unchanged.
+def CNL.dup_counter(+c: Nat, +nl: +List<Nat>,
+    +hm: {CR.CR.mem(c, nl) == True{} : Bool}) ->
+  {CR.CR.nlen(CNL.dedup(c <> nl)) == CR.CR.nlen(CNL.dedup(nl)) : Nat}:
+  +hn : {Bool.not(CR.CR.mem(c, nl)) == False{} : Bool} =
+    Equal.trans(Bool, Bool.not(CR.CR.mem(c, nl)), Bool.not(True{}), False{},
+      Equal.cong(Bool, Bool, z => Bool.not(z), CR.CR.mem(c, nl), True{}, hm),
+      {==})
+  +hv : {U32.to_nat(Bool.to_u32(Bool.not(CR.CR.mem(c, nl)))) == 0n : Nat} =
+    Equal.cong(Bool, Nat, z => U32.to_nat(Bool.to_u32(z)),
+      Bool.not(CR.CR.mem(c, nl)), False{}, hn)
+  +h3 : {CR.CR.nlen(CNL.dedup(c <> nl))
+         == Nat.add(CR.CR.nlen(CNL.dedup(nl)), 0n) : Nat} =
+    Equal.trans(Nat,
+      CR.CR.nlen(CNL.dedup(c <> nl)),
+      Nat.add(CR.CR.nlen(CNL.dedup(nl)),
+              U32.to_nat(Bool.to_u32(Bool.not(CR.CR.mem(c, nl))))),
+      Nat.add(CR.CR.nlen(CNL.dedup(nl)), 0n),
+      CNL.len_ndedup_add(c, nl),
+      CR.CR.add_cong_r(CR.CR.nlen(CNL.dedup(nl)),
+        U32.to_nat(Bool.to_u32(Bool.not(CR.CR.mem(c, nl)))), 0n, hv))
+  Equal.trans(Nat, CR.CR.nlen(CNL.dedup(c <> nl)),
+    Nat.add(CR.CR.nlen(CNL.dedup(nl)), 0n),
+    CR.CR.nlen(CNL.dedup(nl)),
+    h3, NatProof.NatPrf.add_zero(CR.CR.nlen(CNL.dedup(nl))))
+
 # `Nat.is_eq` is symmetric in its `False` direction too (the `True` direction
 # is `NatProof.NatPrf.is_eq_sym`).  The `len_dedup_snoc` induction needs it to
 # pass a `False` decision from `is_eq(c, d)` to `mem(c, d <> rest)`'s head test
