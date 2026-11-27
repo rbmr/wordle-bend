@@ -1168,3 +1168,47 @@ def CR.count_nil_get(+d: Nat, xs: +List<U32>,
     Equal.cong(Nat, U32, z => CS.CS.nth(xs, z), d, Nat.add(d, 0n),
       Equal.sym(Nat, Nat.add(d, 0n), d, ez)),
     h0)
+
+# ------------------------------------------------------ the candidate set ---
+#
+# `CR.Set` is the machine's input: cells `o+d .. o+k+d-1` hold the candidate
+# indices.  The machine never writes there (its scratch is below 768 and `o`
+# is at or above it), so the invariant needs the fact that a write *below* the
+# region leaves `Set` unchanged.  `hw` is `w < o + d`; every cell of the region
+# is at or above `o + d`, so no cell is the written one.
+
+def CR.is_lt_rewrite_r(+a: Nat, +b: Nat, +c: Nat, +e: {b == c : Nat},
+    h: {Nat.is_lt(a, b) == True{} : Bool}) ->
+  {Nat.is_lt(a, c) == True{} : Bool}:
+  %e : {Nat.is_lt(a, _) == True{} : Bool}
+  h
+
+def CR.set_set_below(+o: Nat, +k: Nat, +d: Nat, +w: Nat, +v: U32,
+    +xs: +List<U32>, +idxs: +List<Nat>,
+    hs: CR.Set(o, k, d, xs, idxs),
+    +hw: {Nat.is_lt(w, Nat.add(o, d)) == True{} : Bool}) ->
+  CR.Set(o, k, d, CS.CS.set(xs, w, v), idxs):
+  match k:
+    case 0n:
+      hs
+    case 1n+kp:
+      (hhead, htail) = hs
+      +hne : {Nat.is_eq(w, Nat.add(o, d)) == False{} : Bool} =
+        CN.core_nat_eq_false_of_lt(w, Nat.add(o, d), hw)
+      +hh : {CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(o, d))
+             == CS.CS.nth(xs, Nat.add(o, d)) : U32} =
+        CS.CS.nth_set_diff(xs, w, Nat.add(o, d), v, hne)
+      +hh2 : {CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(o, d))
+              == U32.from_nat(CR.nnth(idxs, d)) : U32} =
+        Equal.trans(U32, CS.CS.nth(CS.CS.set(xs, w, v), Nat.add(o, d)),
+          CS.CS.nth(xs, Nat.add(o, d)),
+          U32.from_nat(CR.nnth(idxs, d)), hh, hhead)
+      +hsucc : {Nat.add(o, 1n+d) == 1n+Nat.add(o, d) : Nat} =
+        NatProof.NatPrf.add_succ(o, d)
+      +hlt1 : {Nat.is_lt(w, 1n+Nat.add(o, d)) == True{} : Bool} =
+        NatProof.Nat.is_lt_succ_of_le(w, Nat.add(o, d),
+          NatProof.Nat.is_le_of_lt(w, Nat.add(o, d), hw))
+      +hw2 : {Nat.is_lt(w, Nat.add(o, 1n+d)) == True{} : Bool} =
+        CR.is_lt_rewrite_r(w, 1n+Nat.add(o, d), Nat.add(o, 1n+d),
+          Equal.sym(Nat, Nat.add(o, 1n+d), 1n+Nat.add(o, d), hsucc), hlt1)
+      (hh2, CR.set_set_below(o, kp, 1n+d, w, v, xs, idxs, htail, hw2))
