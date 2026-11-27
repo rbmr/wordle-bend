@@ -15,6 +15,7 @@ import Base
 import ./core_list.bend as CS
 import ./core_region.bend as CR
 import ./nat.bend as NatProof
+import ./logic.bend as Logic
 
 def CNL.dedup_cons(+x: Nat, b: Bool, +d: +List<Nat>) -> +List<Nat>:
   match b:
@@ -104,3 +105,21 @@ def CNL.nlen_snoc(+c: Nat, +tl: +List<Nat>) ->
       Equal.cong(Nat, Nat, z => Nat.add(1n, z),
         CR.CR.nlen(CR.CR.snoc(c, rest)), Nat.add(1n, CR.CR.nlen(rest)),
         CNL.nlen_snoc(c, rest))
+
+# `Nat.is_eq` is symmetric in its `False` direction too (the `True` direction
+# is `NatProof.NatPrf.is_eq_sym`).  The `len_dedup_snoc` induction needs it to
+# pass a `False` decision from `is_eq(c, d)` to `mem(c, d <> rest)`'s head test
+# and to `mem_snoc_ne`'s head test, which are stated the other way round.
+def CNL.is_eq_sym_false(a: Nat, b: Nat,
+    e: {Nat.is_eq(a, b) == False{} : Bool}) ->
+  {Nat.is_eq(b, a) == False{} : Bool}:
+  match a b:
+    case 0n 0n:
+      Empty.absurd({Nat.is_eq(0n, 0n) == False{} : Bool},
+                   Logic.Proof.true_ne_false(e))
+    case 0n 1n+bp:
+      {==}
+    case 1n+ap 0n:
+      {==}
+    case 1n+ap 1n+bp:
+      CNL.is_eq_sym_false(ap, bp, e)
