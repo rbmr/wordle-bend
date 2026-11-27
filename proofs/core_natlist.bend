@@ -195,3 +195,34 @@ def CNL.is_eq_sym_false(a: Nat, b: Nat,
       {==}
     case 1n+ap 1n+bp:
       CNL.is_eq_sym_false(ap, bp, e)
+
+# The phase-3 counter step as the machine performs it.  The count-cell read
+# decides first occurrence (`False`: append to the touched list; `True`: the
+# duplicate path leaves it alone), so the invariant is stated for the touched
+# list the machine actually keeps.  `CtrOK` is that list-indexed statement.
+def CNL.CtrOK(b: Bool, +c: Nat, +nl: +List<Nat>, +tl: +List<Nat>) -> Type:
+  match b:
+    case True{}:
+      {CR.CR.nlen(tl) == CR.CR.nlen(CNL.dedup(c <> nl)) : Nat}
+    case False{}:
+      {CR.CR.nlen(CR.CR.snoc(c, tl)) == CR.CR.nlen(CNL.dedup(c <> nl)) : Nat}
+
+def CNL.step_counter(+c: Nat, +nl: +List<Nat>, +tl: +List<Nat>,
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.dedup(nl)) : Nat},
+    b: Bool, +hb: {b == CR.CR.mem(c, nl) : Bool}) ->
+  CNL.CtrOK(b, c, nl, tl):
+  match b:
+    case True{}:
+      +hm : {CR.CR.mem(c, nl) == True{} : Bool} =
+        Equal.sym(Bool, b, CR.CR.mem(c, nl), hb)
+      +hd : {CR.CR.nlen(CNL.dedup(c <> nl))
+             == CR.CR.nlen(CNL.dedup(nl)) : Nat} =
+        CNL.dup_counter(c, nl, hm)
+      Equal.trans(Nat, CR.CR.nlen(tl), CR.CR.nlen(CNL.dedup(nl)),
+        CR.CR.nlen(CNL.dedup(c <> nl)), ht,
+        Equal.sym(Nat, CR.CR.nlen(CNL.dedup(c <> nl)),
+          CR.CR.nlen(CNL.dedup(nl)), hd))
+    case False{}:
+      +hm : {CR.CR.mem(c, nl) == False{} : Bool} =
+        Equal.sym(Bool, b, CR.CR.mem(c, nl), hb)
+      CNL.touch_counter(c, nl, tl, ht, hm)
