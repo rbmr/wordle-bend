@@ -1100,3 +1100,39 @@ def CR.set_get(+o: Nat, +k: Nat, +d: Nat, +e: Nat, xs: +List<U32>,
               U32.from_nat(CR.nnth(idxs, Nat.add(1n+d, ep))),
               U32.from_nat(CR.nnth(idxs, Nat.add(d, 1n+ep))),
               CR.set_get(o, kp, 1n+d, ep, xs, idxs, htail, he), er))
+
+# `Bool.or(b, True)` is `True` (the list membership has no absorbing `True` on
+# the right until it is proved).
+def CR.or_true(b: Bool) -> {Bool.or(b, True{}) == True{} : Bool}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+# Extending a ghost membership list keeps a member.
+def CR.mem_cons_true(+x: Nat, +y: Nat, +xs: +List<Nat>,
+    +h: {CR.mem(x, xs) == True{} : Bool}) ->
+  {CR.mem(x, y <> xs) == True{} : Bool}:
+  Equal.trans(Bool, Bool.or(Nat.is_eq(x, y), CR.mem(x, xs)),
+    Bool.or(Nat.is_eq(x, y), True{}), True{},
+    Equal.cong(Bool, Bool, z => Bool.or(Nat.is_eq(x, y), z),
+      CR.mem(x, xs), True{}, h),
+    CR.or_true(Nat.is_eq(x, y)))
+
+# The candidate index at position `d` of the set is one of the set's indices, so
+# it is a valid candidate (the table row and the class sizes use it).
+def CR.nnth_mem(+idxs: +List<Nat>, +d: Nat,
+    +hd: {Nat.is_lt(d, CR.nlen(idxs)) == True{} : Bool}) ->
+  {CR.mem(CR.nnth(idxs, d), idxs) == True{} : Bool}:
+  match idxs:
+    case Nil{}:
+      Empty.absurd({CR.mem(CR.nnth(Nil{}, d), Nil{}) == True{} : Bool},
+        NatProof.Nat.not_lt_zero(d, hd))
+    case Con{c, rest}:
+      match d:
+        case 0n:
+          CR.mem_head_same(c, rest)
+        case 1n+dp:
+          CR.mem_cons_true(CR.nnth(rest, dp), c, rest,
+            CR.nnth_mem(rest, dp, hd))
