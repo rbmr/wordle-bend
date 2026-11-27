@@ -61,6 +61,7 @@ import ./proofs/core_region.bend as CoreRegion
 import ./proofs/core_machine.bend as CoreMachine
 import ./proofs/core_dcount.bend as CoreDCount
 import ./proofs/core_cells.bend as CoreCells
+import ./proofs/core_natlist.bend as CoreNatList
 
 def Bool.disc(b: Bool) -> Type:
   match b:
