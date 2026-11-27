@@ -10,6 +10,7 @@
 import Base
 import ./core_list.bend as CS
 import ./core_nat.bend as CN
+import ./core_natlist.bend as CNL
 import ./core_store.bend as CMem
 import ./core_write.bend as CWrite
 import ./core_region.bend as CR
@@ -500,3 +501,90 @@ def CMm.read_touch_value(+d: Nat, a: Array<U32>, +xs: +List<U32>,
           Nat.add(256n, nj), Nat.add(256n, Nat.add(0n, nj)),
           Equal.sym(Nat, Nat.add(256n, Nat.add(0n, nj)), Nat.add(256n, nj), e0a)),
         htv)))
+
+# ------------------------------------------------- the phase-3 ghost state ---
+#
+# After the two writes the array is fixed; only the ghost lists differ by
+# branch.  On a first occurrence (`mem c nl = False`) the touched list gains the
+# code (`snoc`), on a duplicate it keeps its old list (`touch_prefix` drops the
+# cell that the free-slot write put past the end).  The counter invariant
+# `len tl = len(dedup nl)` follows in each branch from the `Nat` list lemmas.
+
+def CMm.phase3_new(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>,
+    +hm: {CR.CR.mem(c, nl) == False{} : Bool},
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat},
+    r: CMem.CM.Store(d, 0n,
+         Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+         CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+           U32.from_nat(c)))
+       & (CR.CR.Count(0n, 256n,
+            CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+              U32.from_nat(c)), c <> nl)
+          & (CR.CR.Touch(0n,
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), CR.CR.snoc(c, tl))
+             & CR.CR.Agree(
+                 CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                   U32.from_nat(c)), xs0)))) ->
+  CMem.CM.Store(d, 0n,
+    Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)))
+  & (CR.CR.Count(0n, 256n,
+       CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+         U32.from_nat(c)), c <> nl)
+     & (CR.CR.Touch(0n,
+          CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+            U32.from_nat(c)), CR.CR.snoc(c, tl))
+        & ({CR.CR.nlen(CR.CR.snoc(c, tl))
+            == CR.CR.nlen(CNL.CNL.dedup(c <> nl)) : Nat}
+           & CR.CR.Agree(
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), xs0)))):
+  (hs, (hc, (hto, ha))) = r
+  (hs, (hc, (hto, (CNL.CNL.touch_counter(c, nl, tl, ht, hm), ha))))
+
+def CMm.phase3_dup(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>,
+    +hm: {CR.CR.mem(c, nl) == True{} : Bool},
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat},
+    r: CMem.CM.Store(d, 0n,
+         Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+         CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+           U32.from_nat(c)))
+       & (CR.CR.Count(0n, 256n,
+            CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+              U32.from_nat(c)), c <> nl)
+          & (CR.CR.Touch(0n,
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), CR.CR.snoc(c, tl))
+             & CR.CR.Agree(
+                 CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                   U32.from_nat(c)), xs0)))) ->
+  CMem.CM.Store(d, 0n,
+    Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)))
+  & (CR.CR.Count(0n, 256n,
+       CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+         U32.from_nat(c)), c <> nl)
+     & (CR.CR.Touch(0n,
+          CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+            U32.from_nat(c)), tl)
+        & ({CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(c <> nl)) : Nat}
+           & CR.CR.Agree(
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), xs0)))):
+  (hs, (hc, (hto, ha))) = r
+  +hd : {CR.CR.nlen(CNL.CNL.dedup(c <> nl))
+         == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat} = CNL.CNL.dup_counter(c, nl, hm)
+  +hct : {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(c <> nl)) : Nat} =
+    Equal.trans(Nat, CR.CR.nlen(tl), CR.CR.nlen(CNL.CNL.dedup(nl)),
+      CR.CR.nlen(CNL.CNL.dedup(c <> nl)), ht, Equal.sym(Nat,
+        CR.CR.nlen(CNL.CNL.dedup(c <> nl)), CR.CR.nlen(CNL.CNL.dedup(nl)), hd))
+  (hs, (hc, (CR.CR.touch_prefix(tl, 0n,
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)), c, hto), (hct, ha))))
