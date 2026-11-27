@@ -827,3 +827,84 @@ def CMm.phase3_dup_inv(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
     CS.CS.set(xs, c, 1), idxs, hset1, hto)
   CMm.phase3_dup_pack(d, a, xs, xs0, c, code, t, nl, tl, o, k, idxs, hset2,
     CMm.phase3_dup(d, a, xs, xs0, c, code, t, nl, tl, hm, ht, r))
+
+# The touched list after phase 3, as a function of the machine's first-occurrence
+# flag: a duplicate keeps the list, a new code appends it.  The bisimulation's
+# result type must name one list, and after the match on the flag this selector
+# reduces to the branch's list.
+def CMm.tlnext(+b: Bool, +c: Nat, +tl: +List<Nat>) -> +List<Nat>:
+  match b:
+    case True{}:
+      tl
+    case False{}:
+      CR.CR.snoc(c, tl)
+
+def CMm.phase3_go(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
+    +xs0: +List<U32>, +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>,
+    +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>, +b: Bool,
+    +hb: {b == CR.CR.mem(c, nl) : Bool},
+    +hc256: {Nat.is_lt(c, 256n) == True{} : Bool},
+    +htl: {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), 512n) == True{} : Bool},
+    +ho: {Nat.is_le(768n, o) == True{} : Bool},
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat},
+    hset: CR.CR.Set(o, k, 0n, xs, idxs),
+    r: CMem.CM.Store(d, 0n,
+         Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+         CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+           U32.from_nat(c)))
+       & (CR.CR.Count(0n, 256n,
+            CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+              U32.from_nat(c)), c <> nl)
+          & (CR.CR.Touch(0n,
+               CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                 U32.from_nat(c)), CR.CR.snoc(c, tl))
+             & CR.CR.Agree(
+                 CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+                   U32.from_nat(c)), xs0)))) ->
+  CMm.Inv(d, Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)),
+    xs0, c <> nl, CMm.tlnext(b, c, tl), o, k, idxs):
+  match b:
+    case True{}:
+      CMm.phase3_dup_inv(d, a, xs, xs0, c, code, t, nl, tl, o, k, idxs,
+        Equal.sym(Bool, True{}, CR.CR.mem(c, nl), hb), ht, hc256, htl, ho, hset,
+        r)
+    case False{}:
+      CMm.phase3_new_inv(d, a, xs, xs0, c, code, t, nl, tl, o, k, idxs,
+        Equal.sym(Bool, False{}, CR.CR.mem(c, nl), hb), ht, hc256, htl, ho,
+        hset, r)
+
+# Phase 3 of the count machine over the invariant, as the machine runs it: the
+# mark step is already done (`r1`, the result of `CMm.mark_code`), this def adds
+# the touched-list write on top of it, splits on the machine's own
+# first-occurrence flag, and repacks into the invariant.  `a` is the pre-mark
+# array; it appears in `r1`'s type and is consumed once by `mark_touch_go`.
+def CMm.phase3(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +c: Nat, +code: U32, +t: U32, +nl: +List<Nat>, +tl: +List<Nat>,
+    +o: Nat, +k: Nat, +idxs: +List<Nat>, +b: Bool,
+    +hb: {b == CR.CR.mem(c, nl) : Bool},
+    +hcode: {code == U32.from_nat(c) : U32},
+    +htn: {t == U32.from_nat(CR.CR.nlen(tl)) : U32},
+    +hc256: {Nat.is_lt(c, 256n) == True{} : Bool},
+    +htl: {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), 512n) == True{} : Bool},
+    +ho: {Nat.is_le(768n, o) == True{} : Bool},
+    +ht: {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat},
+    hset: CR.CR.Set(o, k, 0n, xs, idxs),
+    +hd: {Nat.is_lt(d, 32n) == True{} : Bool},
+    +hk2: {Nat.is_lt(Nat.add(256n, CR.CR.nlen(tl)), FT.FT.pow2(d))
+           == True{} : Bool},
+    +hlen: {Nat.is_le(Nat.add(0n, FT.FT.pow2(d)), CS.CS.len(xs)) == True{}
+            : Bool},
+    r1: CMem.CM.Store(d, 0n, Array.set(U32, a, code, 1), CS.CS.set(xs, c, 1))
+        & (CR.CR.Count(0n, 256n, CS.CS.set(xs, c, 1), c <> nl)
+           & (CR.CR.Touch(0n, CS.CS.set(xs, c, 1), tl)
+              & CR.CR.Agree(CS.CS.set(xs, c, 1), xs0)))) ->
+  CMm.Inv(d, Array.set(U32, Array.set(U32, a, code, 1), U32.add(256, t), code),
+    CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
+      U32.from_nat(c)),
+    xs0, c <> nl, CMm.tlnext(b, c, tl), o, k, idxs):
+  CMm.phase3_go(d, a, xs, xs0, c, code, t, nl, tl, o, k, idxs, b, hb, hc256,
+    htl, ho, ht, hset,
+    CMm.mark_touch_go(d, a, xs, xs0, c, code, t, nl, tl, hcode, htn, hd, hk2,
+      hlen, htl, r1))
