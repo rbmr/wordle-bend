@@ -1136,3 +1136,17 @@ def CR.nnth_mem(+idxs: +List<Nat>, +d: Nat,
         case 1n+dp:
           CR.mem_cons_true(CR.nnth(rest, dp), c, rest,
             CR.nnth_mem(rest, dp, hd))
+
+# The touched list after the phase-3 write is the old list with the code
+# appended: `touch_append` gives `Touch(..., snoc c tl)`.  On the duplicate
+# branch (`mem c nl = True`) the machine does not grow the list, so the ghost
+# list stays `tl`; the appended cell is past the list's end and does not
+# constrain it.  This lemma drops that last cell.
+def CR.touch_prefix(+tl: +List<Nat>, +j: Nat, xs: +List<U32>, +c: Nat,
+    h: CR.Touch(j, xs, CR.snoc(c, tl))) -> CR.Touch(j, xs, tl):
+  match tl:
+    case Nil{}:
+      Unit{}
+    case Con{d, rest}:
+      (hhead, htail) = h
+      (hhead, CR.touch_prefix(rest, Nat.add(1n, j), xs, c, htail))
