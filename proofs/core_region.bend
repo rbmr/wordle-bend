@@ -1276,3 +1276,56 @@ def CR.rem_all_head_cons(+c: Nat, +rest: +List<Nat>,
     CR.rem_cons(True{}, c, CR.rem_all(c, rest)), rest, e1,
     Equal.trans(+List<Nat>, CR.rem_cons(True{}, c, CR.rem_all(c, rest)),
       CR.rem_all(c, rest), rest, e2, CR.rem_all_of_not_mem(c, rest, h)))
+
+# `drop` on a `Nat` ghost list (the count region's lists are `List<Nat>`; the
+# `List<U32>` `CR.drop` cannot be reused).  Phases 4-5 carry the ghost list as
+# `ndrop cj tl`, so the cursor step is one `ndrop` composition.
+def CR.ndrop(+n: Nat, +xs: +List<Nat>) -> +List<Nat>:
+  match n:
+    case 0n:
+      xs
+    case 1n+np:
+      match xs:
+        case Nil{}:
+          Nil{}
+        case Con{y, rest}:
+          CR.ndrop(np, rest)
+
+def CR.ndrop_nil(+a: Nat) -> {CR.ndrop(a, Nil{}) == Nil{} : +List<Nat>}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+ap:
+      {==}
+
+def CR.ndrop_drop(+a: Nat, +b: Nat, +xs: +List<Nat>) ->
+  {CR.ndrop(a, CR.ndrop(b, xs)) == CR.ndrop(Nat.add(a, b), xs) : +List<Nat>}:
+  match b:
+    case 0n:
+      +e : {Nat.add(a, 0n) == a : Nat} = NatProof.NatPrf.add_zero(a)
+      Equal.cong(Nat, +List<Nat>, z => CR.ndrop(z, xs), a, Nat.add(a, 0n),
+        Equal.sym(Nat, Nat.add(a, 0n), a, e))
+    case 1n+bp:
+      match xs:
+        case Nil{}:
+          Equal.trans(+List<Nat>, CR.ndrop(a, CR.ndrop(1n+bp, Nil{})),
+            Nil{}, CR.ndrop(Nat.add(a, 1n+bp), Nil{}), CR.ndrop_nil(a),
+            Equal.sym(+List<Nat>, CR.ndrop(Nat.add(a, 1n+bp), Nil{}), Nil{},
+              CR.ndrop_nil(Nat.add(a, 1n+bp))))
+        case Con{y, rest}:
+          +e : {Nat.add(a, 1n+bp) == 1n+Nat.add(a, bp) : Nat} =
+            NatProof.NatPrf.add_succ(a, bp)
+          Equal.trans(+List<Nat>, CR.ndrop(a, CR.ndrop(1n+bp, y <> rest)),
+            CR.ndrop(a, CR.ndrop(bp, rest)),
+            CR.ndrop(Nat.add(a, 1n+bp), y <> rest),
+            Equal.cong(+List<Nat>, +List<Nat>, z => CR.ndrop(a, z),
+              CR.ndrop(1n+bp, y <> rest), CR.ndrop(bp, rest), {==}),
+            Equal.trans(+List<Nat>, CR.ndrop(a, CR.ndrop(bp, rest)),
+              CR.ndrop(Nat.add(a, bp), rest),
+              CR.ndrop(Nat.add(a, 1n+bp), y <> rest),
+              CR.ndrop_drop(a, bp, rest),
+              Equal.sym(+List<Nat>,
+                CR.ndrop(Nat.add(a, 1n+bp), y <> rest),
+                CR.ndrop(Nat.add(a, bp), rest),
+                Equal.cong(Nat, +List<Nat>, z => CR.ndrop(z, y <> rest),
+                  Nat.add(a, 1n+bp), 1n+Nat.add(a, bp), e))))
