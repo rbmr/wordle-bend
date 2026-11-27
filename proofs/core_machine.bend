@@ -588,3 +588,82 @@ def CMm.phase3_dup(+d: Nat, -a: Array<U32>, +xs: +List<U32>,
   (hs, (hc, (CR.CR.touch_prefix(tl, 0n,
     CS.CS.set(CS.CS.set(xs, c, 1), Nat.add(256n, CR.CR.nlen(tl)),
       U32.from_nat(c)), c, hto), (hct, ha))))
+
+# ------------------------------------------------------ the machine invariant -
+#
+# One predicate for the ghost state every phase of `dc_go` must preserve: the
+# array is the `Store` model, the count cells are the ghost code list `nl` (all
+# codes processed, duplicates kept), the touched cells are the first-occurrence
+# list `tl`, `tl`'s length is the deduplicated length of `nl` (so the machine's
+# `t` is the distinct count so far), every cell from 768 on is unchanged, and
+# the candidate set is the index list `idxs`.  The phase-dependent parts (the
+# result cell at phase 6, the branch-selected touched list at phase 3) are not
+# part of it: `CMm.phase3_new`/`phase3_dup` and `CMm.phase6` are the lemmas that
+# extend it, which is why this predicate is phase-independent.
+def CMm.Inv(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>)
+    -> Type:
+  CMem.CM.Store(d, 0n, a, xs)
+  & (CR.CR.Count(0n, 256n, xs, nl)
+     & (CR.CR.Touch(0n, xs, tl)
+        & ({CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat}
+           & (CR.CR.Agree(xs, xs0)
+              & CR.CR.Set(o, k, 0n, xs, idxs)))))
+
+# Projections, so a phase lemma can take the invariant and hand each part to the
+# step lemma it needs without destructuring at the call site.
+def CMm.inv_store(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    h: CMm.Inv(d, a, xs, xs0, nl, tl, o, k, idxs)) ->
+  CMem.CM.Store(d, 0n, a, xs):
+  (hs, _) = h
+  hs
+
+def CMm.inv_count(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    h: CMm.Inv(d, a, xs, xs0, nl, tl, o, k, idxs)) ->
+  CR.CR.Count(0n, 256n, xs, nl):
+  (_, r) = h
+  (hc, _) = r
+  hc
+
+def CMm.inv_touch(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    h: CMm.Inv(d, a, xs, xs0, nl, tl, o, k, idxs)) ->
+  CR.CR.Touch(0n, xs, tl):
+  (_, r) = h
+  (_, r2) = r
+  (ht, _) = r2
+  ht
+
+def CMm.inv_len(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    h: CMm.Inv(d, a, xs, xs0, nl, tl, o, k, idxs)) ->
+  {CR.CR.nlen(tl) == CR.CR.nlen(CNL.CNL.dedup(nl)) : Nat}:
+  (_, r) = h
+  (_, r2) = r
+  (_, r3) = r2
+  (hl, _) = r3
+  hl
+
+def CMm.inv_agree(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    h: CMm.Inv(d, a, xs, xs0, nl, tl, o, k, idxs)) ->
+  CR.CR.Agree(xs, xs0):
+  (_, r) = h
+  (_, r2) = r
+  (_, r3) = r2
+  (_, r4) = r3
+  (ha, _) = r4
+  ha
+
+def CMm.inv_set(+d: Nat, a: Array<U32>, +xs: +List<U32>, +xs0: +List<U32>,
+    +nl: +List<Nat>, +tl: +List<Nat>, +o: Nat, +k: Nat, +idxs: +List<Nat>,
+    h: CMm.Inv(d, a, xs, xs0, nl, tl, o, k, idxs)) ->
+  CR.CR.Set(o, k, 0n, xs, idxs):
+  (_, r) = h
+  (_, r2) = r
+  (_, r3) = r2
+  (_, r4) = r3
+  (_, hset) = r4
+  hset
