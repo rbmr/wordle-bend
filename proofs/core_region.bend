@@ -14,6 +14,7 @@
 import Base
 import ./core_list.bend as CS
 import ./core_nat.bend as CN
+import ./core_arith.bend as CA
 import ./nat.bend as NatProof
 import ./logic.bend as Logic
 
@@ -1150,3 +1151,20 @@ def CR.touch_prefix(+tl: +List<Nat>, +j: Nat, xs: +List<U32>, +c: Nat,
     case Con{d, rest}:
       (hhead, htail) = h
       (hhead, CR.touch_prefix(rest, Nat.add(1n, j), xs, c, htail))
+
+# The cleared count region: after the clear pass the ghost code list is `Nil`,
+# and `Count(0,256,xs,Nil)` says every one of the 256 count cells is
+# `to_u32(mem(_, Nil)) = to_u32(False) = 0`.  This is the "count cells cleared"
+# half of the count theorem's conclusion, stated cell by cell so the final
+# theorem (or a future physical-zero statement) can use it directly.
+def CR.count_nil_get(+d: Nat, xs: +List<U32>,
+    hc: CR.Count(0n, 256n, xs, Nil{}),
+    +hd: {Nat.is_lt(d, 256n) == True{} : Bool}) ->
+  {CS.CS.nth(xs, d) == 0 : U32}:
+  +h0 : {CS.CS.nth(xs, Nat.add(d, 0n)) == 0 : U32} =
+    CR.count_get(256n, d, 0n, xs, Nil{}, hc, hd)
+  +ez : {Nat.add(d, 0n) == d : Nat} = NatProof.NatPrf.add_zero(d)
+  Equal.trans(U32, CS.CS.nth(xs, d), CS.CS.nth(xs, Nat.add(d, 0n)), 0,
+    Equal.cong(Nat, U32, z => CS.CS.nth(xs, z), d, Nat.add(d, 0n),
+      Equal.sym(Nat, Nat.add(d, 0n), d, ez)),
+    h0)
