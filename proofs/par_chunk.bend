@@ -1,11 +1,18 @@
-# The chunked root of the bound-pruned solver.
+# The seeded, presorted, chunked root of the bound-pruned solver.
 #
-# `src/solve_k.bend` splits the root guess list into contiguous chunks and runs
-# the fast search machine (`SolveFast.step`) on each chunk from the neutral
-# accumulator, with the full guess list still used at every child node. This
-# module proves that every chunk result is valid and at most the reference fold
-# over its own guesses, and that folding the chunk results in guess order is at
-# most the reference fold over the whole root guess list.
+# `src/solve_k.bend` first runs `Greedy.root_prepare` (`src/greedy.bend`) to
+# presort usable root guesses by their Pass-1 depth-two lower bound and seed an
+# initial valid upper bound `b0` from greedy(lb) rollouts. For `d = 0` (`k <= 1`),
+# it runs `SolveFast.step` directly on the root buffer from `b0`. For `d >= 1`
+# (`k >= 2`), it deals the sorted root guesses round-robin (`deal_even` /
+# `deal_odd`) into `2^d <= k` chunks, evaluates every chunk from `b0` with the
+# full guess list available at every child node, and folds the results with
+# `SolveRef.better`.
+#
+# This module proves that every chunk result is valid and at most the reference
+# fold over its own guesses, and by pointwise optimality over all usable root
+# guesses in `G` that the final folded root result is valid and costs at most
+# the reference solver for every chunk count `k`.
 #
 # The walk functions are the ones of `proofs/fast_opt.bend`, with the reference
 # guess list as an explicit parameter `gs` instead of the whole child guess
@@ -48,6 +55,10 @@ import ./fast_valid.bend as FVal
 import ./fast_opt.bend as FOpt
 import ./par_fold.bend as ParFold
 import ./par_list.bend as ParList
+import ../src/greedy.bend as Greedy
+import ./optguess.bend as OQGuess
+import ./par_elt.bend as ParElt
+import ./greedy.bend as GR
 
 # ---------------------------------------------------------------------------
 # The chunk job specification
@@ -720,243 +731,7 @@ def P.glist_walk(+rws: +List<FT.FT.RowWord>, +p: Nat,
                         Eval.Eval.guess(p, G, S, g, inf, best), hleg)))))
 
 # ---------------------------------------------------------------------------
-# Split bookkeeping: prefixes, tails, and contiguous segments
-# ---------------------------------------------------------------------------
-
-# `half_go` is at most its argument.
-def P.half_go_le(fuel: Nat, +n: Nat) ->
-  {Nat.is_le(SolveK.half_go(fuel, n), n) == True{} : Bool}:
-  match fuel:
-    case 0n:
-      NatProof.Nat.is_le_zero_l(n)
-    case 1n++p:
-      match n:
-        case 0n:
-          {==}
-        case 1n+q:
-          match q:
-            case 0n:
-              {==}
-            case 1n++r:
-              +ih : {Nat.is_le(SolveK.half_go(p, r), r) == True{} : Bool} =
-                P.half_go_le(p, r)
-              +h1 : {Nat.is_le(Nat.add(1n, SolveK.half_go(p, r)),
-                                Nat.add(1n, r)) == True{} : Bool} =
-                NatProof.Nat.is_le_add_l(SolveK.half_go(p, r), r, 1n, ih)
-              NatProof.Nat.is_le_trans(Nat.add(1n, SolveK.half_go(p, r)),
-                Nat.add(1n, r), Nat.add(1n, Nat.add(1n, r)), h1,
-                NatProof.Nat.is_le_add_self_l(1n, r))
-
-def P.half_le(+n: Nat) ->
-  {Nat.is_le(SolveK.half(n), n) == True{} : Bool}:
-  P.half_go_le(n, n)
-
-# `take` of an in-range length has that length.
-def P.len_take_le(+xs: +List<+List<Nat>>, +k: Nat,
-    +h: {Nat.is_le(k, Groups.len_words(xs)) == True{} : Bool}) ->
-  {Groups.len_words(List.take(&2, +List<Nat>, xs, k)) == k : Nat}:
-  match xs k:
-    case Nil{} _:
-      +hk : {k == 0n : Nat} = NatProof.Nat.eq_zero_of_le_zero(k, h)
-      Equal.trans(Nat,
-        Groups.len_words(List.take(&2, +List<Nat>, Nil{}, k)), 0n, k,
-        {==}, Equal.sym(Nat, k, 0n, hk))
-    case Con{w, t} 0n:
-      {==}
-    case Con{w, t} 1n+p:
-      +hp : {Nat.is_le(p, Groups.len_words(t)) == True{} : Bool} =
-        NatProof.Nat.is_le_succ_inv(p, Groups.len_words(t), h)
-      +ih : {Groups.len_words(List.take(&2, +List<Nat>, t, p)) == p : Nat} =
-        P.len_take_le(t, p, hp)
-      Equal.cong(Nat, Nat, x => Nat.add(1n, x),
-        Groups.len_words(List.take(&2, +List<Nat>, t, p)), p, ih)
-
-# Appending `rest` to the guess list keeps `has_grow_go`.
-def P.has_grow_go_append(+G: +List<+List<Nat>>, +rest: +List<+List<Nat>>,
-    +n: Nat, +row: U32, +g: +List<Nat>, +cur: Nat,
-    +h: {FT.FT.has_grow_go(G, n, row, g, cur) == True{} : Bool}) ->
-  {FT.FT.has_grow_go(List.append(&2, +List<Nat>, G, rest), n, row, g, cur)
-   == True{} : Bool}:
-  match G:
-    case Nil{}:
-      Empty.absurd(
-        {FT.FT.has_grow_go(List.append(&2, +List<Nat>, Nil{}, rest), n, row,
-           g, cur) == True{} : Bool},
-        Logic.Proof.false_ne_true(h))
-    case Con{h0, t}:
-      +cond : Bool = Bool.and(U32.is_eq(row, U32.from_nat(cur)),
-        Feedback.word_eq(g, h0))
-      FT.FT.bool_or_elim_go(
-        {FT.FT.has_grow_go(List.append(&2, +List<Nat>, h0 <> t, rest), n, row,
-           g, cur) == True{} : Bool},
-        cond, FT.FT.has_grow_go(t, n, row, g, 1n+cur), h,
-        +hc => FOpt.FOpt.bool_or_l(cond,
-          FT.FT.has_grow_go(List.append(&2, +List<Nat>, t, rest), n, row, g,
-            1n+cur), hc),
-        +ht => FVal.FV.bool_or_r(cond,
-          FT.FT.has_grow_go(List.append(&2, +List<Nat>, t, rest), n, row, g,
-            1n+cur),
-          P.has_grow_go_append(t, rest, n, row, g, 1n+cur, ht)))
-
-# Appending `rest` to the guess list keeps `rws_ok_b`.
-def P.rws_ok_b_append(+G: +List<+List<Nat>>, +rest: +List<+List<Nat>>,
-    +n: Nat, +rws: +List<FT.FT.RowWord>,
-    +h: {FT.FT.rws_ok_b(G, n, rws) == True{} : Bool}) ->
-  {FT.FT.rws_ok_b(List.append(&2, +List<Nat>, G, rest), n, rws)
-   == True{} : Bool}:
-  match rws:
-    case Nil{}:
-      {==}
-    case Con{rw, t}:
-      match rw:
-        case FT.RowWord{+r, +w}:
-          FO.FO.bool_and_intro(
-            FT.FT.gentry_ok_b(List.append(&2, +List<Nat>, G, rest), n, r, w),
-            FT.FT.rws_ok_b(List.append(&2, +List<Nat>, G, rest), n, t),
-            P.has_grow_go_append(G, rest, n, r, w, 0n,
-              Logic.Proof.and_true_l(FT.FT.gentry_ok_b(G, n, r, w),
-                FT.FT.rws_ok_b(G, n, t), h)),
-            P.rws_ok_b_append(G, rest, n, t,
-              Logic.Proof.and_true_r(FT.FT.gentry_ok_b(G, n, r, w),
-                FT.FT.rws_ok_b(G, n, t), h)))
-
-# A subsequence relation for the segment inside the whole guess list.
-def P.subseq_self(+xs: +List<+List<Nat>>) -> CoverList.Cover.Subseq(xs, xs):
-  match xs:
-    case Nil{}:
-      Unit{}
-    case Con{h, t}:
-      Inl{({==}, P.subseq_self(t))}
-
-def P.subseq_cons_r(+h: +List<Nat>, +xs: +List<+List<Nat>>,
-    +ys: +List<+List<Nat>>, p: CoverList.Cover.Subseq(xs, ys)) ->
-  CoverList.Cover.Subseq(xs, List.append(&2, +List<Nat>, ys, h <> Nil{})):
-  match xs ys:
-    case Nil{} _:
-      Unit{}
-    case Con{h0, t} Nil{}:
-      match p:
-    case Con{h0, t} Con{y, r}:
-      match p:
-        case Inl{q}:
-          (e, pt) = q
-          Inl{(e, P.subseq_cons_r(h, t, r, pt))}
-        case Inr{q}:
-          Inr{P.subseq_cons_r(h, xs, r, q)}
-
-def P.subseq_append_r(+xs: +List<+List<Nat>>, +zs: +List<+List<Nat>>,
-    +ys: +List<+List<Nat>>, p: CoverList.Cover.Subseq(xs, ys)) ->
-  CoverList.Cover.Subseq(xs, List.append(&2, +List<Nat>, ys, zs)):
-  match zs:
-    case Nil{}:
-      +e : {ys == List.append(&2, +List<Nat>, ys, Nil{}) : +List<+List<Nat>>} =
-        Equal.sym(+List<+List<Nat>>, List.append(&2, +List<Nat>, ys, Nil{}), ys,
-          FN.FN.list_append_nil(ys))
-      %e : CoverList.Cover.Subseq(xs, _)
-      p
-    case Con{w, t}:
-      +e : {List.append(&2, +List<Nat>,
-              List.append(&2, +List<Nat>, ys, w <> Nil{}), t)
-            == List.append(&2, +List<Nat>, ys, w <> t)
-            : +List<+List<Nat>>} =
-        FN.FN.list_append_assoc(ys, w <> Nil{}, t)
-      %e : CoverList.Cover.Subseq(xs, _)
-      P.subseq_append_r(xs, t, List.append(&2, +List<Nat>, ys, w <> Nil{}),
-        P.subseq_cons_r(w, xs, ys, p))
-
-def P.subseq_prepend(+xs: +List<+List<Nat>>, +pre: +List<+List<Nat>>) ->
-  CoverList.Cover.Subseq(xs, List.append(&2, +List<Nat>, pre, xs)):
-  match xs pre:
-    case Nil{} _:
-      Unit{}
-    case Con{xh, xt} Nil{}:
-      P.subseq_self(xs)
-    case Con{xh, xt} Con{h, t}:
-      Inr{P.subseq_prepend(xs, t)}
-
-def P.subseq_mid(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>) ->
-  CoverList.Cover.Subseq(seg,
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, seg), post)):
-  P.subseq_append_r(seg, post, List.append(&2, +List<Nat>, pre, seg),
-    P.subseq_prepend(seg, pre))
-
-def P.all_in_seg(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>, +G: +List<+List<Nat>>,
-    +eG: {List.append(&2, +List<Nat>,
-            List.append(&2, +List<Nat>, pre, seg), post) == G
-          : +List<+List<Nat>>}) ->
-  {FO.FO.all_in_ref(seg, G) == True{} : Bool}:
-  sub : CoverList.Cover.Subseq(seg,
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, seg), post)) =
-    P.subseq_mid(pre, seg, post)
-  +GX : +List<+List<Nat>> = List.append(&2, +List<Nat>,
-    List.append(&2, +List<Nat>, pre, seg), post)
-  +ai : {FO.FO.all_in_ref(GX, GX) == True{} : Bool} =
-    FVal.FV.all_in_ref_self(GX)
-  +a : {FO.FO.all_in_ref(seg, GX) == True{} : Bool} =
-    FO.FO.all_in_of_subseq(seg, GX, GX, sub, ai)
-  %eG : {FO.FO.all_in_ref(seg, _) == True{} : Bool}
-  a
-
-# The rows of a segment, as a transparent definition (a local `+` binding is
-# opaque in type indices).
-def P.rws_of(+seg: +List<+List<Nat>>, +off: U32) -> +List<FT.FT.RowWord>:
-  FT.FT.guesses_to_rws(seg, off, 1)
-
-# The chunk rows are valid against the whole guess list.
-def P.chunk_rws_ok(+n: Nat, +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
-    +has_buf: Bool, +pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>, +off: U32,
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>},
-    +eoff: {U32.from_nat(Groups.len_words(pre)) == off : U32}) ->
-  {FH.FH.rws_ok_if(has_buf, G, n, P.rws_of(seg, off)) == True{} : Bool}:
-  match has_buf:
-    case False{}:
-      {==}
-    case True{}:
-      +hbase : {FT.FT.rws_ok_b(
-                 List.append(&2, +List<Nat>, pre, seg), n,
-                 FT.FT.guesses_to_rws(seg, U32.from_nat(
-                   Groups.len_words(pre)), 1))
-                == True{} : Bool} =
-        FT.FT.guesses_to_rws_ok_go(seg, pre, n)
-      +elist : {FT.FT.guesses_to_rws(seg, U32.from_nat(
-                    Groups.len_words(pre)), 1)
-                 == FT.FT.guesses_to_rws(seg, off, 1)
-                 : +List<FT.FT.RowWord>} =
-        Equal.cong(U32, +List<FT.FT.RowWord>,
-          u => FT.FT.guesses_to_rws(seg, u, 1),
-          U32.from_nat(Groups.len_words(pre)), off, eoff)
-      +hbase_off : {FT.FT.rws_ok_b(
-                      List.append(&2, +List<Nat>, pre, seg), n,
-                      P.rws_of(seg, off))
-                    == True{} : Bool} =
-        %elist : {FT.FT.rws_ok_b(List.append(&2, +List<Nat>, pre, seg), n,
-                    _) == True{} : Bool}
-        hbase
-      +happ : {FT.FT.rws_ok_b(
-                 List.append(&2, +List<Nat>,
-                   List.append(&2, +List<Nat>, pre, seg), post), n,
-                 P.rws_of(seg, off))
-               == True{} : Bool} =
-        P.rws_ok_b_append(List.append(&2, +List<Nat>, pre, seg), post, n,
-          P.rws_of(seg, off), hbase_off)
-      +eall : {List.append(&2, +List<Nat>,
-                 List.append(&2, +List<Nat>, pre, seg), post) == G
-               : +List<+List<Nat>>} =
-        Equal.sym(+List<+List<Nat>>, G,
-          List.append(&2, +List<Nat>,
-            List.append(&2, +List<Nat>, pre, seg), post), eG)
-      %eall : {FT.FT.rws_ok_b(_, n, P.rws_of(seg, off)) == True{} : Bool}
-      happ
-
-# ---------------------------------------------------------------------------
-# The chunk leaf: one `step` over a contiguous segment of the root guess list
+# The chunk leaf: one `step` over any valid root guess list
 # ---------------------------------------------------------------------------
 
 def P.job_res_gs_of_spec(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
@@ -1063,316 +838,23 @@ def P.chunk_direct(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
             hle_inf, hle_dummy))
       Arr.DPair{hjr, hbuf_end})
 
-def P.chunk_leaf(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
-    +cs: +List<+List<Nat>>, +nd: Bool, +has_buf: Bool,
-    +rwsG: +List<FT.FT.RowWord>,
-    +cwS: +List<SolveFast.CWord>,
-    +pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>, +off: U32,
-    -buf0: SolveFast.Buf5,
-    +hbuf0: FH.FH.BufOk(G, cs, Groups.len_words(cs), has_buf, nd, buf0),
-    dp: &b1: SolveFast.Buf5 -> &b2: SolveFast.Buf5 ->
-        {b1 == buf0 : SolveFast.Buf5} & {b2 == b1 : SolveFast.Buf5},
-    +erwsG: {FT.FT.rws_words(rwsG) == G : +List<+List<Nat>>},
-    +hrwsG: {FH.FH.rws_ok_if(has_buf, G, Groups.len_words(cs), rwsG)
-             == True{} : Bool},
-    +ecwS: {SolveFast.cwords_words(cwS) == cs : +List<+List<Nat>>},
-    +hcwS: {FH.FH.cwords_ok_if(has_buf, G, cs, Groups.len_words(cs), cwS)
-            == True{} : Bool},
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>},
-    +eoff: {U32.from_nat(Groups.len_words(pre)) == off : U32},
-    +ele: {Nat.is_le(Groups.len_words(cs), 1n+p) == True{} : Bool},
-    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
-    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
-    +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
-    +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
-    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
-    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool}) ->
-  {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf,
-     SolveFast.step_res_best(
-       SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n,
-         Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS,
-         Groups.len_words(cs), nd,
-         SolveFast.init_floor(Groups.len_words(cs)), inf,
-         Nil{}, Nil{}, 0n, SolveFast.dummy_inf(inf),
-         SolveFast.dummy_step_zero(), False{},
-         SolveFast.is_floor_hit(nd, SolveFast.init_floor(Groups.len_words(cs)),
-           SolveFast.dummy_inf(inf)),
-         SolveFast.GuessRes{Nil{}, buf0}))) == True{} : Bool}:
-  (b1, d2) = dp
-  (b2, pe) = d2
-  (+eb1, +eb2) = pe
-  +n : Nat = Groups.len_words(cs)
-  +erws : {FT.FT.rws_words(P.rws_of(seg, off)) == seg
-           : +List<+List<Nat>>} =
-    FT.FT.guesses_to_rws_words(seg, off, 1)
-  +b0 : SolveRef.Best = SolveFast.dummy_inf(inf)
-  +hbest0 : {Nat.is_le(Eval.Eval.cost_of(b0), inf) == True{} : Bool} =
-    NatProof.Nat.is_le_refl(inf)
-  +hok0 : {FVal.FV.best_ok_b(inf, G, cs, b0) == True{} : Bool} =
-    FVal.FV.best_ok_init(inf, G, cs, b0, Nat.ge_refl(inf))
-  +eb2_0 : {b2 == buf0 : SolveFast.Buf5} =
-    Equal.trans(SolveFast.Buf5, b2, b1, buf0, eb2, eb1)
-  +hbuf2 = FH.FH.buf_ok_transport(G, cs, n, has_buf, nd, buf0, b2,
-              Equal.sym(SolveFast.Buf5, b2, buf0, eb2_0), hbuf0)
-  +seg_in : {FO.FO.all_in_ref(seg, G) == True{} : Bool} =
-    P.all_in_seg(pre, seg, post, G, Equal.sym(+List<+List<Nat>>, G, List.append(&2, +List<Nat>, List.append(&2, +List<Nat>, pre, seg), post), eG))
-  fseg : FOpt.FOpt.EFlat(p, inf, G, cs, n, has_buf, nd,
-            MV.MV.next_guess(seg, cs)) =
-    FOpt.FOpt.eflat(p, inf, G, cs, n, has_buf, nd,
-      MV.MV.next_guess(seg, cs), MV.MV.any_bounds(p, seg, cs, ele),
-      hz, h1, h3, h6, FO.FO.all_in_next_guess(seg, cs, G, ai),
-      FN.FN.nodup_ok_next_guess(nd, seg, cs, hnd))
-  fgs : FOpt.FOpt.EByGs(p, inf, G, cs, n, has_buf, cs, nd, seg) =
-    FOpt.FOpt.eby_gs(p, inf, G, cs, n, has_buf, cs, nd, seg, fseg)
-  +hrws : {FH.FH.rws_ok_if(has_buf, G, n, P.rws_of(seg, off))
-           == True{} : Bool} =
-    P.chunk_rws_ok(n, G, cs, has_buf, pre, seg, post, off, eG, eoff)
-  +esg : {SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2})
-           == SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2})
-           : SolveFast.StepRes} =
-    Equal.cong(SolveFast.GList, SolveFast.StepRes,
-      gl => SolveFast.step(1n+p,
-              FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n,
-              Nil{}, gl, cwS, n, nd,
-              SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-              SolveFast.dummy_step_zero(), False{},
-              SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-              SolveFast.GuessRes{Nil{}, b2}),
-      FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), {==})
-  +hspec : P.ChunkSpec(1n+p, inf, G, seg, cs, n, has_buf, nd, cs, inf,
-            SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2})) =
-    P.chunk_spec_transport(1n+p, inf, G, seg, cs, n, has_buf, nd, cs, inf,
-      SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2}),
-      SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2}),
-      esg,
-      P.chunk_direct(p, inf, G, seg, cs, has_buf, P.rws_of(seg, off), rwsG, cwS, nd, b0, b2,
-        erwsG, hrwsG, ecwS, hcwS, erws, hrws, seg_in, ele, hz, h1, h3, h6, ai,
-        hnd, hbest0, hok0, hbuf2, fgs))
-  +esr : {SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2})
-           == SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1})
-           : SolveFast.StepRes} =
-    Equal.trans(SolveFast.StepRes,
-      SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2}),
-      SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-      SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-      Equal.cong(SolveFast.Buf5, SolveFast.StepRes,
-        b => SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b}),
-        b2, b1, eb2),
-      Equal.trans(SolveFast.StepRes,
-        SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-        SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-        SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-        Equal.cong(SolveFast.GList, SolveFast.StepRes,
-        gl => SolveFast.step(1n+p, gl, 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-        FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), SolveFast.glist_of_guesses(seg, off, 1),
-        Equal.sym(SolveFast.GList, SolveFast.glist_of_guesses(seg, off, 1), FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}),
-          FT.FT.glist_of_guesses_eq(seg, off, 1))),
-        Equal.cong(SolveFast.GList, SolveFast.StepRes,
-        gl => SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{}, gl, cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-        FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), {==})))
-  +hspec2 : P.ChunkSpec(1n+p, inf, G, seg, cs, n, has_buf, nd, cs, inf,
-              SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n,
-                Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-                SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-                SolveFast.dummy_step_zero(), False{},
-                SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-                SolveFast.GuessRes{Nil{}, b1})) =
-    P.chunk_spec_transport(1n+p, inf, G, seg, cs, n, has_buf, nd, cs, inf,
-      SolveFast.step(1n+p, FT.FT.glist_of_rws(P.rws_of(seg, off), SolveFast.GEnd{}), 0n,
-        Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b2}),
-      SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}),
-      esr, hspec)
-  +hfinal : {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf,
-      SolveFast.step_res_best(
-        SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{},
-          FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-          SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-          SolveFast.dummy_step_zero(), False{},
-          SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-          SolveFast.GuessRes{Nil{}, b1}))) == True{} : Bool} =
-    P.job_res_gs_of_spec(1n+p, inf, G, seg, cs, n, has_buf, nd, cs, inf,
-      SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n, Nil{},
-        FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-        SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-        SolveFast.dummy_step_zero(), False{},
-        SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-        SolveFast.GuessRes{Nil{}, b1}), hspec2)
-  +esr2 : {SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n,
-              Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-              SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-              SolveFast.dummy_step_zero(), False{},
-              SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-              SolveFast.GuessRes{Nil{}, b1})
-            == SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n,
-                 Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
-                 SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-                 SolveFast.dummy_step_zero(), False{},
-                 SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-                 SolveFast.GuessRes{Nil{}, buf0})
-            : SolveFast.StepRes} =
-    Equal.cong(SolveFast.Buf5, SolveFast.StepRes,
-      b => SolveFast.step(1n+p, SolveFast.glist_of_guesses(seg, off, 1), 0n,
-             Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n,
-             nd, SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
-             SolveFast.dummy_step_zero(), False{},
-             SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
-             SolveFast.GuessRes{Nil{}, b}),
-      b1, buf0, eb1)
-  %esr2 : {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf,
-              SolveFast.step_res_best(_)) == True{} : Bool}
-  hfinal
 
 # ---------------------------------------------------------------------------
-# Fold composition
+# Fold and accumulator helpers
 # ---------------------------------------------------------------------------
 
-# `Eval.guesses` over a concatenation is the two folds in order.
-def P.guesses_append(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +inf: Nat, +xs: +List<+List<Nat>>, +ys: +List<+List<Nat>>,
-    +best: SolveRef.Best) ->
-  {Eval.Eval.guesses(1n+p, G, S, inf,
-      List.append(&2, +List<Nat>, xs, ys), best)
-   == Eval.Eval.guesses(1n+p, G, S, inf, ys,
-        Eval.Eval.guesses(1n+p, G, S, inf, xs, best)) : SolveRef.Best}:
-  match xs:
-    case Nil{}:
-      {==}
-    case Con{g, t}:
-      P.guesses_append(p, G, S, inf, t, ys,
-        Eval.Eval.guess(p, G, S, g, inf, best))
+def P.or_true_l(+a: Bool, +b: Bool, +ha: {a == True{} : Bool}) ->
+  {Bool.or(a, b) == True{} : Bool}:
+  Equal.cong(Bool, Bool, x => Bool.or(x, b), a, True{}, ha)
 
-# `Eval.guesses` from `best` is `better` of the neutral fold and `best`.
-def P.guesses_as_better(+p: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +inf: Nat, +gs: +List<+List<Nat>>, +best: SolveRef.Best,
-    +hbest: {Nat.is_le(Eval.Eval.cost_of(best), inf) == True{} : Bool}) ->
-  {Eval.Eval.guesses(1n+p, G, S, inf, gs, best)
-   == FC.FC.better_best(
-        Eval.Eval.guesses(1n+p, G, S, inf, gs, Eval.Eval.dummy_inf(inf)), best)
-   : SolveRef.Best}:
-  +d : SolveRef.Best = Eval.Eval.dummy_inf(inf)
-  Equal.trans(SolveRef.Best,
-    Eval.Eval.guesses(1n+p, G, S, inf, gs, best),
-    Eval.Eval.guesses(1n+p, G, S, inf, gs, FC.FC.better_best(d, best)),
-    FC.FC.better_best(Eval.Eval.guesses(1n+p, G, S, inf, gs, d), best),
-    Equal.cong(SolveRef.Best, SolveRef.Best,
-      a => Eval.Eval.guesses(1n+p, G, S, inf, gs, a),
-      best, FC.FC.better_best(d, best),
-      Equal.sym(SolveRef.Best, FC.FC.better_best(d, best), best,
-        FC.FC.better_dummy_inf(inf, best, hbest))),
-    FC.FC.eval_guesses_better(1n+p, G, S, inf, gs, d, best))
-
-# `better` is monotone in both costs.
-def P.better_mono_le_go(+a1: SolveRef.Best, +a2: SolveRef.Best,
-    +b1: SolveRef.Best, +b2: SolveRef.Best, c: Bool,
-    +ec: {c == Nat.is_lt(Eval.Eval.cost_of(a2), Eval.Eval.cost_of(b2)) : Bool},
-    +h1: {Nat.is_le(Eval.Eval.cost_of(a1), Eval.Eval.cost_of(a2))
-          == True{} : Bool},
-    +h2: {Nat.is_le(Eval.Eval.cost_of(b1), Eval.Eval.cost_of(b2))
-          == True{} : Bool}) ->
-  {Nat.is_le(Eval.Eval.cost_of(FC.FC.better_best(a1, b1)),
-     Eval.Eval.cost_of(Feedback.Bool.case(SolveRef.Best, c, a2, b2)))
-   == True{} : Bool}:
-  match c:
+def P.or_true_r(a: Bool, +b: Bool, +hb: {b == True{} : Bool}) ->
+  {Bool.or(a, b) == True{} : Bool}:
+  match a:
     case True{}:
-      NatProof.Nat.is_le_trans(Eval.Eval.cost_of(FC.FC.better_best(a1, b1)),
-        Eval.Eval.cost_of(a1), Eval.Eval.cost_of(a2),
-        FVal.FV.better_best_le_l(a1, b1), h1)
+      {==}
     case False{}:
-      NatProof.Nat.is_le_trans(Eval.Eval.cost_of(FC.FC.better_best(a1, b1)),
-        Eval.Eval.cost_of(b1), Eval.Eval.cost_of(b2),
-        FVal.FV.better_best_le_r(a1, b1), h2)
+      hb
 
-def P.better_mono_le(+a1: SolveRef.Best, +a2: SolveRef.Best,
-    +b1: SolveRef.Best, +b2: SolveRef.Best,
-    +h1: {Nat.is_le(Eval.Eval.cost_of(a1), Eval.Eval.cost_of(a2))
-          == True{} : Bool},
-    +h2: {Nat.is_le(Eval.Eval.cost_of(b1), Eval.Eval.cost_of(b2))
-          == True{} : Bool}) ->
-  {Nat.is_le(Eval.Eval.cost_of(FC.FC.better_best(a1, b1)),
-     Eval.Eval.cost_of(FC.FC.better_best(a2, b2))) == True{} : Bool}:
-  match a2:
-    case SolveRef.Best{+ta2, +ca2}:
-      match b2:
-        case SolveRef.Best{+tb2, +cb2}:
-          P.better_mono_le_go(a1, SolveRef.Best{ta2, ca2}, b1,
-            SolveRef.Best{tb2, cb2}, Nat.is_lt(ca2, cb2), {==}, h1, h2)
-
-# Unfolding one fold step.
 def P.fold_unfold(+r: SolveRef.Best, +rest: +List<SolveRef.Best>,
     +best: SolveRef.Best) ->
   {SolveK.fold_results(r <> rest, best)
@@ -1381,39 +863,36 @@ def P.fold_unfold(+r: SolveRef.Best, +rest: +List<SolveRef.Best>,
     case SolveRef.Best{+tree, +cost}:
       {==}
 
-# Folding never increases the accumulator cost.
+def P.fold_single(+r: SolveRef.Best, +best: SolveRef.Best) ->
+  {SolveK.fold_results(r <> Nil{}, best)
+   == FC.FC.better_best(r, best) : SolveRef.Best}:
+  match r:
+    case SolveRef.Best{+tree, +cost}:
+      {==}
+
 def P.fold_le_best(+rs: +List<SolveRef.Best>, +best: SolveRef.Best) ->
   {Nat.is_le(Eval.Eval.cost_of(SolveK.fold_results(rs, best)),
      Eval.Eval.cost_of(best)) == True{} : Bool}:
   match rs:
     case Nil{}:
       NatProof.Nat.is_le_refl(Eval.Eval.cost_of(best))
-    case Con{r, t}:
-      +e : {SolveK.fold_results(r <> t, best)
-            == SolveK.fold_results(t, FC.FC.better_best(r, best))
-            : SolveRef.Best} =
-        P.fold_unfold(r, t, best)
-      +ih : {Nat.is_le(
-               Eval.Eval.cost_of(SolveK.fold_results(t,
-                 FC.FC.better_best(r, best))),
-               Eval.Eval.cost_of(best)) == True{} : Bool} =
-        NatProof.Nat.is_le_trans(
-          Eval.Eval.cost_of(SolveK.fold_results(t,
-            FC.FC.better_best(r, best))),
-          Eval.Eval.cost_of(FC.FC.better_best(r, best)),
-          Eval.Eval.cost_of(best),
-          P.fold_le_best(t, FC.FC.better_best(r, best)),
-          FVal.FV.better_best_le_r(r, best))
+    case Con{+r, +t}:
+      +e = P.fold_unfold(r, t, best)
+      +ih = NatProof.Nat.is_le_trans(
+              Eval.Eval.cost_of(SolveK.fold_results(t,
+                FC.FC.better_best(r, best))),
+              Eval.Eval.cost_of(FC.FC.better_best(r, best)),
+              Eval.Eval.cost_of(best),
+              P.fold_le_best(t, FC.FC.better_best(r, best)),
+              FVal.FV.better_best_le_r(r, best))
       Fold.OQ.le_cong_l(Eval.Eval.cost_of(SolveK.fold_results(r <> t, best)),
-        Eval.Eval.cost_of(SolveK.fold_results(t,
-          FC.FC.better_best(r, best))),
+        Eval.Eval.cost_of(SolveK.fold_results(t, FC.FC.better_best(r, best))),
         Eval.Eval.cost_of(best),
         Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
           SolveK.fold_results(r <> t, best),
           SolveK.fold_results(t, FC.FC.better_best(r, best)), e),
         ih)
 
-# Folding a concatenation is folding the halves in order.
 def P.fold_append(+xs: +List<SolveRef.Best>, +ys: +List<SolveRef.Best>,
     +best: SolveRef.Best) ->
   {SolveK.fold_results(List.append(&2, SolveRef.Best, xs, ys), best)
@@ -1422,167 +901,56 @@ def P.fold_append(+xs: +List<SolveRef.Best>, +ys: +List<SolveRef.Best>,
   match xs:
     case Nil{}:
       {==}
-    case Con{r, t}:
-      +e1 : {SolveK.fold_results(List.append(&2, SolveRef.Best, [r], List.append(&2, SolveRef.Best, t, ys)), best)
-             == SolveK.fold_results(List.append(&2, SolveRef.Best, t, ys), FC.FC.better_best(r, best))
-             : SolveRef.Best} =
-        P.fold_unfold(r, List.append(&2, SolveRef.Best, t, ys), best)
-      +e2 : {SolveK.fold_results(List.append(&2, SolveRef.Best, [r], t), best)
-             == SolveK.fold_results(t, FC.FC.better_best(r, best))
-             : SolveRef.Best} =
-        P.fold_unfold(r, t, best)
-      +e3 : {SolveK.fold_results(ys, SolveK.fold_results(List.append(&2, SolveRef.Best, [r], t), best))
-             == SolveK.fold_results(ys,
-                  SolveK.fold_results(t, FC.FC.better_best(r, best)))
-             : SolveRef.Best} =
-        Equal.cong(SolveRef.Best, SolveRef.Best,
-          a => SolveK.fold_results(ys, a),
-          SolveK.fold_results(List.append(&2, SolveRef.Best, [r], t), best),
-          SolveK.fold_results(t, FC.FC.better_best(r, best)), e2)
+    case Con{+r, +t}:
+      +e1 = P.fold_unfold(r, List.append(&2, SolveRef.Best, t, ys), best)
+      +e2 = P.fold_unfold(r, t, best)
+      +e3 = Equal.cong(SolveRef.Best, SolveRef.Best,
+              a => SolveK.fold_results(ys, a),
+              SolveK.fold_results(r <> t, best),
+              SolveK.fold_results(t, FC.FC.better_best(r, best)), e2)
       Equal.trans(SolveRef.Best,
-        SolveK.fold_results(List.append(&2, SolveRef.Best, [r], List.append(&2, SolveRef.Best, t, ys)), best),
-        SolveK.fold_results(List.append(&2, SolveRef.Best, t, ys), FC.FC.better_best(r, best)),
-        SolveK.fold_results(ys, SolveK.fold_results(List.append(&2, SolveRef.Best, [r], t), best)),
+        SolveK.fold_results(r <> List.append(&2, SolveRef.Best, t, ys), best),
+        SolveK.fold_results(List.append(&2, SolveRef.Best, t, ys),
+          FC.FC.better_best(r, best)),
+        SolveK.fold_results(ys, SolveK.fold_results(r <> t, best)),
         e1,
         Equal.trans(SolveRef.Best,
-          SolveK.fold_results(List.append(&2, SolveRef.Best, t, ys), FC.FC.better_best(r, best)),
+          SolveK.fold_results(List.append(&2, SolveRef.Best, t, ys),
+            FC.FC.better_best(r, best)),
           SolveK.fold_results(ys,
             SolveK.fold_results(t, FC.FC.better_best(r, best))),
-          SolveK.fold_results(ys, SolveK.fold_results(List.append(&2, SolveRef.Best, [r], t), best)),
+          SolveK.fold_results(ys, SolveK.fold_results(r <> t, best)),
           P.fold_append(t, ys, FC.FC.better_best(r, best)),
           Equal.sym(SolveRef.Best,
-            SolveK.fold_results(ys, SolveK.fold_results(List.append(&2, SolveRef.Best, [r], t), best)),
+            SolveK.fold_results(ys, SolveK.fold_results(r <> t, best)),
             SolveK.fold_results(ys,
               SolveK.fold_results(t, FC.FC.better_best(r, best))), e3)))
 
-
-# ---------------------------------------------------------------------------
-# Chunk results as `SolveK.chunk_best`
-# ---------------------------------------------------------------------------
-
-# Transporting a chunk job result along an equality of results (the shape of
-# `P.chunk_spec_transport`, for the bare result).
-def P.job_res_gs_b_transport(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
-    +gs: +List<+List<Nat>>, +S: +List<+List<Nat>>, +limit: Nat,
-    -r1: SolveRef.Best, -r2: SolveRef.Best,
-    +e: {r1 == r2 : SolveRef.Best},
-    +h: {P.job_res_gs_b(fuel, inf, G, gs, S, limit, r1) == True{}
-        : Bool}) ->
-  {P.job_res_gs_b(fuel, inf, G, gs, S, limit, r2) == True{} : Bool}:
-  %e : {P.job_res_gs_b(fuel, inf, G, gs, S, limit, _) == True{} : Bool}
-  h
-
-# The chunk leaf on the term `par_chunks` actually calls: `SolveK.chunk_best`
-# over the segment, with the root-allocated table buffer.
-def P.chunk_best_leaf(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
-    +cs: +List<+List<Nat>>, +nd: Bool,
-    +pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>, +off: U32,
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>},
-    +eoff: {U32.from_nat(Groups.len_words(pre)) == off : U32},
-    +ele: {Nat.is_le(Groups.len_words(cs), 1n+p) == True{} : Bool},
-    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
-    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
-    +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
-    +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
-    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
-    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool}) ->
-  {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf,
-     SolveK.chunk_best(1n+p, seg, off, G, SolveFast.glist_of_guesses(G, 0, 1),
-       SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-       cs, Groups.len_words(cs), nd,
-       SolveFast.init_floor(Groups.len_words(cs)), inf,
-       SolveFast.mk_buf_tbl(nd, G, cs, Groups.len_words(cs))))
-   == True{} : Bool}:
-  +n : Nat = Groups.len_words(cs)
-  +rwsG : +List<FT.FT.RowWord> = FT.FT.guesses_to_rws(G, 0, 1)
-  +cwS : +List<SolveFast.CWord> =
-    SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G)))
-  +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
-  +erwsG : {FT.FT.rws_words(rwsG) == G : +List<+List<Nat>>} =
-    FT.FT.guesses_to_rws_words(G, 0, 1)
-  +hrwsG : {FH.FH.rws_ok_if(has_buf, G, n, rwsG) == True{} : Bool} =
-    FOpt.FOpt.guesses_to_rws_ok_if(has_buf, G, n)
-  +ecwS : {SolveFast.cwords_words(cwS) == cs : +List<+List<Nat>>} =
-    FT.FT.build_cwords_words(cs, G, 0, U32.from_nat(Groups.len_words(G)))
-  +hcwS : {FH.FH.cwords_ok_if(has_buf, G, cs, n, cwS) == True{} : Bool} =
-    FOpt.FOpt.build_cwords_ok_if(has_buf, G, cs, n, ai)
-  +egG : {SolveFast.glist_of_guesses(G, 0, 1)
-          == FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}) : SolveFast.GList} =
-    FT.FT.glist_of_guesses_eq(G, 0, 1)
-  +econc : {SolveK.chunk_best(1n+p, seg, off, G,
-               SolveFast.glist_of_guesses(G, 0, 1), cwS, cs, n, nd,
-               SolveFast.init_floor(n), inf, SolveFast.mk_buf_tbl(nd, G, cs, n))
-             == SolveK.chunk_best(1n+p, seg, off, G,
-                  FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, cs, n, nd,
-                  SolveFast.init_floor(n), inf,
-                  SolveFast.mk_buf_tbl(nd, G, cs, n))
-             : SolveRef.Best} =
-    Equal.cong(SolveFast.GList, SolveRef.Best,
-      gl => SolveK.chunk_best(1n+p, seg, off, G, gl, cwS, cs, n, nd,
-              SolveFast.init_floor(n), inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
-      SolveFast.glist_of_guesses(G, 0, 1),
-      FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), egG)
-  P.job_res_gs_b_transport(1n+p, inf, G, seg, cs, inf,
-    SolveK.chunk_best(1n+p, seg, off, G,
-      FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, cs, n, nd,
-      SolveFast.init_floor(n), inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
-    SolveK.chunk_best(1n+p, seg, off, G,
-      SolveFast.glist_of_guesses(G, 0, 1), cwS, cs, n, nd,
-      SolveFast.init_floor(n), inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
-    Equal.sym(SolveRef.Best,
-      SolveK.chunk_best(1n+p, seg, off, G,
-        SolveFast.glist_of_guesses(G, 0, 1), cwS, cs, n, nd,
-        SolveFast.init_floor(n), inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
-      SolveK.chunk_best(1n+p, seg, off, G,
-        FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, cs, n, nd,
-        SolveFast.init_floor(n), inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
-      econc),
-    P.chunk_leaf(p, inf, G, cs, nd, has_buf, rwsG, cwS, pre, seg, post, off,
-      SolveFast.mk_buf_tbl(nd, G, cs, n),
-      FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}),
-      FH.FH.buf_dup(SolveFast.mk_buf_tbl(nd, G, cs, n)),
-      erwsG, hrwsG, ecwS, hcwS, eG, eoff, ele, hz, h1, h3, h6, ai, hnd))
-
-# ---------------------------------------------------------------------------
-# Per-chunk results: validity and finite cost
-# ---------------------------------------------------------------------------
-
-# One chunk result is acceptable when it is valid at the cutoff, and its cost
-# is below the cutoff.
-def P.elt_ok(+limit: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
-    +r: SolveRef.Best) -> Bool:
-  Bool.and(FVal.FV.best_ok_b(limit, G, S, r),
-    Nat.is_le(Eval.Eval.cost_of(r), limit))
-
 def P.elt_ok_better(+limit: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +a: SolveRef.Best, +b: SolveRef.Best,
-    +ha: {P.elt_ok(limit, G, S, a) == True{} : Bool},
-    +hb: {P.elt_ok(limit, G, S, b) == True{} : Bool}) ->
-  {P.elt_ok(limit, G, S, FC.FC.better_best(a, b)) == True{} : Bool}:
+    +ha: {GR.GR.elt_ok(limit, G, S, a) == True{} : Bool},
+    +hb: {GR.GR.elt_ok(limit, G, S, b) == True{} : Bool}) ->
+  {GR.GR.elt_ok(limit, G, S, FC.FC.better_best(a, b)) == True{} : Bool}:
   +hoka = Logic.Proof.and_true_l(FVal.FV.best_ok_b(limit, G, S, a),
             Nat.is_le(Eval.Eval.cost_of(a), limit), ha)
   +hca = Logic.Proof.and_true_r(FVal.FV.best_ok_b(limit, G, S, a),
            Nat.is_le(Eval.Eval.cost_of(a), limit), ha)
   +hokb = Logic.Proof.and_true_l(FVal.FV.best_ok_b(limit, G, S, b),
             Nat.is_le(Eval.Eval.cost_of(b), limit), hb)
-  FO.FO.bool_and_intro(FVal.FV.best_ok_b(limit, G, S,
-      FC.FC.better_best(a, b)),
+  FO.FO.bool_and_intro(
+    FVal.FV.best_ok_b(limit, G, S, FC.FC.better_best(a, b)),
     Nat.is_le(Eval.Eval.cost_of(FC.FC.better_best(a, b)), limit),
     P.best_ok_better(limit, G, S, a, b, hoka, hokb),
     NatProof.Nat.is_le_trans(Eval.Eval.cost_of(FC.FC.better_best(a, b)),
       Eval.Eval.cost_of(a), limit, FVal.FV.better_best_le_l(a, b), hca))
 
-# Every result of the list is acceptable.
 def P.ok_list(+limit: Nat, +G: +List<+List<Nat>>, +S: +List<+List<Nat>>,
     +rs: +List<SolveRef.Best>) -> Bool:
   match rs:
     case Nil{}:
       True{}
     case Con{r, t}:
-      Bool.and(P.elt_ok(limit, G, S, r), P.ok_list(limit, G, S, t))
+      Bool.and(GR.GR.elt_ok(limit, G, S, r), P.ok_list(limit, G, S, t))
 
 def P.ok_list_append(+limit: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +xs: +List<SolveRef.Best>,
@@ -1594,1108 +962,772 @@ def P.ok_list_append(+limit: Nat, +G: +List<+List<Nat>>,
   match xs:
     case Nil{}:
       hy
-    case Con{r, t}:
-      +hr = Logic.Proof.and_true_l(P.elt_ok(limit, G, S, r),
+    case Con{+r, +t}:
+      +hr = Logic.Proof.and_true_l(GR.GR.elt_ok(limit, G, S, r),
               P.ok_list(limit, G, S, t), hx)
-      +ht = Logic.Proof.and_true_r(P.elt_ok(limit, G, S, r),
+      +ht = Logic.Proof.and_true_r(GR.GR.elt_ok(limit, G, S, r),
               P.ok_list(limit, G, S, t), hx)
-      FO.FO.bool_and_intro(P.elt_ok(limit, G, S, r),
+      FO.FO.bool_and_intro(GR.GR.elt_ok(limit, G, S, r),
         P.ok_list(limit, G, S, List.append(&2, SolveRef.Best, t, ys)),
         hr, P.ok_list_append(limit, G, S, t, ys, ht, hy))
 
-# Folding acceptable results keeps the accumulator acceptable.
 def P.ok_list_fold(+limit: Nat, +G: +List<+List<Nat>>,
     +S: +List<+List<Nat>>, +rs: +List<SolveRef.Best>,
     +best: SolveRef.Best,
     +h: {P.ok_list(limit, G, S, rs) == True{} : Bool},
-    +hb: {P.elt_ok(limit, G, S, best) == True{} : Bool}) ->
-  {P.elt_ok(limit, G, S, SolveK.fold_results(rs, best)) == True{} : Bool}:
+    +hb: {GR.GR.elt_ok(limit, G, S, best) == True{} : Bool}) ->
+  {GR.GR.elt_ok(limit, G, S, SolveK.fold_results(rs, best)) == True{} : Bool}:
   match rs:
     case Nil{}:
       hb
-    case Con{r, t}:
+    case Con{+r, +t}:
       match r:
         case SolveRef.Best{+tree, +cost}:
           +hr = Logic.Proof.and_true_l(
-                  P.elt_ok(limit, G, S, SolveRef.Best{tree, cost}),
+                  GR.GR.elt_ok(limit, G, S, SolveRef.Best{tree, cost}),
                   P.ok_list(limit, G, S, t), h)
           +ht = Logic.Proof.and_true_r(
-                  P.elt_ok(limit, G, S, SolveRef.Best{tree, cost}),
+                  GR.GR.elt_ok(limit, G, S, SolveRef.Best{tree, cost}),
                   P.ok_list(limit, G, S, t), h)
           P.ok_list_fold(limit, G, S, t,
             FC.FC.better_best(SolveRef.Best{tree, cost}, best), ht,
             P.elt_ok_better(limit, G, S, SolveRef.Best{tree, cost}, best,
               hr, hb))
 
-# The neutral accumulator is acceptable at a positive cutoff.
-def P.elt_ok_dummy_inf(+limit: Nat, +G: +List<+List<Nat>>,
-    +S: +List<+List<Nat>>,
-    +hge: {Nat.is_ge(limit, limit) == True{} : Bool}) ->
-  {P.elt_ok(limit, G, S, Eval.Eval.dummy_inf(limit)) == True{} : Bool}:
-  FO.FO.bool_and_intro(
-    FVal.FV.best_ok_b(limit, G, S, Eval.Eval.dummy_inf(limit)),
-    Nat.is_le(Eval.Eval.cost_of(Eval.Eval.dummy_inf(limit)), limit),
-    FVal.FV.best_ok_init(limit, G, S, Eval.Eval.dummy_inf(limit), hge),
-    NatProof.Nat.is_le_refl(limit))
+def P.elt_ok_of_job_res(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +gs: +List<+List<Nat>>, +S: +List<+List<Nat>>, +res: SolveRef.Best,
+    +h: {P.job_res_gs_b(fuel, inf, G, gs, S, inf, res) == True{} : Bool}) ->
+  {GR.GR.elt_ok(inf, G, S, res) == True{} : Bool}:
+  +hok = Logic.Proof.and_true_l(FVal.FV.best_ok_b(inf, G, S, res),
+           Bool.and(Nat.is_le(Eval.Eval.cost_of(res), inf),
+             Nat.is_le(Eval.Eval.cost_of(res),
+               Eval.Eval.cost_of(Eval.Eval.guesses(fuel, G, S, inf, gs,
+                 Eval.Eval.dummy_inf(inf))))), h)
+  +hr = Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, S, res),
+          Bool.and(Nat.is_le(Eval.Eval.cost_of(res), inf),
+            Nat.is_le(Eval.Eval.cost_of(res),
+              Eval.Eval.cost_of(Eval.Eval.guesses(fuel, G, S, inf, gs,
+                Eval.Eval.dummy_inf(inf))))), h)
+  +hle = Logic.Proof.and_true_l(Nat.is_le(Eval.Eval.cost_of(res), inf),
+           Nat.is_le(Eval.Eval.cost_of(res),
+             Eval.Eval.cost_of(Eval.Eval.guesses(fuel, G, S, inf, gs,
+               Eval.Eval.dummy_inf(inf)))), hr)
+  FO.FO.bool_and_intro(FVal.FV.best_ok_b(inf, G, S, res),
+    Nat.is_le(Eval.Eval.cost_of(res), inf), hok, hle)
 
-# Folding a singleton result list is one `better` step.
-def P.fold_single(+r: SolveRef.Best, +best: SolveRef.Best) ->
-  {SolveK.fold_results(r <> Nil{}, best)
-   == FC.FC.better_best(r, best) : SolveRef.Best}:
-  match r:
-    case SolveRef.Best{+tree, +cost}:
-      {==}
-
-# A chunk job result bounds the fold of its singleton list by the reference
-# fold over the segment, from any accumulator below the cutoff.
-def P.single_le(+p: Nat, +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
-    +inf: Nat, +seg: +List<+List<Nat>>, +acc: SolveRef.Best,
-    +r: SolveRef.Best,
-    +hjr: {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf, r) == True{} : Bool},
-    +hacc: {Nat.is_le(Eval.Eval.cost_of(acc), inf) == True{} : Bool}) ->
-  {Nat.is_le(Eval.Eval.cost_of(SolveK.fold_results(r <> Nil{}, acc)),
-     Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc)))
-   == True{} : Bool}:
-  +hb2 = Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, cs, r),
-           Bool.and(Nat.is_le(Eval.Eval.cost_of(r), inf),
-             Nat.is_le(Eval.Eval.cost_of(r),
-               Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                 Eval.Eval.dummy_inf(inf))))), hjr)
-  +hcost = Logic.Proof.and_true_r(Nat.is_le(Eval.Eval.cost_of(r), inf),
-             Nat.is_le(Eval.Eval.cost_of(r),
-               Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                 Eval.Eval.dummy_inf(inf)))), hb2)
-  +eab : {Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc)
-          == FC.FC.better_best(
-               Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                 Eval.Eval.dummy_inf(inf)), acc) : SolveRef.Best} =
-    P.guesses_as_better(p, G, cs, inf, seg, acc, hacc)
-  +emon = P.better_mono_le(r,
-            Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-              Eval.Eval.dummy_inf(inf)),
-            acc, acc, hcost, NatProof.Nat.is_le_refl(Eval.Eval.cost_of(acc)))
-  +hmain = Fold.OQ.le_cong_r(
-             Eval.Eval.cost_of(FC.FC.better_best(r, acc)),
-             Eval.Eval.cost_of(FC.FC.better_best(
-               Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                 Eval.Eval.dummy_inf(inf)), acc)),
-             Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc)),
-             Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
-               FC.FC.better_best(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                 Eval.Eval.dummy_inf(inf)), acc),
-               Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc),
-               Equal.sym(SolveRef.Best,
-                 Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc),
-                 FC.FC.better_best(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                   Eval.Eval.dummy_inf(inf)), acc), eab)),
-             emon)
-  Fold.OQ.le_cong_l(
-    Eval.Eval.cost_of(SolveK.fold_results(r <> Nil{}, acc)),
-    Eval.Eval.cost_of(FC.FC.better_best(r, acc)),
-    Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc)),
-    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
-      SolveK.fold_results(r <> Nil{}, acc), FC.FC.better_best(r, acc),
-      P.fold_single(r, acc)),
-    hmain)
-
-# The split of a segment, as transparent definitions so the type indices of
-# the induction below can mention them.
-def P.half_of(+xs: +List<+List<Nat>>) -> Nat:
-  SolveK.half(Groups.len_words(xs))
-
-def P.left_of(+xs: +List<+List<Nat>>) -> +List<+List<Nat>>:
-  List.take(&2, +List<Nat>, xs, P.half_of(xs))
-
-def P.right_of(+xs: +List<+List<Nat>>) -> +List<+List<Nat>>:
-  List.drop(&2, +List<Nat>, xs, P.half_of(xs))
-
-def P.off_next(+off: U32, +xs: +List<+List<Nat>>) -> U32:
-  U32.add(off, U32.from_nat(P.half_of(xs)))
-
-def P.split_back(+xs: +List<+List<Nat>>) ->
-  {List.append(&2, +List<Nat>, P.left_of(xs), P.right_of(xs)) == xs
-   : +List<+List<Nat>>}:
-  ParList.ParList.take_drop(xs, P.half_of(xs))
-
-def P.half_of_le(+xs: +List<+List<Nat>>) ->
-  {Nat.is_le(P.half_of(xs), Groups.len_words(xs)) == True{} : Bool}:
-  P.half_le(Groups.len_words(xs))
-
-def P.len_left(+xs: +List<+List<Nat>>) ->
-  {Groups.len_words(P.left_of(xs)) == P.half_of(xs) : Nat}:
-  P.len_take_le(xs, P.half_of(xs), P.half_of_le(xs))
-
-def P.eG1(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>) ->
-  {List.append(&2, +List<Nat>,
-     List.append(&2, +List<Nat>, pre, seg), post)
-   == List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre,
-          List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg))),
-        post) : +List<+List<Nat>>}:
-  Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
-    l => List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, l), post),
-    seg, List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg)),
-    Equal.sym(+List<+List<Nat>>,
-      List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg)), seg,
-      P.split_back(seg)))
-
-def P.eG2(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>) ->
-  {List.append(&2, +List<Nat>,
-     List.append(&2, +List<Nat>, pre,
-       List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg))),
-     post)
-   == List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>,
-          List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-          P.right_of(seg)),
-        post) : +List<+List<Nat>>}:
-  Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
-    l => List.append(&2, +List<Nat>, l, post),
-    List.append(&2, +List<Nat>, pre,
-      List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg))),
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-      P.right_of(seg)),
-    Equal.sym(+List<+List<Nat>>,
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-        P.right_of(seg)),
-      List.append(&2, +List<Nat>, pre,
-        List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg))),
-      FN.FN.list_append_assoc(pre, P.left_of(seg), P.right_of(seg))))
-
-def P.eG3(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>) ->
-  {List.append(&2, +List<Nat>,
-     List.append(&2, +List<Nat>,
-       List.append(&2, +List<Nat>, pre, P.left_of(seg)), P.right_of(seg)),
-     post)
-   == List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-        List.append(&2, +List<Nat>, P.right_of(seg), post))
-   : +List<+List<Nat>>}:
-  FN.FN.list_append_assoc(
-    List.append(&2, +List<Nat>, pre, P.left_of(seg)), P.right_of(seg), post)
-
-# The left child keeps the prefix, taking the right half into its suffix.
-def P.eG_left(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>, +G: +List<+List<Nat>>,
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>}) ->
-  {G == List.append(&2, +List<Nat>,
-         List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-         List.append(&2, +List<Nat>, P.right_of(seg), post))
-   : +List<+List<Nat>>}:
-  Equal.trans(+List<+List<Nat>>, G,
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, seg), post),
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-      List.append(&2, +List<Nat>, P.right_of(seg), post)),
-    eG,
-    Equal.trans(+List<+List<Nat>>,
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre, seg), post),
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>,
-          List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-          P.right_of(seg)),
-        post),
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-        List.append(&2, +List<Nat>, P.right_of(seg), post)),
-      Equal.trans(+List<+List<Nat>>,
-        List.append(&2, +List<Nat>,
-          List.append(&2, +List<Nat>, pre, seg), post),
-        List.append(&2, +List<Nat>,
-          List.append(&2, +List<Nat>, pre,
-            List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg))),
-          post),
-        List.append(&2, +List<Nat>,
-          List.append(&2, +List<Nat>,
-            List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-            P.right_of(seg)),
-          post),
-        P.eG1(pre, seg, post), P.eG2(pre, seg, post)),
-      P.eG3(pre, seg, post)))
-
-# The right child takes the left half into its prefix.
-def P.eG_right(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +post: +List<+List<Nat>>, +G: +List<+List<Nat>>,
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>}) ->
-  {G == List.append(&2, +List<Nat>,
-         List.append(&2, +List<Nat>,
-           List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-           P.right_of(seg)),
-         post) : +List<+List<Nat>>}:
-  Equal.trans(+List<+List<Nat>>, G,
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>, pre, seg), post),
-    List.append(&2, +List<Nat>,
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-        P.right_of(seg)),
-      post),
-    eG,
-    Equal.trans(+List<+List<Nat>>,
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre, seg), post),
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>, pre,
-          List.append(&2, +List<Nat>, P.left_of(seg), P.right_of(seg))),
-        post),
-      List.append(&2, +List<Nat>,
-        List.append(&2, +List<Nat>,
-          List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-          P.right_of(seg)),
-        post),
-      P.eG1(pre, seg, post), P.eG2(pre, seg, post)))
-
-# The right child's offset is the left child's length added to the prefix
-# offset.
-def P.eoff_right(+pre: +List<+List<Nat>>, +seg: +List<+List<Nat>>,
-    +off: U32,
-    +eoff: {U32.from_nat(Groups.len_words(pre)) == off : U32}) ->
-  {U32.from_nat(Groups.len_words(
-      List.append(&2, +List<Nat>, pre, P.left_of(seg))))
-   == P.off_next(off, seg) : U32}:
-  Equal.trans(U32,
-    U32.from_nat(Groups.len_words(
-      List.append(&2, +List<Nat>, pre, P.left_of(seg)))),
-    U32.from_nat(Nat.add(Groups.len_words(pre), P.half_of(seg))),
-    U32.add(off, U32.from_nat(P.half_of(seg))),
-    Equal.cong(Nat, U32, x => U32.from_nat(x),
-      Groups.len_words(List.append(&2, +List<Nat>, pre, P.left_of(seg))),
-      Nat.add(Groups.len_words(pre), P.half_of(seg)),
-      Equal.trans(Nat,
-        Groups.len_words(List.append(&2, +List<Nat>, pre, P.left_of(seg))),
-        Nat.add(Groups.len_words(pre), Groups.len_words(P.left_of(seg))),
-        Nat.add(Groups.len_words(pre), P.half_of(seg)),
-        FT.FT.len_words_append(pre, P.left_of(seg)),
-        Equal.cong(Nat, Nat, x => Nat.add(Groups.len_words(pre), x),
-          Groups.len_words(P.left_of(seg)), P.half_of(seg),
-          P.len_left(seg)))),
-    Equal.trans(U32,
-      U32.from_nat(Nat.add(Groups.len_words(pre), P.half_of(seg))),
-      U32.add(U32.from_nat(Groups.len_words(pre)),
-        U32.from_nat(P.half_of(seg))),
-      U32.add(off, U32.from_nat(P.half_of(seg))),
-      Equal.sym(U32,
-        U32.add(U32.from_nat(Groups.len_words(pre)),
-          U32.from_nat(P.half_of(seg))),
-        U32.from_nat(Nat.add(Groups.len_words(pre), P.half_of(seg))),
-        FT.FT.u32_add_from_nat(Groups.len_words(pre), P.half_of(seg))),
-      Equal.cong(U32, U32, x => U32.add(x, U32.from_nat(P.half_of(seg))),
-        U32.from_nat(Groups.len_words(pre)), off, eoff)))
+def P.le_gs_of_job_res(+fuel: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +gs: +List<+List<Nat>>, +S: +List<+List<Nat>>, +res: SolveRef.Best,
+    +h: {P.job_res_gs_b(fuel, inf, G, gs, S, inf, res) == True{} : Bool}) ->
+  {Nat.is_le(Eval.Eval.cost_of(res),
+     Eval.Eval.cost_of(Eval.Eval.guesses(fuel, G, S, inf, gs,
+       Eval.Eval.dummy_inf(inf)))) == True{} : Bool}:
+  +hr = Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, S, res),
+          Bool.and(Nat.is_le(Eval.Eval.cost_of(res), inf),
+            Nat.is_le(Eval.Eval.cost_of(res),
+              Eval.Eval.cost_of(Eval.Eval.guesses(fuel, G, S, inf, gs,
+                Eval.Eval.dummy_inf(inf))))), h)
+  Logic.Proof.and_true_r(Nat.is_le(Eval.Eval.cost_of(res), inf),
+    Nat.is_le(Eval.Eval.cost_of(res),
+      Eval.Eval.cost_of(Eval.Eval.guesses(fuel, G, S, inf, gs,
+        Eval.Eval.dummy_inf(inf)))), hr)
 
 # ---------------------------------------------------------------------------
-# The chunked root: cost bound and validity of every chunk result
+# `SolveK.chunk_best` over any valid `RootGuess` list and valid initial bound
 # ---------------------------------------------------------------------------
 
-def P.par_cost(+d: Nat, +seg: +List<+List<Nat>>, +off: U32, +p: Nat,
-    +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +nd: Bool, +inf: Nat,
-    +pre: +List<+List<Nat>>, +post: +List<+List<Nat>>,
-    +acc: SolveRef.Best,
+def P.chunk_best_rgs(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +cs: +List<+List<Nat>>, +nd: Bool, +has_buf: Bool,
+    +rgs: +List<Greedy.RootGuess>, +b0: SolveRef.Best, buf0: SolveFast.Buf5,
     +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>},
-    +eoff: {U32.from_nat(Groups.len_words(pre)) == off : U32},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
     +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
     +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
     +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool},
-    +hacc: {Nat.is_le(Eval.Eval.cost_of(acc), inf) == True{} : Bool}) ->
-  {Nat.is_le(
-     Eval.Eval.cost_of(SolveK.fold_results(
-       SolveK.par_chunks(d, seg, off, 1n+p, G,
-         SolveFast.glist_of_guesses(G, 0, 1),
-         SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-         cs, Groups.len_words(cs), nd,
-         SolveFast.init_floor(Groups.len_words(cs)), inf), acc)),
-     Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc)))
-   == True{} : Bool}:
-  match d:
-    case 0n:
-      +n : Nat = Groups.len_words(cs)
-      +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
-        Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en,
-          NatProof.Nat.is_le_refl(1n+p))
-      P.single_le(p, G, cs, inf, seg, acc,
-        SolveK.chunk_best(1n+p, seg, off, G,
-          SolveFast.glist_of_guesses(G, 0, 1),
-          SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-          cs, n, nd, SolveFast.init_floor(n), inf,
-          SolveFast.mk_buf_tbl(nd, G, cs, n)),
-        P.chunk_best_leaf(p, inf, G, cs, nd, pre, seg, post, off, eG, eoff,
-          ele, hz, h1, h3, h6, ai, hnd), hacc)
-    case 1n+dc:
-      match seg:
-        case Nil{}:
-          NatProof.Nat.is_le_refl(Eval.Eval.cost_of(acc))
-        case Con{w, rest}:
-          match rest:
-            case Nil{}:
-              +n : Nat = Groups.len_words(cs)
-              +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
-                Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en,
-                  NatProof.Nat.is_le_refl(1n+p))
-              P.single_le(p, G, cs, inf, seg, acc,
-                SolveK.chunk_best(1n+p, seg, off, G,
-                  SolveFast.glist_of_guesses(G, 0, 1),
-                  SolveFast.build_cwords(cs, G, 0,
-                    U32.from_nat(Groups.len_words(G))),
-                  cs, n, nd, SolveFast.init_floor(n), inf,
-                  SolveFast.mk_buf_tbl(nd, G, cs, n)),
-                P.chunk_best_leaf(p, inf, G, cs, nd, pre, seg, post, off, eG,
-                  eoff, ele, hz, h1, h3, h6, ai, hnd), hacc)
-            case Con{w2, rest2}:
-              +n : Nat = Groups.len_words(cs)
-              +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
-                Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en,
-                  NatProof.Nat.is_le_refl(1n+p))
-              +off2 : U32 = P.off_next(off, seg)
-              +e1 : {List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>, pre, seg), post)
-                     == List.append(&2, +List<Nat>,
-                          List.append(&2, +List<Nat>, pre,
-                            List.append(&2, +List<Nat>, P.left_of(seg),
-                              P.right_of(seg))),
-                          post) : +List<+List<Nat>>} =
-                Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
-                  l => List.append(&2, +List<Nat>,
-                    List.append(&2, +List<Nat>, pre, l), post),
-                  seg,
-                  List.append(&2, +List<Nat>, P.left_of(seg),
-                    P.right_of(seg)),
-                  Equal.sym(+List<+List<Nat>>,
-                    List.append(&2, +List<Nat>, P.left_of(seg),
-                      P.right_of(seg)), seg, P.split_back(seg)))
-              +e2 : {List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>, pre,
-                          List.append(&2, +List<Nat>, P.left_of(seg),
-                            P.right_of(seg))),
-                        post)
-                     == List.append(&2, +List<Nat>,
-                          List.append(&2, +List<Nat>,
-                            List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                            P.right_of(seg)),
-                          post) : +List<+List<Nat>>} =
-                Equal.cong(+List<+List<Nat>>, +List<+List<Nat>>,
-                  l => List.append(&2, +List<Nat>, l, post),
-                  List.append(&2, +List<Nat>, pre,
-                    List.append(&2, +List<Nat>, P.left_of(seg),
-                      P.right_of(seg))),
-                  List.append(&2, +List<Nat>,
-                    List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                    P.right_of(seg)),
-                  Equal.sym(+List<+List<Nat>>,
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                      P.right_of(seg)),
-                    List.append(&2, +List<Nat>, pre,
-                      List.append(&2, +List<Nat>, P.left_of(seg),
-                        P.right_of(seg))),
-                    FN.FN.list_append_assoc(pre, P.left_of(seg),
-                      P.right_of(seg))))
-              +e3 : {List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>,
-                          List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                          P.right_of(seg)),
-                        post)
-                     == List.append(&2, +List<Nat>,
-                          List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                          List.append(&2, +List<Nat>, P.right_of(seg), post))
-                     : +List<+List<Nat>>} =
-                FN.FN.list_append_assoc(
-                  List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                  P.right_of(seg), post)
-              +eGl : {G == List.append(&2, +List<Nat>,
-                         List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                         List.append(&2, +List<Nat>, P.right_of(seg), post))
-                      : +List<+List<Nat>>} =
-                Equal.trans(+List<+List<Nat>>, G,
-                  List.append(&2, +List<Nat>,
-                    List.append(&2, +List<Nat>, pre, seg), post),
-                  List.append(&2, +List<Nat>,
-                    List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                    List.append(&2, +List<Nat>, P.right_of(seg), post)),
-                  eG,
-                  Equal.trans(+List<+List<Nat>>,
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>, pre, seg), post),
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                        P.right_of(seg)),
-                      post),
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                      List.append(&2, +List<Nat>, P.right_of(seg), post)),
-                    Equal.trans(+List<+List<Nat>>,
-                      List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>, pre, seg), post),
-                      List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>, pre,
-                          List.append(&2, +List<Nat>, P.left_of(seg),
-                            P.right_of(seg))),
-                        post),
-                      List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>,
-                          List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                          P.right_of(seg)),
-                        post),
-                      e1, e2),
-                    e3))
-              +eGr : {G == List.append(&2, +List<Nat>,
-                         List.append(&2, +List<Nat>,
-                           List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                           P.right_of(seg)),
-                         post) : +List<+List<Nat>>} =
-                Equal.trans(+List<+List<Nat>>, G,
-                  List.append(&2, +List<Nat>,
-                    List.append(&2, +List<Nat>, pre, seg), post),
-                  List.append(&2, +List<Nat>,
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                      P.right_of(seg)),
-                    post),
-                  eG,
-                  Equal.trans(+List<+List<Nat>>,
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>, pre, seg), post),
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>, pre,
-                        List.append(&2, +List<Nat>, P.left_of(seg),
-                          P.right_of(seg))),
-                      post),
-                    List.append(&2, +List<Nat>,
-                      List.append(&2, +List<Nat>,
-                        List.append(&2, +List<Nat>, pre, P.left_of(seg)),
-                        P.right_of(seg)),
-                      post),
-                    e1, e2))
-              +eL1 : {Groups.len_words(
-                        List.append(&2, +List<Nat>, pre, P.left_of(seg)))
-                      == Nat.add(Groups.len_words(pre), P.half_of(seg))
-                      : Nat} =
-                Equal.trans(Nat,
-                  Groups.len_words(
-                    List.append(&2, +List<Nat>, pre, P.left_of(seg))),
-                  Nat.add(Groups.len_words(pre),
-                    Groups.len_words(P.left_of(seg))),
-                  Nat.add(Groups.len_words(pre), P.half_of(seg)),
-                  FT.FT.len_words_append(pre, P.left_of(seg)),
-                  Equal.cong(Nat, Nat,
-                    x => Nat.add(Groups.len_words(pre), x),
-                    Groups.len_words(P.left_of(seg)), P.half_of(seg),
-                    P.len_left(seg)))
-              +eL2 : {U32.from_nat(Groups.len_words(
-                         List.append(&2, +List<Nat>, pre, P.left_of(seg))))
-                      == U32.add(U32.from_nat(Groups.len_words(pre)),
-                           U32.from_nat(P.half_of(seg))) : U32} =
-                Equal.trans(U32,
-                  U32.from_nat(Groups.len_words(
-                    List.append(&2, +List<Nat>, pre, P.left_of(seg)))),
-                  U32.from_nat(Nat.add(Groups.len_words(pre),
-                    P.half_of(seg))),
-                  U32.add(U32.from_nat(Groups.len_words(pre)),
-                    U32.from_nat(P.half_of(seg))),
-                  Equal.cong(Nat, U32, x => U32.from_nat(x),
-                    Groups.len_words(
-                      List.append(&2, +List<Nat>, pre, P.left_of(seg))),
-                    Nat.add(Groups.len_words(pre), P.half_of(seg)), eL1),
-                  Equal.sym(U32,
-                    U32.add(U32.from_nat(Groups.len_words(pre)),
-                      U32.from_nat(P.half_of(seg))),
-                    U32.from_nat(Nat.add(Groups.len_words(pre),
-                      P.half_of(seg))),
-                    FT.FT.u32_add_from_nat(Groups.len_words(pre),
-                      P.half_of(seg))))
-              +eoff2 : {U32.from_nat(Groups.len_words(
-                          List.append(&2, +List<Nat>, pre, P.left_of(seg))))
-                        == off2 : U32} =
-                Equal.trans(U32,
-                  U32.from_nat(Groups.len_words(
-                    List.append(&2, +List<Nat>, pre, P.left_of(seg)))),
-                  U32.add(U32.from_nat(Groups.len_words(pre)),
-                    U32.from_nat(P.half_of(seg))),
-                  U32.add(off, U32.from_nat(P.half_of(seg))),
-                  eL2,
-                  Equal.cong(U32, U32,
-                    x => U32.add(x, U32.from_nat(P.half_of(seg))),
-                    U32.from_nat(Groups.len_words(pre)), off, eoff))
-              +ihl : {Nat.is_le(
-                        Eval.Eval.cost_of(SolveK.fold_results(
-                          SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                            SolveFast.glist_of_guesses(G, 0, 1),
-                            SolveFast.build_cwords(cs, G, 0,
-                              U32.from_nat(Groups.len_words(G))),
-                            cs, n, nd, SolveFast.init_floor(n), inf), acc)),
-                        Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                          P.left_of(seg), acc))) == True{} : Bool} =
-                P.par_cost(dc, P.left_of(seg), off, p, G, cs, nd, inf, pre,
-                  List.append(&2, +List<Nat>, P.right_of(seg), post), acc, en,
-                  eGl, eoff, hz, h1, h3, h6, ai, hnd, hacc)
-              +hacc2 : {Nat.is_le(
-                          Eval.Eval.cost_of(SolveK.fold_results(
-                            SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                              SolveFast.glist_of_guesses(G, 0, 1),
-                              SolveFast.build_cwords(cs, G, 0,
-                                U32.from_nat(Groups.len_words(G))),
-                              cs, n, nd, SolveFast.init_floor(n), inf), acc)),
-                          inf) == True{} : Bool} =
-                NatProof.Nat.is_le_trans(
-                  Eval.Eval.cost_of(SolveK.fold_results(
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf), acc)),
-                  Eval.Eval.cost_of(acc), inf,
-                  P.fold_le_best(
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf), acc),
-                  hacc)
-              +ihr : {Nat.is_le(
-                        Eval.Eval.cost_of(SolveK.fold_results(
-                          SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                            SolveFast.glist_of_guesses(G, 0, 1),
-                            SolveFast.build_cwords(cs, G, 0,
-                              U32.from_nat(Groups.len_words(G))),
-                            cs, n, nd, SolveFast.init_floor(n), inf),
-                          SolveK.fold_results(
-                            SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                              SolveFast.glist_of_guesses(G, 0, 1),
-                              SolveFast.build_cwords(cs, G, 0,
-                                U32.from_nat(Groups.len_words(G))),
-                              cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                        Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                          P.right_of(seg),
-                          SolveK.fold_results(
-                            SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                              SolveFast.glist_of_guesses(G, 0, 1),
-                              SolveFast.build_cwords(cs, G, 0,
-                                U32.from_nat(Groups.len_words(G))),
-                              cs, n, nd, SolveFast.init_floor(n), inf), acc))))
-                        == True{} : Bool} =
-                P.par_cost(dc, P.right_of(seg), off2, p, G, cs, nd, inf,
-                  List.append(&2, +List<Nat>, pre, P.left_of(seg)), post,
-                  SolveK.fold_results(
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf), acc),
-                  en, eGr, eoff2, hz, h1, h3, h6, ai, hnd, hacc2)
-              +emon : {Nat.is_le(
-                         Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                           P.right_of(seg),
-                           SolveK.fold_results(
-                             SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                               SolveFast.glist_of_guesses(G, 0, 1),
-                               SolveFast.build_cwords(cs, G, 0,
-                                 U32.from_nat(Groups.len_words(G))),
-                               cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                         Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                           P.right_of(seg),
-                           Eval.Eval.guesses(1n+p, G, cs, inf, P.left_of(seg),
-                             acc))))
-                       == True{} : Bool} =
-                FVal.FV.eval_guesses_mono(p, G, cs, inf, P.right_of(seg),
-                  SolveK.fold_results(
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf), acc),
-                  Eval.Eval.guesses(1n+p, G, cs, inf, P.left_of(seg), acc), ihl)
-              +eapp : {Eval.Eval.guesses(1n+p, G, cs, inf,
-                         List.append(&2, +List<Nat>, P.left_of(seg),
-                           P.right_of(seg)), acc)
-                       == Eval.Eval.guesses(1n+p, G, cs, inf, P.right_of(seg),
-                            Eval.Eval.guesses(1n+p, G, cs, inf,
-                              P.left_of(seg), acc))
-                       : SolveRef.Best} =
-                P.guesses_append(p, G, cs, inf, P.left_of(seg),
-                  P.right_of(seg), acc)
-              +eapp2 : {Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc)
-                        == Eval.Eval.guesses(1n+p, G, cs, inf, P.right_of(seg),
-                             Eval.Eval.guesses(1n+p, G, cs, inf,
-                               P.left_of(seg), acc))
-                        : SolveRef.Best} =
-                Equal.trans(SolveRef.Best,
-                  Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc),
-                  Eval.Eval.guesses(1n+p, G, cs, inf,
-                    List.append(&2, +List<Nat>, P.left_of(seg),
-                      P.right_of(seg)), acc),
-                  Eval.Eval.guesses(1n+p, G, cs, inf, P.right_of(seg),
-                    Eval.Eval.guesses(1n+p, G, cs, inf, P.left_of(seg), acc)),
-                  Equal.cong(+List<+List<Nat>>, SolveRef.Best,
-                    l => Eval.Eval.guesses(1n+p, G, cs, inf, l, acc),
-                    seg,
-                    List.append(&2, +List<Nat>, P.left_of(seg),
-                      P.right_of(seg)),
-                    Equal.sym(+List<+List<Nat>>,
-                      List.append(&2, +List<Nat>, P.left_of(seg),
-                        P.right_of(seg)), seg, P.split_back(seg))),
-                  eapp)
-              +hmain2 : {Nat.is_le(
-                           Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs,
-                             inf, P.right_of(seg),
-                             SolveK.fold_results(
-                               SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p,
-                                 G, SolveFast.glist_of_guesses(G, 0, 1),
-                                 SolveFast.build_cwords(cs, G, 0,
-                                   U32.from_nat(Groups.len_words(G))),
-                                 cs, n, nd, SolveFast.init_floor(n), inf),
-                               acc))),
-                           Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs,
-                             inf, seg, acc))) == True{} : Bool} =
-                Fold.OQ.le_cong_r(
-                  Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                    P.right_of(seg),
-                    SolveK.fold_results(
-                      SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                  Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                    P.right_of(seg),
-                    Eval.Eval.guesses(1n+p, G, cs, inf, P.left_of(seg), acc))),
-                  Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                    acc)),
-                  Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
-                    Eval.Eval.guesses(1n+p, G, cs, inf, P.right_of(seg),
-                      Eval.Eval.guesses(1n+p, G, cs, inf, P.left_of(seg),
-                        acc)),
-                    Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc),
-                    Equal.sym(SolveRef.Best,
-                      Eval.Eval.guesses(1n+p, G, cs, inf, seg, acc),
-                      Eval.Eval.guesses(1n+p, G, cs, inf, P.right_of(seg),
-                        Eval.Eval.guesses(1n+p, G, cs, inf, P.left_of(seg),
-                          acc)), eapp2)),
-                  emon)
-              +hmain : {Nat.is_le(
-                          Eval.Eval.cost_of(SolveK.fold_results(
-                            SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p,
-                              G, SolveFast.glist_of_guesses(G, 0, 1),
-                              SolveFast.build_cwords(cs, G, 0,
-                                U32.from_nat(Groups.len_words(G))),
-                              cs, n, nd, SolveFast.init_floor(n), inf),
-                            SolveK.fold_results(
-                              SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p,
-                                G, SolveFast.glist_of_guesses(G, 0, 1),
-                                SolveFast.build_cwords(cs, G, 0,
-                                  U32.from_nat(Groups.len_words(G))),
-                                cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                          Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs,
-                            inf, seg, acc))) == True{} : Bool} =
-                NatProof.Nat.is_le_trans(
-                  Eval.Eval.cost_of(SolveK.fold_results(
-                    SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf),
-                    SolveK.fold_results(
-                      SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                  Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                    P.right_of(seg),
-                    SolveK.fold_results(
-                      SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                  Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                    acc)),
-                  ihr, hmain2)
-              Fold.OQ.le_cong_l(
-                Eval.Eval.cost_of(SolveK.fold_results(
-                  List.append(&2, SolveRef.Best,
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf),
-                    SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf)), acc)),
-                Eval.Eval.cost_of(SolveK.fold_results(
-                  SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                    SolveFast.glist_of_guesses(G, 0, 1),
-                    SolveFast.build_cwords(cs, G, 0,
-                      U32.from_nat(Groups.len_words(G))),
-                    cs, n, nd, SolveFast.init_floor(n), inf),
-                  SolveK.fold_results(
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf), acc))),
-                Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                  acc)),
-                Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
-                  SolveK.fold_results(
-                    List.append(&2, SolveRef.Best,
-                      SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf),
-                      SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf)), acc),
-                  SolveK.fold_results(
-                    SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf),
-                    SolveK.fold_results(
-                      SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf), acc)),
-                  P.fold_append(
-                    SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf),
-                    SolveK.par_chunks(dc, P.right_of(seg), off2, 1n+p, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf), acc)),
-                hmain)
+    +hrgs: {GR.GR.rgs_ok_b(has_buf, G, Groups.len_words(cs), rgs) == True{} : Bool},
+    +hb0: {GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+    +hbuf0: FH.FH.BufOk(G, cs, Groups.len_words(cs), has_buf, nd, buf0)) ->
+  {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+     SolveK.chunk_best(1n+p, rgs, SolveFast.glist_of_guesses(G, 0, 1),
+       SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+       Groups.len_words(cs), nd, SolveFast.init_floor(Groups.len_words(cs)),
+       inf, b0, buf0)) == True{} : Bool}:
+  +n : Nat = Groups.len_words(cs)
+  +gs : +List<+List<Nat>> = GR.GR.rgs_words(rgs)
+  +rws : +List<FT.FT.RowWord> = GR.GR.rgs_to_rws(rgs)
+  +rwsG : +List<FT.FT.RowWord> = FT.FT.guesses_to_rws(G, 0, 1)
+  +cwS : +List<SolveFast.CWord> =
+    SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G)))
+  +erws = GR.GR.rgs_to_rws_words(rgs)
+  +hrws = GR.GR.rgs_ok_to_rws(has_buf, G, n, rgs, hrgs)
+  +hg_in = GR.GR.rgs_ok_to_all_in(has_buf, G, n, rgs, hrgs)
+  +erwsG = FT.FT.guesses_to_rws_words(G, 0, 1)
+  +hrwsG = FOpt.FOpt.guesses_to_rws_ok_if(has_buf, G, n)
+  +ecwS = FT.FT.build_cwords_words(cs, G, 0, U32.from_nat(Groups.len_words(G)))
+  +hcwS = FOpt.FOpt.build_cwords_ok_if(has_buf, G, cs, n, ai)
+  +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
+    Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en, NatProof.Nat.is_le_refl(1n+p))
+  +hok0 = Logic.Proof.and_true_l(FVal.FV.best_ok_b(inf, G, cs, b0),
+            Nat.is_le(Eval.Eval.cost_of(b0), inf), hb0)
+  +hbest0 = Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, cs, b0),
+              Nat.is_le(Eval.Eval.cost_of(b0), inf), hb0)
+  +eg_rgs = Equal.sym(SolveFast.GList, Greedy.glist_of_rgs(rgs),
+              FT.FT.glist_of_rws(rws, SolveFast.GEnd{}), GR.GR.glist_of_rgs_eq(rgs))
+  +eg_G = Equal.sym(SolveFast.GList, SolveFast.glist_of_guesses(G, 0, 1),
+            FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}),
+            FT.FT.glist_of_guesses_eq(G, 0, 1))
+  GR.GR.with_dup_buf(
+    {P.job_res_gs_b(1n+p, inf, G, gs, cs, inf,
+       SolveK.chunk_best(1n+p, rgs, SolveFast.glist_of_guesses(G, 0, 1),
+         cwS, n, nd, SolveFast.init_floor(n), inf, b0, buf0)) == True{} : Bool},
+    buf0,
+    b1 => b2 => +eb1 => +eb2 =>
+    +hbuf1 = FH.FH.buf_ok_transport(G, cs, n, has_buf, nd, buf0, b1,
+               Equal.sym(SolveFast.Buf5, b1, buf0, eb1), hbuf0)
+    fseg : FOpt.FOpt.EFlat(p, inf, G, cs, n, has_buf, nd,
+              MV.MV.next_guess(gs, cs)) =
+      FOpt.FOpt.eflat(p, inf, G, cs, n, has_buf, nd,
+        MV.MV.next_guess(gs, cs), MV.MV.any_bounds(p, gs, cs, ele),
+        hz, h1, h3, h6, FO.FO.all_in_next_guess(gs, cs, G, ai),
+        FN.FN.nodup_ok_next_guess(nd, gs, cs, hnd))
+    fgs : FOpt.FOpt.EByGs(p, inf, G, cs, n, has_buf, cs, nd, gs) =
+      FOpt.FOpt.eby_gs(p, inf, G, cs, n, has_buf, cs, nd, gs, fseg)
+    +hspec1 = P.chunk_direct(p, inf, G, gs, cs, has_buf, rws, rwsG, cwS, nd,
+                b0, b1, erwsG, hrwsG, ecwS, hcwS, erws, hrws, hg_in, ele, hz,
+                h1, h3, h6, ai, hnd, hbest0, hok0, hbuf1, fgs)
+    +eb12 : {b1 == b2 : SolveFast.Buf5} =
+      Equal.trans(SolveFast.Buf5, b1, buf0, b2, eb1,
+        Equal.sym(SolveFast.Buf5, b2, buf0, eb2))
+    +hspec2 : P.ChunkSpec(1n+p, inf, G, gs, cs, n, has_buf, nd, cs, inf,
+                SolveFast.step(1n+p, FT.FT.glist_of_rws(rws, SolveFast.GEnd{}),
+                  0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS,
+                  n, nd, SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
+                  SolveFast.dummy_step_zero(), False{},
+                  SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
+                  SolveFast.GuessRes{Nil{}, b2})) =
+      %eb12 : P.ChunkSpec(1n+p, inf, G, gs, cs, n, has_buf, nd, cs, inf,
+                SolveFast.step(1n+p, FT.FT.glist_of_rws(rws, SolveFast.GEnd{}),
+                  0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS,
+                  n, nd, SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
+                  SolveFast.dummy_step_zero(), False{},
+                  SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
+                  SolveFast.GuessRes{Nil{}, _}))
+      hspec1
+    +hjr2 = P.job_res_gs_of_spec(1n+p, inf, G, gs, cs, n, has_buf, nd, cs, inf,
+              SolveFast.step(1n+p, FT.FT.glist_of_rws(rws, SolveFast.GEnd{}),
+                0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS,
+                n, nd, SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
+                SolveFast.dummy_step_zero(), False{},
+                SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
+                SolveFast.GuessRes{Nil{}, b2}), hspec2)
+    %eg_rgs :
+      {P.job_res_gs_b(1n+p, inf, G, gs, cs, inf,
+         SolveFast.step_res_best(
+           SolveFast.step(1n+p, _, 0n, Nil{},
+             SolveFast.glist_of_guesses(G, 0, 1), cwS, n, nd,
+             SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
+             SolveFast.dummy_step_zero(), False{},
+             SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
+             SolveFast.GuessRes{Nil{}, buf0}))) == True{} : Bool}
+    %eg_G :
+      {P.job_res_gs_b(1n+p, inf, G, gs, cs, inf,
+         SolveFast.step_res_best(
+           SolveFast.step(1n+p, FT.FT.glist_of_rws(rws, SolveFast.GEnd{}),
+             0n, Nil{}, _, cwS, n, nd, SolveFast.init_floor(n), inf, Nil{},
+             Nil{}, 0n, b0, SolveFast.dummy_step_zero(), False{},
+             SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
+             SolveFast.GuessRes{Nil{}, buf0}))) == True{} : Bool}
+    %eb2 :
+      {P.job_res_gs_b(1n+p, inf, G, gs, cs, inf,
+         SolveFast.step_res_best(
+           SolveFast.step(1n+p, FT.FT.glist_of_rws(rws, SolveFast.GEnd{}),
+             0n, Nil{}, FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, n, nd,
+             SolveFast.init_floor(n), inf, Nil{}, Nil{}, 0n, b0,
+             SolveFast.dummy_step_zero(), False{},
+             SolveFast.is_floor_hit(nd, SolveFast.init_floor(n), b0),
+             SolveFast.GuessRes{Nil{}, _}))) == True{} : Bool}
+    hjr2)
 
-# Every result `par_chunks` returns is valid at the cutoff and costs at most
-# the cutoff.
-def P.par_ok(+d: Nat, +seg: +List<+List<Nat>>, +off: U32, +p: Nat,
-    +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +nd: Bool, +inf: Nat,
-    +pre: +List<+List<Nat>>, +post: +List<+List<Nat>>,
+# ---------------------------------------------------------------------------
+# Round-robin splitting (`deal_even` / `deal_odd`) and `par_chunks`
+# ---------------------------------------------------------------------------
+
+def P.deal_even_ok(+has_buf: Bool, +G: +List<+List<Nat>>, +n_root: Nat,
+    +xs: +List<Greedy.RootGuess>,
+    +h: {GR.GR.rgs_ok_b(has_buf, G, n_root, xs) == True{} : Bool}) ->
+  {GR.GR.rgs_ok_b(has_buf, G, n_root, SolveK.deal_even(xs)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      match t:
+        case Nil{}:
+          h
+        case Con{+y, +rest}:
+          +hx = Logic.Proof.and_true_l(GR.GR.rg_ok_b(has_buf, G, n_root, x),
+                  GR.GR.rgs_ok_b(has_buf, G, n_root, y <> rest), h)
+          +ht = Logic.Proof.and_true_r(GR.GR.rg_ok_b(has_buf, G, n_root, x),
+                  GR.GR.rgs_ok_b(has_buf, G, n_root, y <> rest), h)
+          +hr = Logic.Proof.and_true_r(GR.GR.rg_ok_b(has_buf, G, n_root, y),
+                  GR.GR.rgs_ok_b(has_buf, G, n_root, rest), ht)
+          FO.FO.bool_and_intro(GR.GR.rg_ok_b(has_buf, G, n_root, x),
+            GR.GR.rgs_ok_b(has_buf, G, n_root, SolveK.deal_even(rest)),
+            hx, P.deal_even_ok(has_buf, G, n_root, rest, hr))
+
+def P.deal_odd_ok(+has_buf: Bool, +G: +List<+List<Nat>>, +n_root: Nat,
+    +xs: +List<Greedy.RootGuess>,
+    +h: {GR.GR.rgs_ok_b(has_buf, G, n_root, xs) == True{} : Bool}) ->
+  {GR.GR.rgs_ok_b(has_buf, G, n_root, SolveK.deal_odd(xs)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      match t:
+        case Nil{}:
+          {==}
+        case Con{+y, +rest}:
+          +ht = Logic.Proof.and_true_r(GR.GR.rg_ok_b(has_buf, G, n_root, x),
+                  GR.GR.rgs_ok_b(has_buf, G, n_root, y <> rest), h)
+          +hy = Logic.Proof.and_true_l(GR.GR.rg_ok_b(has_buf, G, n_root, y),
+                  GR.GR.rgs_ok_b(has_buf, G, n_root, rest), ht)
+          +hr = Logic.Proof.and_true_r(GR.GR.rg_ok_b(has_buf, G, n_root, y),
+                  GR.GR.rgs_ok_b(has_buf, G, n_root, rest), ht)
+          FO.FO.bool_and_intro(GR.GR.rg_ok_b(has_buf, G, n_root, y),
+            GR.GR.rgs_ok_b(has_buf, G, n_root, SolveK.deal_odd(rest)),
+            hy, P.deal_odd_ok(has_buf, G, n_root, rest, hr))
+
+def P.or_cons_mono(+w: +List<Nat>, +gx: +List<Nat>, +gy: +List<Nat>,
+    +ls: +List<+List<Nat>>, +rs: +List<+List<Nat>>, ml: Bool,
+    +eml: {ml == Tree.member_word(w, ls) : Bool},
+    +hor: {Bool.or(ml, Tree.member_word(w, rs)) == True{} : Bool}) ->
+  {Bool.or(Tree.member_word(w, gx <> ls), Tree.member_word(w, gy <> rs))
+   == True{} : Bool}:
+  match ml:
+    case True{}:
+      P.or_true_l(Tree.member_word(w, gx <> ls), Tree.member_word(w, gy <> rs),
+        FN.FN.member_cons_r(w, gx, ls,
+          Equal.sym(Bool, True{}, Tree.member_word(w, ls), eml)))
+    case False{}:
+      P.or_true_r(Tree.member_word(w, gx <> ls), Tree.member_word(w, gy <> rs),
+        FN.FN.member_cons_r(w, gy, rs, hor))
+
+def P.deal_mem(+w: +List<Nat>, +xs: +List<Greedy.RootGuess>,
+    +hm: {Tree.member_word(w, GR.GR.rgs_words(xs)) == True{} : Bool}) ->
+  {Bool.or(Tree.member_word(w, GR.GR.rgs_words(SolveK.deal_even(xs))),
+           Tree.member_word(w, GR.GR.rgs_words(SolveK.deal_odd(xs))))
+   == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      Empty.absurd(
+        {Bool.or(Tree.member_word(w, Nil{}), Tree.member_word(w, Nil{}))
+         == True{} : Bool},
+        Logic.Proof.false_ne_true(hm))
+    case Con{+x, +t}:
+      match x:
+        case Greedy.RootGuess{+rx, +gx}:
+          match t:
+            case Nil{}:
+              P.or_true_l(
+                Tree.member_word(w, gx <> Nil{}), False{}, hm)
+            case Con{+y, +rest}:
+              match y:
+                case Greedy.RootGuess{+ry, +gy}:
+                  GR.GR.member_cons_split(
+                    {Bool.or(
+                       Tree.member_word(w,
+                         gx <> GR.GR.rgs_words(SolveK.deal_even(rest))),
+                       Tree.member_word(w,
+                         gy <> GR.GR.rgs_words(SolveK.deal_odd(rest))))
+                     == True{} : Bool},
+                    w, gx, gy <> GR.GR.rgs_words(rest), hm,
+                    +ewx =>
+                      +eqx : {Feedback.word_eq(w, gx) == True{} : Bool} =
+                        Equal.trans(Bool, Feedback.word_eq(w, gx),
+                          Feedback.word_eq(gx, gx), True{},
+                          Equal.cong(+List<Nat>, Bool,
+                            z => Feedback.word_eq(z, gx), w, gx, ewx),
+                          FbProof.FbPrf.word_eq_refl(gx))
+                      P.or_true_l(
+                        Tree.member_word(w,
+                          gx <> GR.GR.rgs_words(SolveK.deal_even(rest))),
+                        Tree.member_word(w,
+                          gy <> GR.GR.rgs_words(SolveK.deal_odd(rest))),
+                        GR.GR.member_cons_l(w, gx,
+                          GR.GR.rgs_words(SolveK.deal_even(rest)), eqx)),
+                    +hm2 =>
+                      GR.GR.member_cons_split(
+                        {Bool.or(
+                           Tree.member_word(w,
+                             gx <> GR.GR.rgs_words(SolveK.deal_even(rest))),
+                           Tree.member_word(w,
+                             gy <> GR.GR.rgs_words(SolveK.deal_odd(rest))))
+                         == True{} : Bool},
+                        w, gy, GR.GR.rgs_words(rest), hm2,
+                        +ewy =>
+                          +eqy : {Feedback.word_eq(w, gy) == True{} : Bool} =
+                            Equal.trans(Bool, Feedback.word_eq(w, gy),
+                              Feedback.word_eq(gy, gy), True{},
+                              Equal.cong(+List<Nat>, Bool,
+                                z => Feedback.word_eq(z, gy), w, gy, ewy),
+                              FbProof.FbPrf.word_eq_refl(gy))
+                          P.or_true_r(
+                            Tree.member_word(w,
+                              gx <> GR.GR.rgs_words(SolveK.deal_even(rest))),
+                            Tree.member_word(w,
+                              gy <> GR.GR.rgs_words(SolveK.deal_odd(rest))),
+                            GR.GR.member_cons_l(w, gy,
+                              GR.GR.rgs_words(SolveK.deal_odd(rest)), eqy)),
+                        +hm3 =>
+                          P.or_cons_mono(w, gx, gy,
+                            GR.GR.rgs_words(SolveK.deal_even(rest)),
+                            GR.GR.rgs_words(SolveK.deal_odd(rest)),
+                            Tree.member_word(w,
+                              GR.GR.rgs_words(SolveK.deal_even(rest))),
+                            {==}, P.deal_mem(w, rest, hm3))))
+
+def P.par_chunks_ok(+d: Nat, +rgs: +List<Greedy.RootGuess>, +p: Nat,
+    +inf: Nat, +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +nd: Bool,
+    +b0: SolveRef.Best,
     +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +eG : {G == List.append(&2, +List<Nat>,
-             List.append(&2, +List<Nat>, pre, seg), post)
-           : +List<+List<Nat>>},
-    +eoff: {U32.from_nat(Groups.len_words(pre)) == off : U32},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
     +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
     +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
-    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool}) ->
+    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool},
+    +hrgs: {GR.GR.rgs_ok_b(FH.FH.mk_buf_has(nd, G, cs, Groups.len_words(cs)), G,
+              Groups.len_words(cs), rgs) == True{} : Bool},
+    +hb0: {GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool}) ->
   {P.ok_list(inf, G, cs,
-     SolveK.par_chunks(d, seg, off, 1n+p, G,
-       SolveFast.glist_of_guesses(G, 0, 1),
+     SolveK.par_chunks(d, rgs, 1n+p, G, SolveFast.glist_of_guesses(G, 0, 1),
        SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-       cs, Groups.len_words(cs), nd,
-       SolveFast.init_floor(Groups.len_words(cs)), inf))
-   == True{} : Bool}:
+       cs, Groups.len_words(cs), nd, SolveFast.init_floor(Groups.len_words(cs)),
+       inf, b0)) == True{} : Bool}:
   match d:
     case 0n:
       +n : Nat = Groups.len_words(cs)
-      +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
-        Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en,
-          NatProof.Nat.is_le_refl(1n+p))
-      +hs : {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf,
-               SolveK.chunk_best(1n+p, seg, off, G,
-                 SolveFast.glist_of_guesses(G, 0, 1),
-                 SolveFast.build_cwords(cs, G, 0,
-                   U32.from_nat(Groups.len_words(G))),
-                 cs, n, nd, SolveFast.init_floor(n), inf,
-                 SolveFast.mk_buf_tbl(nd, G, cs, n)))
-             == True{} : Bool} =
-        P.chunk_best_leaf(p, inf, G, cs, nd, pre, seg, post, off, eG, eoff,
-          ele, hz, h1, h3, h6, ai, hnd)
+      +hjr = P.chunk_best_rgs(p, inf, G, cs, nd, FH.FH.mk_buf_has(nd, G, cs, n),
+               rgs, b0, SolveFast.mk_buf_tbl(nd, G, cs, n), en, hz, h1, h3, h6,
+               ai, hnd, hrgs, hb0, FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}))
+      +helt = P.elt_ok_of_job_res(1n+p, inf, G, GR.GR.rgs_words(rgs), cs,
+                SolveK.chunk_best(1n+p, rgs, SolveFast.glist_of_guesses(G, 0, 1),
+                  SolveFast.build_cwords(cs, G, 0,
+                    U32.from_nat(Groups.len_words(G))),
+                  n, nd, SolveFast.init_floor(n), inf, b0,
+                  SolveFast.mk_buf_tbl(nd, G, cs, n)), hjr)
       FO.FO.bool_and_intro(
-        P.elt_ok(inf, G, cs,
-          SolveK.chunk_best(1n+p, seg, off, G,
-            SolveFast.glist_of_guesses(G, 0, 1),
+        GR.GR.elt_ok(inf, G, cs,
+          SolveK.chunk_best(1n+p, rgs, SolveFast.glist_of_guesses(G, 0, 1),
             SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-            cs, n, nd, SolveFast.init_floor(n), inf,
+            n, nd, SolveFast.init_floor(n), inf, b0,
             SolveFast.mk_buf_tbl(nd, G, cs, n))),
-        True{},
-        FO.FO.bool_and_intro(
-          FVal.FV.best_ok_b(inf, G, cs,
-            SolveK.chunk_best(1n+p, seg, off, G,
-              SolveFast.glist_of_guesses(G, 0, 1),
-              SolveFast.build_cwords(cs, G, 0,
-                U32.from_nat(Groups.len_words(G))),
-              cs, n, nd, SolveFast.init_floor(n), inf,
-              SolveFast.mk_buf_tbl(nd, G, cs, n))),
-          Nat.is_le(Eval.Eval.cost_of(
-            SolveK.chunk_best(1n+p, seg, off, G,
-              SolveFast.glist_of_guesses(G, 0, 1),
-              SolveFast.build_cwords(cs, G, 0,
-                U32.from_nat(Groups.len_words(G))),
-              cs, n, nd, SolveFast.init_floor(n), inf,
-              SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-          Logic.Proof.and_true_l(FVal.FV.best_ok_b(inf, G, cs,
-              SolveK.chunk_best(1n+p, seg, off, G,
-                SolveFast.glist_of_guesses(G, 0, 1),
-                SolveFast.build_cwords(cs, G, 0,
-                  U32.from_nat(Groups.len_words(G))),
-                cs, n, nd, SolveFast.init_floor(n), inf,
-                SolveFast.mk_buf_tbl(nd, G, cs, n))),
-            Bool.and(Nat.is_le(Eval.Eval.cost_of(
-                SolveK.chunk_best(1n+p, seg, off, G,
-                  SolveFast.glist_of_guesses(G, 0, 1),
-                  SolveFast.build_cwords(cs, G, 0,
-                    U32.from_nat(Groups.len_words(G))),
-                  cs, n, nd, SolveFast.init_floor(n), inf,
-                  SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-              Nat.is_le(Eval.Eval.cost_of(
-                  SolveK.chunk_best(1n+p, seg, off, G,
-                    SolveFast.glist_of_guesses(G, 0, 1),
-                    SolveFast.build_cwords(cs, G, 0,
-                      U32.from_nat(Groups.len_words(G))),
-                    cs, n, nd, SolveFast.init_floor(n), inf,
-                    SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                  Eval.Eval.dummy_inf(inf))))),
-            hs),
-          Logic.Proof.and_true_l(Nat.is_le(Eval.Eval.cost_of(
-              SolveK.chunk_best(1n+p, seg, off, G,
-                SolveFast.glist_of_guesses(G, 0, 1),
-                SolveFast.build_cwords(cs, G, 0,
-                  U32.from_nat(Groups.len_words(G))),
-                cs, n, nd, SolveFast.init_floor(n), inf,
-                SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-            Nat.is_le(Eval.Eval.cost_of(
-                SolveK.chunk_best(1n+p, seg, off, G,
-                  SolveFast.glist_of_guesses(G, 0, 1),
-                  SolveFast.build_cwords(cs, G, 0,
-                    U32.from_nat(Groups.len_words(G))),
-                  cs, n, nd, SolveFast.init_floor(n), inf,
-                  SolveFast.mk_buf_tbl(nd, G, cs, n))),
-              Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                Eval.Eval.dummy_inf(inf)))),
-            Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, cs,
-                SolveK.chunk_best(1n+p, seg, off, G,
-                  SolveFast.glist_of_guesses(G, 0, 1),
-                  SolveFast.build_cwords(cs, G, 0,
-                    U32.from_nat(Groups.len_words(G))),
-                  cs, n, nd, SolveFast.init_floor(n), inf,
-                  SolveFast.mk_buf_tbl(nd, G, cs, n))),
-              Bool.and(Nat.is_le(Eval.Eval.cost_of(
-                  SolveK.chunk_best(1n+p, seg, off, G,
-                    SolveFast.glist_of_guesses(G, 0, 1),
-                    SolveFast.build_cwords(cs, G, 0,
-                      U32.from_nat(Groups.len_words(G))),
-                    cs, n, nd, SolveFast.init_floor(n), inf,
-                    SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-                Nat.is_le(Eval.Eval.cost_of(
-                    SolveK.chunk_best(1n+p, seg, off, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf,
-                      SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                  Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, seg,
-                    Eval.Eval.dummy_inf(inf))))),
-              hs))),
-        {==})
-    case 1n+dc:
-      match seg:
+        True{}, helt, {==})
+    case 1n+dp:
+      match rgs:
         case Nil{}:
           {==}
-        case Con{w, rest}:
+        case Con{+w, +rest}:
           match rest:
             case Nil{}:
               +n : Nat = Groups.len_words(cs)
-              +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
-                Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en,
-                  NatProof.Nat.is_le_refl(1n+p))
-              +hs : {P.job_res_gs_b(1n+p, inf, G, seg, cs, inf,
-                       SolveK.chunk_best(1n+p, seg, off, G,
-                         SolveFast.glist_of_guesses(G, 0, 1),
-                         SolveFast.build_cwords(cs, G, 0,
-                           U32.from_nat(Groups.len_words(G))),
-                         cs, n, nd, SolveFast.init_floor(n), inf,
-                         SolveFast.mk_buf_tbl(nd, G, cs, n)))
-                     == True{} : Bool} =
-                P.chunk_best_leaf(p, inf, G, cs, nd, pre, seg, post, off, eG,
-                  eoff, ele, hz, h1, h3, h6, ai, hnd)
+              +hjr = P.chunk_best_rgs(p, inf, G, cs, nd,
+                       FH.FH.mk_buf_has(nd, G, cs, n), w <> Nil{}, b0,
+                       SolveFast.mk_buf_tbl(nd, G, cs, n), en, hz, h1, h3, h6,
+                       ai, hnd, hrgs, hb0,
+                       FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}))
+              +helt = P.elt_ok_of_job_res(1n+p, inf, G,
+                        GR.GR.rgs_words(w <> Nil{}), cs,
+                        SolveK.chunk_best(1n+p, w <> Nil{},
+                          SolveFast.glist_of_guesses(G, 0, 1),
+                          SolveFast.build_cwords(cs, G, 0,
+                            U32.from_nat(Groups.len_words(G))),
+                          n, nd, SolveFast.init_floor(n), inf, b0,
+                          SolveFast.mk_buf_tbl(nd, G, cs, n)), hjr)
               FO.FO.bool_and_intro(
-                P.elt_ok(inf, G, cs,
-                  SolveK.chunk_best(1n+p, seg, off, G,
+                GR.GR.elt_ok(inf, G, cs,
+                  SolveK.chunk_best(1n+p, w <> Nil{},
                     SolveFast.glist_of_guesses(G, 0, 1),
                     SolveFast.build_cwords(cs, G, 0,
                       U32.from_nat(Groups.len_words(G))),
-                    cs, n, nd, SolveFast.init_floor(n), inf,
+                    n, nd, SolveFast.init_floor(n), inf, b0,
                     SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                True{},
-                FO.FO.bool_and_intro(
-                  FVal.FV.best_ok_b(inf, G, cs,
-                    SolveK.chunk_best(1n+p, seg, off, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf,
-                      SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                  Nat.is_le(Eval.Eval.cost_of(
-                    SolveK.chunk_best(1n+p, seg, off, G,
-                      SolveFast.glist_of_guesses(G, 0, 1),
-                      SolveFast.build_cwords(cs, G, 0,
-                        U32.from_nat(Groups.len_words(G))),
-                      cs, n, nd, SolveFast.init_floor(n), inf,
-                      SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-                  Logic.Proof.and_true_l(FVal.FV.best_ok_b(inf, G, cs,
-                      SolveK.chunk_best(1n+p, seg, off, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf,
-                        SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                    Bool.and(Nat.is_le(Eval.Eval.cost_of(
-                        SolveK.chunk_best(1n+p, seg, off, G,
-                          SolveFast.glist_of_guesses(G, 0, 1),
-                          SolveFast.build_cwords(cs, G, 0,
-                            U32.from_nat(Groups.len_words(G))),
-                          cs, n, nd, SolveFast.init_floor(n), inf,
-                          SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-                      Nat.is_le(Eval.Eval.cost_of(
-                          SolveK.chunk_best(1n+p, seg, off, G,
-                            SolveFast.glist_of_guesses(G, 0, 1),
-                            SolveFast.build_cwords(cs, G, 0,
-                              U32.from_nat(Groups.len_words(G))),
-                            cs, n, nd, SolveFast.init_floor(n), inf,
-                            SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                        Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                          seg, Eval.Eval.dummy_inf(inf))))),
-                    hs),
-                  Logic.Proof.and_true_l(Nat.is_le(Eval.Eval.cost_of(
-                      SolveK.chunk_best(1n+p, seg, off, G,
-                        SolveFast.glist_of_guesses(G, 0, 1),
-                        SolveFast.build_cwords(cs, G, 0,
-                          U32.from_nat(Groups.len_words(G))),
-                        cs, n, nd, SolveFast.init_floor(n), inf,
-                        SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-                    Nat.is_le(Eval.Eval.cost_of(
-                        SolveK.chunk_best(1n+p, seg, off, G,
-                          SolveFast.glist_of_guesses(G, 0, 1),
-                          SolveFast.build_cwords(cs, G, 0,
-                            U32.from_nat(Groups.len_words(G))),
-                          cs, n, nd, SolveFast.init_floor(n), inf,
-                          SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                      Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
-                        seg, Eval.Eval.dummy_inf(inf)))),
-                    Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, cs,
-                        SolveK.chunk_best(1n+p, seg, off, G,
-                          SolveFast.glist_of_guesses(G, 0, 1),
-                          SolveFast.build_cwords(cs, G, 0,
-                            U32.from_nat(Groups.len_words(G))),
-                          cs, n, nd, SolveFast.init_floor(n), inf,
-                          SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                      Bool.and(Nat.is_le(Eval.Eval.cost_of(
-                          SolveK.chunk_best(1n+p, seg, off, G,
-                            SolveFast.glist_of_guesses(G, 0, 1),
-                            SolveFast.build_cwords(cs, G, 0,
-                              U32.from_nat(Groups.len_words(G))),
-                            cs, n, nd, SolveFast.init_floor(n), inf,
-                            SolveFast.mk_buf_tbl(nd, G, cs, n))), inf),
-                        Nat.is_le(Eval.Eval.cost_of(
-                            SolveK.chunk_best(1n+p, seg, off, G,
-                              SolveFast.glist_of_guesses(G, 0, 1),
-                              SolveFast.build_cwords(cs, G, 0,
-                                U32.from_nat(Groups.len_words(G))),
-                              cs, n, nd, SolveFast.init_floor(n), inf,
-                              SolveFast.mk_buf_tbl(nd, G, cs, n))),
-                          Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs,
-                            inf, seg, Eval.Eval.dummy_inf(inf))))),
-                      hs))),
-                {==})
-            case Con{w2, rest2}:
+                True{}, helt, {==})
+            case Con{+w2, +rest2}:
+              +rgs0 : +List<Greedy.RootGuess> = w <> (w2 <> rest2)
               +n : Nat = Groups.len_words(cs)
-              +ele : {Nat.is_le(n, 1n+p) == True{} : Bool} =
-                Fold.OQ.le_cong_l(n, 1n+p, 1n+p, en,
-                  NatProof.Nat.is_le_refl(1n+p))
-              +okl : {P.ok_list(inf, G, cs,
-                        SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
-                          SolveFast.glist_of_guesses(G, 0, 1),
-                          SolveFast.build_cwords(cs, G, 0,
-                            U32.from_nat(Groups.len_words(G))),
-                          cs, n, nd, SolveFast.init_floor(n), inf))
-                      == True{} : Bool} =
-                P.par_ok(dc, P.left_of(seg), off, p, G, cs, nd, inf, pre,
-                  List.append(&2, +List<Nat>, P.right_of(seg), post), en,
-                  P.eG_left(pre, seg, post, G, eG), eoff, hz, h1, h3, h6, ai,
-                  hnd)
-              +okr : {P.ok_list(inf, G, cs,
-                        SolveK.par_chunks(dc, P.right_of(seg),
-                          P.off_next(off, seg), 1n+p, G,
-                          SolveFast.glist_of_guesses(G, 0, 1),
-                          SolveFast.build_cwords(cs, G, 0,
-                            U32.from_nat(Groups.len_words(G))),
-                          cs, n, nd, SolveFast.init_floor(n), inf))
-                      == True{} : Bool} =
-                P.par_ok(dc, P.right_of(seg), P.off_next(off, seg), p, G, cs,
-                  nd, inf,
-                  List.append(&2, +List<Nat>, pre, P.left_of(seg)), post, en,
-                  P.eG_right(pre, seg, post, G, eG),
-                  P.eoff_right(pre, seg, off, eoff), hz, h1, h3, h6, ai, hnd)
+              +hb = FH.FH.mk_buf_has(nd, G, cs, n)
               P.ok_list_append(inf, G, cs,
-                SolveK.par_chunks(dc, P.left_of(seg), off, 1n+p, G,
+                SolveK.par_chunks(dp, SolveK.deal_even(rgs0), 1n+p, G,
                   SolveFast.glist_of_guesses(G, 0, 1),
                   SolveFast.build_cwords(cs, G, 0,
                     U32.from_nat(Groups.len_words(G))),
-                  cs, n, nd, SolveFast.init_floor(n), inf),
-                SolveK.par_chunks(dc, P.right_of(seg),
-                  P.off_next(off, seg), 1n+p, G,
+                  cs, n, nd, SolveFast.init_floor(n), inf, b0),
+                SolveK.par_chunks(dp, SolveK.deal_odd(rgs0), 1n+p, G,
                   SolveFast.glist_of_guesses(G, 0, 1),
                   SolveFast.build_cwords(cs, G, 0,
                     U32.from_nat(Groups.len_words(G))),
-                  cs, n, nd, SolveFast.init_floor(n), inf),
-                okl, okr)
+                  cs, n, nd, SolveFast.init_floor(n), inf, b0),
+                P.par_chunks_ok(dp, SolveK.deal_even(rgs0), p, inf, G, cs, nd,
+                  b0, en, hz, h1, h3, h6, ai, hnd,
+                  P.deal_even_ok(hb, G, n, rgs0, hrgs), hb0),
+                P.par_chunks_ok(dp, SolveK.deal_odd(rgs0), p, inf, G, cs, nd,
+                  b0, en, hz, h1, h3, h6, ai, hnd,
+                  P.deal_odd_ok(hb, G, n, rgs0, hrgs), hb0))
+
+def P.par_chunks_cand_split(+ra: +List<SolveRef.Best>,
+    +rb: +List<SolveRef.Best>, +acc: SolveRef.Best, +cand_cost: Nat,
+    +m_even: Bool, +m_odd: Bool,
+    +hor: {Bool.or(m_even, m_odd) == True{} : Bool},
+    kl: {m_even == True{} : Bool} ->
+        {Nat.is_le(Eval.Eval.cost_of(SolveK.fold_results(ra, acc)), cand_cost)
+         == True{} : Bool},
+    kr: {m_odd == True{} : Bool} ->
+        {Nat.is_le(Eval.Eval.cost_of(
+           SolveK.fold_results(rb, SolveK.fold_results(ra, acc))), cand_cost)
+         == True{} : Bool}) ->
+  {Nat.is_le(
+     Eval.Eval.cost_of(
+       SolveK.fold_results(List.append(&2, SolveRef.Best, ra, rb), acc)),
+     cand_cost) == True{} : Bool}:
+  match m_even:
+    case True{}:
+      Fold.OQ.le_cong_l(
+        Eval.Eval.cost_of(
+          SolveK.fold_results(List.append(&2, SolveRef.Best, ra, rb), acc)),
+        Eval.Eval.cost_of(
+          SolveK.fold_results(rb, SolveK.fold_results(ra, acc))),
+        cand_cost,
+        Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+          SolveK.fold_results(List.append(&2, SolveRef.Best, ra, rb), acc),
+          SolveK.fold_results(rb, SolveK.fold_results(ra, acc)),
+          P.fold_append(ra, rb, acc)),
+        NatProof.Nat.is_le_trans(
+          Eval.Eval.cost_of(
+            SolveK.fold_results(rb, SolveK.fold_results(ra, acc))),
+          Eval.Eval.cost_of(SolveK.fold_results(ra, acc)),
+          cand_cost,
+          P.fold_le_best(rb, SolveK.fold_results(ra, acc)),
+          kl({==})))
+    case False{}:
+      Fold.OQ.le_cong_l(
+        Eval.Eval.cost_of(
+          SolveK.fold_results(List.append(&2, SolveRef.Best, ra, rb), acc)),
+        Eval.Eval.cost_of(
+          SolveK.fold_results(rb, SolveK.fold_results(ra, acc))),
+        cand_cost,
+        Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+          SolveK.fold_results(List.append(&2, SolveRef.Best, ra, rb), acc),
+          SolveK.fold_results(rb, SolveK.fold_results(ra, acc)),
+          P.fold_append(ra, rb, acc)),
+        kr(hor))
+
+def P.par_chunks_cand_le(+d: Nat, +rgs: +List<Greedy.RootGuess>, +p: Nat,
+    +inf: Nat, +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +nd: Bool,
+    +b0: SolveRef.Best, +acc: SolveRef.Best, +g: +List<Nat>,
+    +en: {Groups.len_words(cs) == 1n+p : Nat},
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
+    +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
+    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool},
+    +hrgs: {GR.GR.rgs_ok_b(FH.FH.mk_buf_has(nd, G, cs, Groups.len_words(cs)), G,
+              Groups.len_words(cs), rgs) == True{} : Bool},
+    +hb0: {GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+    +hm: {Tree.member_word(g, GR.GR.rgs_words(rgs)) == True{} : Bool},
+    +hus: {Groups.groups_smaller(cs, Groups.groups_build(g, cs, Nil{}))
+           == True{} : Bool}) ->
+  {Nat.is_le(
+     Eval.Eval.cost_of(
+       SolveK.fold_results(
+         SolveK.par_chunks(d, rgs, 1n+p, G,
+           SolveFast.glist_of_guesses(G, 0, 1),
+           SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+           cs, Groups.len_words(cs), nd,
+           SolveFast.init_floor(Groups.len_words(cs)), inf, b0),
+         acc)),
+     Fold.OQ.ks_cost(inf, cs,
+       Eval.Eval.items(p, G, cs, g, Groups.groups_build(g, cs, Nil{}),
+         Nil{}, 0n, inf))) == True{} : Bool}:
+  match d:
+    case 0n:
+      +n : Nat = Groups.len_words(cs)
+      +r = SolveK.chunk_best(1n+p, rgs, SolveFast.glist_of_guesses(G, 0, 1),
+             SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+             n, nd, SolveFast.init_floor(n), inf, b0,
+             SolveFast.mk_buf_tbl(nd, G, cs, n))
+      +hjr = P.chunk_best_rgs(p, inf, G, cs, nd, FH.FH.mk_buf_has(nd, G, cs, n),
+               rgs, b0, SolveFast.mk_buf_tbl(nd, G, cs, n), en, hz, h1, h3, h6,
+               ai, hnd, hrgs, hb0, FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}))
+      +hle_gs = P.le_gs_of_job_res(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, r, hjr)
+      +hle_c = NatProof.Nat.is_le_trans(
+                 Eval.Eval.cost_of(r),
+                 Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
+                   GR.GR.rgs_words(rgs), Eval.Eval.dummy_inf(inf))),
+                 Fold.OQ.ks_cost(inf, cs,
+                   Eval.Eval.items(p, G, cs, g,
+                     Groups.groups_build(g, cs, Nil{}), Nil{}, 0n, inf)),
+                 hle_gs,
+                 OQGuess.OQ.guesses_le_cand(p, G, cs, inf, GR.GR.rgs_words(rgs),
+                   g, Eval.Eval.dummy_inf(inf), hm, hus))
+      Fold.OQ.le_cong_l(
+        Eval.Eval.cost_of(SolveK.fold_results(r <> Nil{}, acc)),
+        Eval.Eval.cost_of(FC.FC.better_best(r, acc)),
+        Fold.OQ.ks_cost(inf, cs,
+          Eval.Eval.items(p, G, cs, g, Groups.groups_build(g, cs, Nil{}),
+            Nil{}, 0n, inf)),
+        Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+          SolveK.fold_results(r <> Nil{}, acc), FC.FC.better_best(r, acc),
+          P.fold_single(r, acc)),
+        NatProof.Nat.is_le_trans(Eval.Eval.cost_of(FC.FC.better_best(r, acc)),
+          Eval.Eval.cost_of(r),
+          Fold.OQ.ks_cost(inf, cs,
+            Eval.Eval.items(p, G, cs, g, Groups.groups_build(g, cs, Nil{}),
+              Nil{}, 0n, inf)),
+          FVal.FV.better_best_le_l(r, acc), hle_c))
+    case 1n+dp:
+      match rgs:
+        case Nil{}:
+          Empty.absurd(
+            {Nat.is_le(Eval.Eval.cost_of(acc),
+               Fold.OQ.ks_cost(inf, cs,
+                 Eval.Eval.items(p, G, cs, g,
+                   Groups.groups_build(g, cs, Nil{}), Nil{}, 0n, inf)))
+             == True{} : Bool},
+            Logic.Proof.false_ne_true(hm))
+        case Con{+w, +rest}:
+          match rest:
+            case Nil{}:
+              +n : Nat = Groups.len_words(cs)
+              +r = SolveK.chunk_best(1n+p, w <> Nil{},
+                     SolveFast.glist_of_guesses(G, 0, 1),
+                     SolveFast.build_cwords(cs, G, 0,
+                       U32.from_nat(Groups.len_words(G))),
+                     n, nd, SolveFast.init_floor(n), inf, b0,
+                     SolveFast.mk_buf_tbl(nd, G, cs, n))
+              +hjr = P.chunk_best_rgs(p, inf, G, cs, nd,
+                       FH.FH.mk_buf_has(nd, G, cs, n), w <> Nil{}, b0,
+                       SolveFast.mk_buf_tbl(nd, G, cs, n), en, hz, h1, h3, h6,
+                       ai, hnd, hrgs, hb0,
+                       FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}))
+              +hle_gs = P.le_gs_of_job_res(1n+p, inf, G,
+                          GR.GR.rgs_words(w <> Nil{}), cs, r, hjr)
+              +hle_c = NatProof.Nat.is_le_trans(
+                         Eval.Eval.cost_of(r),
+                         Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf,
+                           GR.GR.rgs_words(w <> Nil{}), Eval.Eval.dummy_inf(inf))),
+                         Fold.OQ.ks_cost(inf, cs,
+                           Eval.Eval.items(p, G, cs, g,
+                             Groups.groups_build(g, cs, Nil{}), Nil{}, 0n, inf)),
+                         hle_gs,
+                         OQGuess.OQ.guesses_le_cand(p, G, cs, inf,
+                           GR.GR.rgs_words(w <> Nil{}), g,
+                           Eval.Eval.dummy_inf(inf), hm, hus))
+              Fold.OQ.le_cong_l(
+                Eval.Eval.cost_of(SolveK.fold_results(r <> Nil{}, acc)),
+                Eval.Eval.cost_of(FC.FC.better_best(r, acc)),
+                Fold.OQ.ks_cost(inf, cs,
+                  Eval.Eval.items(p, G, cs, g,
+                    Groups.groups_build(g, cs, Nil{}), Nil{}, 0n, inf)),
+                Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+                  SolveK.fold_results(r <> Nil{}, acc),
+                  FC.FC.better_best(r, acc), P.fold_single(r, acc)),
+                NatProof.Nat.is_le_trans(
+                  Eval.Eval.cost_of(FC.FC.better_best(r, acc)),
+                  Eval.Eval.cost_of(r),
+                  Fold.OQ.ks_cost(inf, cs,
+                    Eval.Eval.items(p, G, cs, g,
+                      Groups.groups_build(g, cs, Nil{}), Nil{}, 0n, inf)),
+                  FVal.FV.better_best_le_l(r, acc), hle_c))
+            case Con{+w2, +rest2}:
+              +rgs0 : +List<Greedy.RootGuess> = w <> (w2 <> rest2)
+              +n : Nat = Groups.len_words(cs)
+              +hb = FH.FH.mk_buf_has(nd, G, cs, n)
+              +ra = SolveK.par_chunks(dp, SolveK.deal_even(rgs0), 1n+p, G,
+                      SolveFast.glist_of_guesses(G, 0, 1),
+                      SolveFast.build_cwords(cs, G, 0,
+                        U32.from_nat(Groups.len_words(G))),
+                      cs, n, nd, SolveFast.init_floor(n), inf, b0)
+              +rb = SolveK.par_chunks(dp, SolveK.deal_odd(rgs0), 1n+p, G,
+                      SolveFast.glist_of_guesses(G, 0, 1),
+                      SolveFast.build_cwords(cs, G, 0,
+                        U32.from_nat(Groups.len_words(G))),
+                      cs, n, nd, SolveFast.init_floor(n), inf, b0)
+              P.par_chunks_cand_split(ra, rb, acc,
+                Fold.OQ.ks_cost(inf, cs,
+                  Eval.Eval.items(p, G, cs, g,
+                    Groups.groups_build(g, cs, Nil{}), Nil{}, 0n, inf)),
+                Tree.member_word(g, GR.GR.rgs_words(SolveK.deal_even(rgs0))),
+                Tree.member_word(g, GR.GR.rgs_words(SolveK.deal_odd(rgs0))),
+                P.deal_mem(g, rgs0, hm),
+                +hme =>
+                  P.par_chunks_cand_le(dp, SolveK.deal_even(rgs0), p, inf, G,
+                    cs, nd, b0, acc, g, en, hz, h1, h3, h6, ai, hnd,
+                    P.deal_even_ok(hb, G, n, rgs0, hrgs), hb0, hme, hus),
+                +hmo =>
+                  P.par_chunks_cand_le(dp, SolveK.deal_odd(rgs0), p, inf, G,
+                    cs, nd, b0, SolveK.fold_results(ra, acc), g, en, hz, h1,
+                    h3, h6, ai, hnd, P.deal_odd_ok(hb, G, n, rgs0, hrgs),
+                    hb0, hmo, hus))
 
 # ---------------------------------------------------------------------------
-# The chunked root entry point
+# Pointwise optimality: any bound <= every usable candidate in `G` beats `ref`
 # ---------------------------------------------------------------------------
 
-# The chunk result list of `solve_chunked`, as a transparent definition.
-def P.root_rs(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +d: Nat) ->
-    +List<SolveRef.Best>:
-  SolveK.par_chunks(d, G, 0, Groups.len_words(cs), G,
-    SolveFast.glist_of_guesses(G, 0, 1),
-    SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-    cs, Groups.len_words(cs), SolveFast.no_dup_fast(cs),
-    SolveFast.init_floor(Groups.len_words(cs)),
-    SolveRef.inf_of(Groups.len_words(cs)))
+def P.guess_fixed_go(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +cs: +List<+List<Nat>>, +g: +List<Nat>, +best: SolveRef.Best, us: Bool,
+    +eus: {us == Groups.groups_smaller(cs, Groups.groups_build(g, cs, Nil{}))
+           : Bool},
+    hle: {Groups.groups_smaller(cs, Groups.groups_build(g, cs, Nil{}))
+          == True{} : Bool} ->
+         {Nat.is_le(Eval.Eval.cost_of(best),
+            Fold.OQ.ks_cost(inf, cs,
+              Eval.Eval.items(p, G, cs, g, Groups.groups_build(g, cs, Nil{}),
+                Nil{}, 0n, inf))) == True{} : Bool}) ->
+  {Eval.Eval.guess_bool(p, G, cs, g, Groups.groups_build(g, cs, Nil{}), inf,
+     us, best) == best : SolveRef.Best}:
+  match best:
+    case SolveRef.Best{+bt, +bc}:
+      match us:
+        case False{}:
+          {==}
+        case True{}:
+          +grps = Groups.groups_build(g, cs, Nil{})
+          +its = Eval.Eval.items(p, G, cs, g, grps, Nil{}, 0n, inf)
+          +cc = Fold.OQ.ks_cost(inf, cs, its)
+          +ct = Fold.OQ.ks_tree(g, its)
+          +hus : {Groups.groups_smaller(cs, grps) == True{} : Bool} =
+            Equal.sym(Bool, True{}, Groups.groups_smaller(cs, grps), eus)
+          +hc = hle(hus)
+          +enlt : {False{} == Nat.is_lt(cc, bc) : Bool} =
+            Equal.sym(Bool, Nat.is_lt(cc, bc), False{},
+              ParElt.ParElt.not_lt_of_le(bc, cc, hc))
+          Equal.trans(SolveRef.Best,
+            Eval.Eval.guess_bool(p, G, cs, g, grps, inf, True{},
+              SolveRef.Best{bt, bc}),
+            SolveRef.better(cc, ct, SolveRef.Best{bt, bc}),
+            SolveRef.Best{bt, bc},
+            Fold.OQ.block_eq(inf, g, cs, its, SolveRef.Best{bt, bc}),
+            ParElt.ParElt.pick_better(cc, ct, bt, bc, False{}, enlt))
 
-# The folded root result of `solve_chunked`.
-def P.root_best(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +d: Nat) ->
-    SolveRef.Best:
-  SolveK.fold_results(P.root_rs(G, cs, d),
-    SolveFast.dummy_inf(SolveRef.inf_of(Groups.len_words(cs))))
+def P.guesses_fixed_of_rgs_bound(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +cs: +List<+List<Nat>>, +ws: +List<+List<Nat>>, +rem: +List<+List<Nat>>,
+    +best: SolveRef.Best,
+    +hle_ws: {Nat.is_le(Eval.Eval.cost_of(best),
+                Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, ws,
+                  Eval.Eval.dummy_inf(inf)))) == True{} : Bool},
+    +hcov: {GR.GR.all_usable_in(cs, rem, ws) == True{} : Bool}) ->
+  {Eval.Eval.guesses(1n+p, G, cs, inf, rem, best) == best : SolveRef.Best}:
+  match rem:
+    case Nil{}:
+      {==}
+    case Con{+g, +t}:
+      +us = Groups.groups_smaller(cs, Groups.groups_build(g, cs, Nil{}))
+      +hg = Logic.Proof.and_true_l(
+              Feedback.Bool.case(Bool, us, Tree.member_word(g, ws), True{}),
+              GR.GR.all_usable_in(cs, t, ws), hcov)
+      +ht = Logic.Proof.and_true_r(
+              Feedback.Bool.case(Bool, us, Tree.member_word(g, ws), True{}),
+              GR.GR.all_usable_in(cs, t, ws), hcov)
+      +efg : {Eval.Eval.guess(p, G, cs, g, inf, best) == best : SolveRef.Best} =
+        P.guess_fixed_go(p, inf, G, cs, g, best, us, {==},
+          +hus =>
+            +hm = GR.GR.all_usable_in_mem_go(cs, g, ws, us, {==}, hus, hg)
+            NatProof.Nat.is_le_trans(
+              Eval.Eval.cost_of(best),
+              Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, ws,
+                Eval.Eval.dummy_inf(inf))),
+              Fold.OQ.ks_cost(inf, cs,
+                Eval.Eval.items(p, G, cs, g, Groups.groups_build(g, cs, Nil{}),
+                  Nil{}, 0n, inf)),
+              hle_ws,
+              OQGuess.OQ.guesses_le_cand(p, G, cs, inf, ws, g,
+                Eval.Eval.dummy_inf(inf), hm, hus)))
+      Equal.trans(SolveRef.Best,
+        Eval.Eval.guesses(1n+p, G, cs, inf, t,
+          Eval.Eval.guess(p, G, cs, g, inf, best)),
+        Eval.Eval.guesses(1n+p, G, cs, inf, t, best),
+        best,
+        Equal.cong(SolveRef.Best, SolveRef.Best,
+          b => Eval.Eval.guesses(1n+p, G, cs, inf, t, b),
+          Eval.Eval.guess(p, G, cs, g, inf, best), best, efg),
+        P.guesses_fixed_of_rgs_bound(p, inf, G, cs, ws, t, best, hle_ws, ht))
 
-# The infinity bound the chunked root needs: at least three candidates put
-# `6` below `inf_of n`.
-def P.inf_gt6(+cs: +List<+List<Nat>>, +h3_le_n:
-    {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
+def P.guesses_fixed_of_par_chunks(+d: Nat, +rgs: +List<Greedy.RootGuess>,
+    +p: Nat, +inf: Nat, +G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
+    +nd: Bool, +b0: SolveRef.Best, +rem: +List<+List<Nat>>,
+    +en: {Groups.len_words(cs) == 1n+p : Nat},
+    +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
+    +h1: {Nat.is_lt(1n, inf) == True{} : Bool},
+    +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
+    +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
+    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool},
+    +hrgs: {GR.GR.rgs_ok_b(FH.FH.mk_buf_has(nd, G, cs, Groups.len_words(cs)), G,
+              Groups.len_words(cs), rgs) == True{} : Bool},
+    +hb0: {GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+    +hcov: {GR.GR.all_usable_in(cs, rem, GR.GR.rgs_words(rgs)) == True{} : Bool}) ->
+  {Eval.Eval.guesses(1n+p, G, cs, inf, rem,
+     SolveK.fold_results(
+       SolveK.par_chunks(d, rgs, 1n+p, G,
+         SolveFast.glist_of_guesses(G, 0, 1),
+         SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+         cs, Groups.len_words(cs), nd,
+         SolveFast.init_floor(Groups.len_words(cs)), inf, b0),
+       b0))
+   == SolveK.fold_results(
+        SolveK.par_chunks(d, rgs, 1n+p, G,
+          SolveFast.glist_of_guesses(G, 0, 1),
+          SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+          cs, Groups.len_words(cs), nd,
+          SolveFast.init_floor(Groups.len_words(cs)), inf, b0),
+        b0) : SolveRef.Best}:
+  match rem:
+    case Nil{}:
+      {==}
+    case Con{+g, +t}:
+      +n : Nat = Groups.len_words(cs)
+      +best = SolveK.fold_results(
+                SolveK.par_chunks(d, rgs, 1n+p, G,
+                  SolveFast.glist_of_guesses(G, 0, 1),
+                  SolveFast.build_cwords(cs, G, 0,
+                    U32.from_nat(Groups.len_words(G))),
+                  cs, n, nd, SolveFast.init_floor(n), inf, b0),
+                b0)
+      +us = Groups.groups_smaller(cs, Groups.groups_build(g, cs, Nil{}))
+      +hg = Logic.Proof.and_true_l(
+              Feedback.Bool.case(Bool, us,
+                Tree.member_word(g, GR.GR.rgs_words(rgs)), True{}),
+              GR.GR.all_usable_in(cs, t, GR.GR.rgs_words(rgs)), hcov)
+      +ht = Logic.Proof.and_true_r(
+              Feedback.Bool.case(Bool, us,
+                Tree.member_word(g, GR.GR.rgs_words(rgs)), True{}),
+              GR.GR.all_usable_in(cs, t, GR.GR.rgs_words(rgs)), hcov)
+      +efg : {Eval.Eval.guess(p, G, cs, g, inf, best) == best : SolveRef.Best} =
+        P.guess_fixed_go(p, inf, G, cs, g, best, us, {==},
+          +hus =>
+            +hm = GR.GR.all_usable_in_mem_go(cs, g, GR.GR.rgs_words(rgs), us, {==},
+                    hus, hg)
+            P.par_chunks_cand_le(d, rgs, p, inf, G, cs, nd, b0, b0, g, en, hz,
+              h1, h3, h6, ai, hnd, hrgs, hb0, hm, hus))
+      Equal.trans(SolveRef.Best,
+        Eval.Eval.guesses(1n+p, G, cs, inf, t,
+          Eval.Eval.guess(p, G, cs, g, inf, best)),
+        Eval.Eval.guesses(1n+p, G, cs, inf, t, best),
+        best,
+        Equal.cong(SolveRef.Best, SolveRef.Best,
+          b => Eval.Eval.guesses(1n+p, G, cs, inf, t, b),
+          Eval.Eval.guess(p, G, cs, g, inf, best), best, efg),
+        P.guesses_fixed_of_par_chunks(d, rgs, p, inf, G, cs, nd, b0, t, en,
+          hz, h1, h3, h6, ai, hnd, hrgs, hb0, ht))
+
+# ---------------------------------------------------------------------------
+# Root bounds (`inf > 6`, `ref_p`, `after_prep`, `solve_chunked`)
+# ---------------------------------------------------------------------------
+
+def P.inf_gt6(+cs: +List<+List<Nat>>,
+    +h3_le_n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
   {Nat.is_lt(6n, SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}:
   +n : Nat = Groups.len_words(cs)
   +h9_le_sq : {Nat.is_le(9n, Nat.mul(n, n)) == True{} : Bool} =
@@ -2706,139 +1738,24 @@ def P.inf_gt6(+cs: +List<+List<Nat>>, +h3_le_n:
     NatProof.Nat.is_le_trans(6n, 9n, Nat.mul(n, n), {==}, h9_le_sq),
     CBN.CB.lt_add_one(Nat.mul(n, n)))
 
-def P.inf_gt3(+cs: +List<+List<Nat>>, +h3_le_n:
-    {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
+def P.inf_gt3(+cs: +List<+List<Nat>>,
+    +h3_le_n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
   {Nat.is_lt(3n, SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}:
   NatProof.Nat.is_le_lt_trans(3n, 6n, SolveRef.inf_of(Groups.len_words(cs)),
     {==}, P.inf_gt6(cs, h3_le_n))
 
-def P.inf_gt1(+cs: +List<+List<Nat>>, +h3_le_n:
-    {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
+def P.inf_gt1(+cs: +List<+List<Nat>>,
+    +h3_le_n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
   {Nat.is_lt(1n, SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}:
   NatProof.Nat.is_le_lt_trans(1n, 6n, SolveRef.inf_of(Groups.len_words(cs)),
     {==}, P.inf_gt6(cs, h3_le_n))
 
-def P.inf_gt0(+cs: +List<+List<Nat>>, +h3_le_n:
-    {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
+def P.inf_gt0(+cs: +List<+List<Nat>>,
+    +h3_le_n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool}) ->
   {Nat.is_lt(0n, SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}:
   NatProof.Nat.is_le_lt_trans(0n, 6n, SolveRef.inf_of(Groups.len_words(cs)),
     {==}, P.inf_gt6(cs, h3_le_n))
 
-def P.nodup_cs(+cs: +List<+List<Nat>>) ->
-  {FN.FN.nodup_ok(SolveFast.no_dup_fast(cs), cs) == True{} : Bool}:
-  FOpt.FOpt.nodup_ok_of_fast(cs)
-
-# The same result list with the fuel written as the positive successor the
-# chunk lemmas are stated at.
-def P.par_rs_p(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat,
-    +d: Nat) -> +List<SolveRef.Best>:
-  SolveK.par_chunks(d, G, 0, 1n+p, G,
-    SolveFast.glist_of_guesses(G, 0, 1),
-    SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-    cs, Groups.len_words(cs), SolveFast.no_dup_fast(cs),
-    SolveFast.init_floor(Groups.len_words(cs)),
-    SolveRef.inf_of(Groups.len_words(cs)))
-
-def P.par_rs_eq(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat,
-    +d: Nat, +en: {Groups.len_words(cs) == 1n+p : Nat}) ->
-  {P.par_rs_p(G, cs, p, d) == P.root_rs(G, cs, d) : +List<SolveRef.Best>}:
-  Equal.cong(Nat, +List<SolveRef.Best>,
-    f => SolveK.par_chunks(d, G, 0, f, G,
-      SolveFast.glist_of_guesses(G, 0, 1),
-      SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-      cs, Groups.len_words(cs), SolveFast.no_dup_fast(cs),
-      SolveFast.init_floor(Groups.len_words(cs)),
-      SolveRef.inf_of(Groups.len_words(cs))),
-    1n+p, Groups.len_words(cs), Equal.sym(Nat, Groups.len_words(cs), 1n+p, en))
-
-def P.ok_list_transport(+limit: Nat, +G: +List<+List<Nat>>,
-    +S: +List<+List<Nat>>, -rs1: +List<SolveRef.Best>,
-    -rs2: +List<SolveRef.Best>,
-    +e: {rs1 == rs2 : +List<SolveRef.Best>},
-    +h: {P.ok_list(limit, G, S, rs1) == True{} : Bool}) ->
-  {P.ok_list(limit, G, S, rs2) == True{} : Bool}:
-  %e : {P.ok_list(limit, G, S, _) == True{} : Bool}
-  h
-
-def P.eG_nil(+G: +List<+List<Nat>>) ->
-  {G == List.append(&2, +List<Nat>,
-         List.append(&2, +List<Nat>, Nil{}, G), Nil{})
-   : +List<+List<Nat>>}:
-  Equal.sym(+List<+List<Nat>>, List.append(&2, +List<Nat>, G, Nil{}), G,
-    FN.FN.list_append_nil(G))
-
-# The folded chunk result is valid.
-def P.root_ok(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat,
-    +d: Nat, +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
-    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool}) ->
-  {FVal.FV.best_ok_b(SolveRef.inf_of(Groups.len_words(cs)), G, cs,
-     P.root_best(G, cs, d)) == True{} : Bool}:
-  +n : Nat = Groups.len_words(cs)
-  +inf : Nat = SolveRef.inf_of(n)
-  +nd : Bool = SolveFast.no_dup_fast(cs)
-  +hz = P.inf_gt0(cs, h3n)
-  +h1 = P.inf_gt1(cs, h3n)
-  +h3 = P.inf_gt3(cs, h3n)
-  +h6 = P.inf_gt6(cs, h3n)
-  +hnd = P.nodup_cs(cs)
-  +hokl_p = P.par_ok(d, G, 0, p, G, cs, nd, inf, Nil{}, Nil{}, en,
-              P.eG_nil(G), {==}, hz, h1, h3, h6, ai, hnd)
-  +hokl = P.ok_list_transport(inf, G, cs, P.par_rs_p(G, cs, p, d),
-            P.root_rs(G, cs, d), P.par_rs_eq(G, cs, p, d, en), hokl_p)
-  +helt = P.elt_ok_dummy_inf(inf, G, cs, Nat.ge_refl(inf))
-  +hf = P.ok_list_fold(inf, G, cs, P.root_rs(G, cs, d),
-          SolveFast.dummy_inf(inf), hokl, helt)
-  Logic.Proof.and_true_l(
-    FVal.FV.best_ok_b(inf, G, cs, P.root_best(G, cs, d)),
-    Nat.is_le(Eval.Eval.cost_of(P.root_best(G, cs, d)), inf), hf)
-
-# The folded chunk result costs at most the reference fold over the root guess
-# list.
-def P.root_cost(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat,
-    +d: Nat, +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
-    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool}) ->
-  {Nat.is_le(Eval.Eval.cost_of(P.root_best(G, cs, d)),
-     Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs,
-       SolveRef.inf_of(Groups.len_words(cs)), G,
-       Eval.Eval.dummy_inf(SolveRef.inf_of(Groups.len_words(cs))))))
-   == True{} : Bool}:
-  +n : Nat = Groups.len_words(cs)
-  +inf : Nat = SolveRef.inf_of(n)
-  +nd : Bool = SolveFast.no_dup_fast(cs)
-  +hz = P.inf_gt0(cs, h3n)
-  +h1 = P.inf_gt1(cs, h3n)
-  +h3 = P.inf_gt3(cs, h3n)
-  +h6 = P.inf_gt6(cs, h3n)
-  +hnd = P.nodup_cs(cs)
-  +hcost_p = P.par_cost(d, G, 0, p, G, cs, nd, inf, Nil{}, Nil{},
-                SolveFast.dummy_inf(inf), en, P.eG_nil(G), {==}, hz, h1, h3,
-                h6, ai, hnd, NatProof.Nat.is_le_refl(inf))
-  +efold : {SolveK.fold_results(P.par_rs_p(G, cs, p, d),
-                SolveFast.dummy_inf(inf)) == P.root_best(G, cs, d)
-            : SolveRef.Best} =
-    Equal.cong(+List<SolveRef.Best>, SolveRef.Best,
-      rs => SolveK.fold_results(rs, SolveFast.dummy_inf(inf)),
-      P.par_rs_p(G, cs, p, d), P.root_rs(G, cs, d),
-      P.par_rs_eq(G, cs, p, d, en))
-  Fold.OQ.le_cong_l(
-    Eval.Eval.cost_of(P.root_best(G, cs, d)),
-    Eval.Eval.cost_of(SolveK.fold_results(P.par_rs_p(G, cs, p, d),
-      SolveFast.dummy_inf(inf))),
-    Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, G,
-      Eval.Eval.dummy_inf(inf))),
-    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
-      P.root_best(G, cs, d),
-      SolveK.fold_results(P.par_rs_p(G, cs, p, d),
-        SolveFast.dummy_inf(inf)),
-      Equal.sym(SolveRef.Best,
-        SolveK.fold_results(P.par_rs_p(G, cs, p, d),
-          SolveFast.dummy_inf(inf)),
-        P.root_best(G, cs, d), efold)),
-    hcost_p)
-
-# The reference search over the root guess list at the positive fuel.
 def P.ref_p(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat) ->
     SolveRef.Best:
   SolveRef.step(1n+p, SolveRef.mk_schedule(G, cs), G, cs,
@@ -2846,38 +1763,401 @@ def P.ref_p(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat) ->
     Eval.Eval.dummy_inf(SolveRef.inf_of(Groups.len_words(cs))),
     Eval.Eval.dummy_zero())
 
-def P.root_le_ref(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat,
-    +d: Nat, +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
-    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool}) ->
-  {Nat.is_le(Eval.Eval.cost_of(P.root_best(G, cs, d)),
-     Eval.Eval.cost_of(P.ref_p(G, cs, p))) == True{} : Bool}:
+def P.opt_from_best(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +p: Nat,
+    +T2: Tree.Tree, +best: SolveRef.Best,
+    +helt: {GR.GR.elt_ok(SolveRef.inf_of(Groups.len_words(cs)), G, cs, best)
+            == True{} : Bool},
+    +efix: {Eval.Eval.guesses(1n+p, G, cs,
+              SolveRef.inf_of(Groups.len_words(cs)), G, best)
+            == best : SolveRef.Best},
+    +opt: {Nat.is_le(Eval.Eval.cost_of(P.ref_p(G, cs, p)), Tree.cost(T2, cs))
+           == True{} : Bool},
+    +fin: {Nat.is_lt(Eval.Eval.cost_of(P.ref_p(G, cs, p)),
+             SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}) ->
+  Exists(Tree.Tree, T =>
+    {SolveRef.best_to_maybe(SolveRef.inf_of(Groups.len_words(cs)), best)
+     == Some{T} : Maybe<Tree.Tree>}
+    & {Nat.is_le(Tree.cost(T, cs), Tree.cost(T2, cs)) == True{} : Bool}):
   +inf : Nat = SolveRef.inf_of(Groups.len_words(cs))
-  +hcost = P.root_cost(G, cs, p, d, en, h3n, ai)
-  +egs : {Eval.Eval.guesses(1n+p, G, cs, inf, G,
-            Eval.Eval.dummy_inf(inf)) == P.ref_p(G, cs, p)
-          : SolveRef.Best} =
+  +hok = Logic.Proof.and_true_l(FVal.FV.best_ok_b(inf, G, cs, best),
+           Nat.is_le(Eval.Eval.cost_of(best), inf), helt)
+  +hbest = Logic.Proof.and_true_r(FVal.FV.best_ok_b(inf, G, cs, best),
+             Nat.is_le(Eval.Eval.cost_of(best), inf), helt)
+  +hle_ev = P.fixed_le_evals(1n+p, inf, G, cs, G, best, hbest, efix)
+  +egs : {Eval.Eval.guesses(1n+p, G, cs, inf, G, Eval.Eval.dummy_inf(inf))
+          == P.ref_p(G, cs, p) : SolveRef.Best} =
     Equal.sym(SolveRef.Best, P.ref_p(G, cs, p),
       Eval.Eval.guesses(1n+p, G, cs, inf, G, Eval.Eval.dummy_inf(inf)),
       Eval.Eval.guesses_step(p, G, cs, inf, G, Eval.Eval.dummy_inf(inf)))
-  Fold.OQ.le_cong_r(
-    Eval.Eval.cost_of(P.root_best(G, cs, d)),
-    Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, G,
-      Eval.Eval.dummy_inf(inf))),
-    Eval.Eval.cost_of(P.ref_p(G, cs, p)),
-    Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
-      Eval.Eval.guesses(1n+p, G, cs, inf, G, Eval.Eval.dummy_inf(inf)),
-      P.ref_p(G, cs, p), egs),
-    hcost)
+  +hle_ref : {Nat.is_le(Eval.Eval.cost_of(best),
+                Eval.Eval.cost_of(P.ref_p(G, cs, p))) == True{} : Bool} =
+    Fold.OQ.le_cong_r(Eval.Eval.cost_of(best),
+      Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, G,
+        Eval.Eval.dummy_inf(inf))),
+      Eval.Eval.cost_of(P.ref_p(G, cs, p)),
+      Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+        Eval.Eval.guesses(1n+p, G, cs, inf, G, Eval.Eval.dummy_inf(inf)),
+        P.ref_p(G, cs, p), egs),
+      hle_ev)
+  +fin_best = NatProof.Nat.is_le_lt_trans(Eval.Eval.cost_of(best),
+                Eval.Eval.cost_of(P.ref_p(G, cs, p)), inf, hle_ref, fin)
+  +es = OC.OC.best_to_maybe_fin(inf, best, fin_best)
+  +hext = FVal.FV.best_ok_extract(inf, G, cs, best, hok, fin_best)
+  +hcost_t = Logic.Proof.and_true_r(
+               FVal.FV.valid_b(Eval.Eval.tree_of(best), G, cs),
+               Nat.is_le(Tree.cost(Eval.Eval.tree_of(best), cs),
+                 Eval.Eval.cost_of(best)), hext)
+  +hle = NatProof.Nat.is_le_trans(Tree.cost(Eval.Eval.tree_of(best), cs),
+           Eval.Eval.cost_of(best), Tree.cost(T2, cs), hcost_t,
+           NatProof.Nat.is_le_trans(Eval.Eval.cost_of(best),
+             Eval.Eval.cost_of(P.ref_p(G, cs, p)), Tree.cost(T2, cs),
+             hle_ref, opt))
+  (Eval.Eval.tree_of(best), (es, hle))
 
-# The chunked root is optimal, given the reference comparison and finiteness.
-def P.solve_chunked_optimal(+G: +List<+List<Nat>>,
-    +cs: +List<+List<Nat>>, +d: Nat, +p: Nat, +T2: Tree.Tree,
+def P.valid_from_job_res(+p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
+    +gs: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +best: SolveRef.Best,
+    +T: Tree.Tree,
+    +hjr: {P.job_res_gs_b(1n+p, inf, G, gs, cs, inf, best) == True{} : Bool},
+    e: {SolveRef.best_to_maybe(inf, best) == Some{T} : Maybe<Tree.Tree>}) ->
+  Tree.Valid(T, G, cs):
+  +hok = Logic.Proof.and_true_l(
+           FVal.FV.best_ok_b(inf, G, cs, best),
+           Bool.and(Nat.is_le(Eval.Eval.cost_of(best), inf),
+             Nat.is_le(Eval.Eval.cost_of(best),
+               Eval.Eval.cost_of(Eval.Eval.guesses(1n+p, G, cs, inf, gs,
+                 Eval.Eval.dummy_inf(inf))))),
+           hjr)
+  FOpt.FOpt.valid_from_best_maybe(G, cs, inf, best, T, hok, e)
+
+def P.opt_from_job_res(+p: Nat, +G: +List<+List<Nat>>,
+    +gs: +List<+List<Nat>>, +cs: +List<+List<Nat>>, +best: SolveRef.Best,
+    +T2: Tree.Tree,
+    +hjr: {P.job_res_gs_b(1n+p, SolveRef.inf_of(Groups.len_words(cs)), G, gs,
+             cs, SolveRef.inf_of(Groups.len_words(cs)), best) == True{} : Bool},
+    +hcov: {GR.GR.all_usable_in(cs, G, gs) == True{} : Bool},
+    +opt: {Nat.is_le(Eval.Eval.cost_of(P.ref_p(G, cs, p)), Tree.cost(T2, cs))
+           == True{} : Bool},
+    +fin: {Nat.is_lt(Eval.Eval.cost_of(P.ref_p(G, cs, p)),
+             SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}) ->
+  Exists(Tree.Tree, T =>
+    {SolveRef.best_to_maybe(SolveRef.inf_of(Groups.len_words(cs)), best)
+     == Some{T} : Maybe<Tree.Tree>}
+    & {Nat.is_le(Tree.cost(T, cs), Tree.cost(T2, cs)) == True{} : Bool}):
+  +inf : Nat = SolveRef.inf_of(Groups.len_words(cs))
+  +helt = P.elt_ok_of_job_res(1n+p, inf, G, gs, cs, best, hjr)
+  +hle_ws = P.le_gs_of_job_res(1n+p, inf, G, gs, cs, best, hjr)
+  +efix = P.guesses_fixed_of_rgs_bound(p, inf, G, cs, gs, G, best, hle_ws, hcov)
+  P.opt_from_best(G, cs, p, T2, best, helt, efix, opt, fin)
+
+def P.after_prep_valid(+d: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +cs: +List<+List<Nat>>, +nd: Bool, pr: Greedy.RootPrepRes, +T: Tree.Tree,
     +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
+    +h3n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
     +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
-    +opt: {Nat.is_le(Eval.Eval.cost_of(P.ref_p(G, cs, p)),
-             Tree.cost(T2, cs)) == True{} : Bool},
+    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool},
+    +hpr: GR.GR.RootPrepSpec(SolveRef.inf_of(Groups.len_words(cs)), G, cs,
+            FH.FH.mk_buf_has(nd, G, cs, Groups.len_words(cs)), nd, pr),
+    e: {SolveK.after_prep(d, G, SolveFast.glist_of_guesses(G, 0, 1),
+          SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+          cs, Groups.len_words(cs), nd,
+          SolveFast.init_floor(Groups.len_words(cs)),
+          SolveRef.inf_of(Groups.len_words(cs)), pr)
+        == Some{T} : Maybe<Tree.Tree>}) ->
+  Tree.Valid(T, G, cs):
+  match d:
+    case 0n:
+      match pr:
+        case Greedy.RootPrepRes{+b0, +rgs, buf0}:
+          +n : Nat = Groups.len_words(cs)
+          +inf : Nat = SolveRef.inf_of(n)
+          +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
+          +gG = SolveFast.glist_of_guesses(G, 0, 1)
+          +cwS = SolveFast.build_cwords(cs, G, 0,
+                   U32.from_nat(Groups.len_words(G)))
+          +fl = SolveFast.init_floor(n)
+          +hb0 = Arr.Arr.dpair_l({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                   Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                     Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                       {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                   hpr)
+          +r1 = Arr.Arr.dpair_r({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                  Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                  hpr)
+          +hrgs = Arr.Arr.dpair_l({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                    r1)
+          +r2 = Arr.Arr.dpair_r({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                  Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                    {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                  r1)
+          +hbuf0 = Arr.Arr.dpair_l(FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                     {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool},
+                     r2)
+          GR.GR.with_dup_buf(Tree.Valid(T, G, cs), buf0,
+            b1 => b2 => +eb1 => +eb2 =>
+            +hbuf1 = FH.FH.buf_ok_transport(G, cs, n, has_buf, nd, buf0, b1,
+                       Equal.sym(SolveFast.Buf5, b1, buf0, eb1), hbuf0)
+            +hjr_p = P.chunk_best_rgs(p, inf, G, cs, nd, has_buf, rgs, b0, b1,
+                       en, P.inf_gt0(cs, h3n), P.inf_gt1(cs, h3n),
+                       P.inf_gt3(cs, h3n), P.inf_gt6(cs, h3n), ai, hnd, hrgs,
+                       hb0, hbuf1)
+            +eb12 : {b1 == b2 : SolveFast.Buf5} =
+              Equal.trans(SolveFast.Buf5, b1, buf0, b2, eb1,
+                Equal.sym(SolveFast.Buf5, b2, buf0, eb2))
+            +hjr2 : {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+                       SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, b2))
+                     == True{} : Bool} =
+              %Equal.sym(Nat, n, 1n+p, en) :
+                {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+                   SolveK.chunk_best(_, rgs, gG, cwS, n, nd, fl, inf, b0, b2))
+                 == True{} : Bool}
+              %eb12 :
+                {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+                   SolveK.chunk_best(1n+p, rgs, gG, cwS, n, nd, fl, inf, b0, _))
+                 == True{} : Bool}
+              hjr_p
+            +e2 : {SolveRef.best_to_maybe(inf,
+                     SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, b2))
+                   == Some{T} : Maybe<Tree.Tree>} =
+              %Equal.sym(SolveFast.Buf5, b2, buf0, eb2) :
+                {SolveRef.best_to_maybe(inf,
+                   SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, _))
+                 == Some{T} : Maybe<Tree.Tree>}
+              e
+            P.valid_from_job_res(p, inf, G, GR.GR.rgs_words(rgs), cs,
+              SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, b2),
+              T, hjr2, e2))
+    case 1n+dp:
+      match pr:
+        case Greedy.RootPrepRes{+b0, +rgs, buf0}:
+          +n : Nat = Groups.len_words(cs)
+          +inf : Nat = SolveRef.inf_of(n)
+          +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
+          +gG = SolveFast.glist_of_guesses(G, 0, 1)
+          +cwS = SolveFast.build_cwords(cs, G, 0,
+                   U32.from_nat(Groups.len_words(G)))
+          +fl = SolveFast.init_floor(n)
+          +hb0 = Arr.Arr.dpair_l({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                   Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                     Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                       {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                   hpr)
+          +r1 = Arr.Arr.dpair_r({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                  Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                  hpr)
+          +hrgs = Arr.Arr.dpair_l({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                    r1)
+          +hokl_p = P.par_chunks_ok(1n+dp, rgs, p, inf, G, cs, nd, b0, en,
+                      P.inf_gt0(cs, h3n), P.inf_gt1(cs, h3n),
+                      P.inf_gt3(cs, h3n), P.inf_gt6(cs, h3n), ai, hnd, hrgs, hb0)
+          +rs = SolveK.par_chunks(1n+dp, rgs, n, G, gG, cwS, cs, n, nd, fl, inf, b0)
+          +hokl : {P.ok_list(inf, G, cs, rs) == True{} : Bool} =
+            %Equal.sym(Nat, n, 1n+p, en) :
+              {P.ok_list(inf, G, cs,
+                 SolveK.par_chunks(1n+dp, rgs, _, G, gG, cwS, cs, n, nd, fl,
+                   inf, b0)) == True{} : Bool}
+            hokl_p
+          +hf = P.ok_list_fold(inf, G, cs, rs, b0, hokl, hb0)
+          +hok = Logic.Proof.and_true_l(
+                   FVal.FV.best_ok_b(inf, G, cs, SolveK.fold_results(rs, b0)),
+                   Nat.is_le(Eval.Eval.cost_of(SolveK.fold_results(rs, b0)), inf),
+                   hf)
+          FOpt.FOpt.valid_from_best_maybe(G, cs, inf,
+            SolveK.fold_results(rs, b0), T, hok, e)
+
+def P.after_prep_optimal(+d: Nat, +p: Nat, +G: +List<+List<Nat>>,
+    +cs: +List<+List<Nat>>, +nd: Bool, pr: Greedy.RootPrepRes, +T2: Tree.Tree,
+    +en: {Groups.len_words(cs) == 1n+p : Nat},
+    +h3n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
+    +hnd: {FN.FN.nodup_ok(nd, cs) == True{} : Bool},
+    +hpr: GR.GR.RootPrepSpec(SolveRef.inf_of(Groups.len_words(cs)), G, cs,
+            FH.FH.mk_buf_has(nd, G, cs, Groups.len_words(cs)), nd, pr),
+    +opt: {Nat.is_le(Eval.Eval.cost_of(P.ref_p(G, cs, p)), Tree.cost(T2, cs))
+           == True{} : Bool},
+    +fin: {Nat.is_lt(Eval.Eval.cost_of(P.ref_p(G, cs, p)),
+             SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}) ->
+  Exists(Tree.Tree, T =>
+    {SolveK.after_prep(d, G, SolveFast.glist_of_guesses(G, 0, 1),
+       SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
+       cs, Groups.len_words(cs), nd,
+       SolveFast.init_floor(Groups.len_words(cs)),
+       SolveRef.inf_of(Groups.len_words(cs)), pr)
+     == Some{T} : Maybe<Tree.Tree>}
+    & {Nat.is_le(Tree.cost(T, cs), Tree.cost(T2, cs)) == True{} : Bool}):
+  match d:
+    case 0n:
+      match pr:
+        case Greedy.RootPrepRes{+b0, +rgs, buf0}:
+          +n : Nat = Groups.len_words(cs)
+          +inf : Nat = SolveRef.inf_of(n)
+          +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
+          +gG = SolveFast.glist_of_guesses(G, 0, 1)
+          +cwS = SolveFast.build_cwords(cs, G, 0,
+                   U32.from_nat(Groups.len_words(G)))
+          +fl = SolveFast.init_floor(n)
+          +hb0 = Arr.Arr.dpair_l({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                   Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                     Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                       {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                   hpr)
+          +r1 = Arr.Arr.dpair_r({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                  Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                  hpr)
+          +hrgs = Arr.Arr.dpair_l({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                    r1)
+          +r2 = Arr.Arr.dpair_r({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                  Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                    {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                  r1)
+          +hbuf0 = Arr.Arr.dpair_l(FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                     {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool},
+                     r2)
+          +hcov = Arr.Arr.dpair_r(FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                    {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool},
+                    r2)
+          GR.GR.with_dup_buf(
+            Exists(Tree.Tree, T =>
+              {SolveRef.best_to_maybe(inf,
+                 SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, buf0))
+               == Some{T} : Maybe<Tree.Tree>}
+              & {Nat.is_le(Tree.cost(T, cs), Tree.cost(T2, cs))
+                 == True{} : Bool}),
+            buf0,
+            b1 => b2 => +eb1 => +eb2 =>
+            +hbuf1 = FH.FH.buf_ok_transport(G, cs, n, has_buf, nd, buf0, b1,
+                       Equal.sym(SolveFast.Buf5, b1, buf0, eb1), hbuf0)
+            +hjr_p = P.chunk_best_rgs(p, inf, G, cs, nd, has_buf, rgs, b0, b1,
+                       en, P.inf_gt0(cs, h3n), P.inf_gt1(cs, h3n),
+                       P.inf_gt3(cs, h3n), P.inf_gt6(cs, h3n), ai, hnd, hrgs,
+                       hb0, hbuf1)
+            +eb12 : {b1 == b2 : SolveFast.Buf5} =
+              Equal.trans(SolveFast.Buf5, b1, buf0, b2, eb1,
+                Equal.sym(SolveFast.Buf5, b2, buf0, eb2))
+            +hjr2 : {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+                       SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, b2))
+                     == True{} : Bool} =
+              %Equal.sym(Nat, n, 1n+p, en) :
+                {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+                   SolveK.chunk_best(_, rgs, gG, cwS, n, nd, fl, inf, b0, b2))
+                 == True{} : Bool}
+              %eb12 :
+                {P.job_res_gs_b(1n+p, inf, G, GR.GR.rgs_words(rgs), cs, inf,
+                   SolveK.chunk_best(1n+p, rgs, gG, cwS, n, nd, fl, inf, b0, _))
+                 == True{} : Bool}
+              hjr_p
+            %eb2 :
+              Exists(Tree.Tree, T =>
+                {SolveRef.best_to_maybe(inf,
+                   SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, _))
+                 == Some{T} : Maybe<Tree.Tree>}
+                & {Nat.is_le(Tree.cost(T, cs), Tree.cost(T2, cs))
+                   == True{} : Bool})
+            P.opt_from_job_res(p, G, GR.GR.rgs_words(rgs), cs,
+              SolveK.chunk_best(n, rgs, gG, cwS, n, nd, fl, inf, b0, b2),
+              T2, hjr2, hcov, opt, fin))
+    case 1n+dp:
+      match pr:
+        case Greedy.RootPrepRes{+b0, +rgs, buf0}:
+          +n : Nat = Groups.len_words(cs)
+          +inf : Nat = SolveRef.inf_of(n)
+          +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
+          +gG = SolveFast.glist_of_guesses(G, 0, 1)
+          +cwS = SolveFast.build_cwords(cs, G, 0,
+                   U32.from_nat(Groups.len_words(G)))
+          +fl = SolveFast.init_floor(n)
+          +hb0 = Arr.Arr.dpair_l({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                   Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                     Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                       {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                   hpr)
+          +r1 = Arr.Arr.dpair_r({GR.GR.elt_ok(inf, G, cs, b0) == True{} : Bool},
+                  Arr.Arr.DPair<{GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>>,
+                  hpr)
+          +hrgs = Arr.Arr.dpair_l({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                    Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                      {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                    r1)
+          +r2 = Arr.Arr.dpair_r({GR.GR.rgs_ok_b(has_buf, G, n, rgs) == True{} : Bool},
+                  Arr.Arr.DPair<FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                    {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool}>,
+                  r1)
+          +hcov = Arr.Arr.dpair_r(FH.FH.BufOk(G, cs, n, has_buf, nd, buf0),
+                    {GR.GR.all_usable_in(cs, G, GR.GR.rgs_words(rgs)) == True{} : Bool},
+                    r2)
+          +hokl_p = P.par_chunks_ok(1n+dp, rgs, p, inf, G, cs, nd, b0, en,
+                      P.inf_gt0(cs, h3n), P.inf_gt1(cs, h3n),
+                      P.inf_gt3(cs, h3n), P.inf_gt6(cs, h3n), ai, hnd, hrgs, hb0)
+          +rs = SolveK.par_chunks(1n+dp, rgs, n, G, gG, cwS, cs, n, nd, fl, inf, b0)
+          +hokl : {P.ok_list(inf, G, cs, rs) == True{} : Bool} =
+            %Equal.sym(Nat, n, 1n+p, en) :
+              {P.ok_list(inf, G, cs,
+                 SolveK.par_chunks(1n+dp, rgs, _, G, gG, cwS, cs, n, nd, fl,
+                   inf, b0)) == True{} : Bool}
+            hokl_p
+          +helt = P.ok_list_fold(inf, G, cs, rs, b0, hokl, hb0)
+          +efix_p = P.guesses_fixed_of_par_chunks(1n+dp, rgs, p, inf, G, cs,
+                      nd, b0, G, en, P.inf_gt0(cs, h3n), P.inf_gt1(cs, h3n),
+                      P.inf_gt3(cs, h3n), P.inf_gt6(cs, h3n), ai, hnd, hrgs,
+                      hb0, hcov)
+          +efix : {Eval.Eval.guesses(1n+p, G, cs, inf, G,
+                     SolveK.fold_results(rs, b0))
+                   == SolveK.fold_results(rs, b0) : SolveRef.Best} =
+            %Equal.sym(Nat, n, 1n+p, en) :
+              {Eval.Eval.guesses(1n+p, G, cs, inf, G,
+                 SolveK.fold_results(
+                   SolveK.par_chunks(1n+dp, rgs, _, G, gG, cwS, cs, n, nd, fl,
+                     inf, b0), b0))
+               == SolveK.fold_results(
+                    SolveK.par_chunks(1n+dp, rgs, _, G, gG, cwS, cs, n, nd, fl,
+                      inf, b0), b0) : SolveRef.Best}
+            efix_p
+          P.opt_from_best(G, cs, p, T2, SolveK.fold_results(rs, b0), helt,
+            efix, opt, fin)
+
+def P.solve_chunked_valid(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
+    +d: Nat, +p: Nat, +T: Tree.Tree,
+    +en: {Groups.len_words(cs) == 1n+p : Nat},
+    +h3n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
+    e: {SolveK.solve_chunked(G, cs, d) == Some{T} : Maybe<Tree.Tree>}) ->
+  Tree.Valid(T, G, cs):
+  +n : Nat = Groups.len_words(cs)
+  +inf : Nat = SolveRef.inf_of(n)
+  +nd : Bool = SolveFast.no_dup_fast(cs)
+  +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
+  +gG = SolveFast.glist_of_guesses(G, 0, 1)
+  +cwS = SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G)))
+  +ecwS = FT.FT.build_cwords_words(cs, G, 0, U32.from_nat(Groups.len_words(G)))
+  +hcwS = FOpt.FOpt.build_cwords_ok_if(has_buf, G, cs, n, ai)
+  +hnd = FOpt.FOpt.nodup_ok_of_fast(cs)
+  +hpr = GR.GR.root_prepare_spec(p, inf, G, cs, nd, has_buf, gG, cwS,
+           SolveFast.mk_buf_tbl(nd, G, cs, n), en, {==}, ecwS, hcwS, ai, hnd,
+           FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}))
+  P.after_prep_valid(d, p, G, cs, nd,
+    Greedy.root_prepare(G, gG, cwS, n, inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
+    T, en, h3n, ai, hnd, hpr, e)
+
+def P.solve_chunked_optimal(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
+    +d: Nat, +p: Nat, +T2: Tree.Tree,
+    +en: {Groups.len_words(cs) == 1n+p : Nat},
+    +h3n: {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
+    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
+    +opt: {Nat.is_le(Eval.Eval.cost_of(P.ref_p(G, cs, p)), Tree.cost(T2, cs))
+           == True{} : Bool},
     +fin: {Nat.is_lt(Eval.Eval.cost_of(P.ref_p(G, cs, p)),
              SolveRef.inf_of(Groups.len_words(cs))) == True{} : Bool}) ->
   Exists(Tree.Tree, T =>
@@ -2885,79 +2165,19 @@ def P.solve_chunked_optimal(+G: +List<+List<Nat>>,
     & {Nat.is_le(Tree.cost(T, cs), Tree.cost(T2, cs)) == True{} : Bool}):
   +n : Nat = Groups.len_words(cs)
   +inf : Nat = SolveRef.inf_of(n)
-  +hok = P.root_ok(G, cs, p, d, en, h3n, ai)
-  +hle_ref = P.root_le_ref(G, cs, p, d, en, h3n, ai)
-  +fin_fold : {Nat.is_lt(Eval.Eval.cost_of(P.root_best(G, cs, d)), inf)
-               == True{} : Bool} =
-    NatProof.Nat.is_le_lt_trans(Eval.Eval.cost_of(P.root_best(G, cs, d)),
-      Eval.Eval.cost_of(P.ref_p(G, cs, p)), inf, hle_ref, fin)
-  +es = OC.OC.best_to_maybe_fin(inf, P.root_best(G, cs, d), fin_fold)
-  +hext = FVal.FV.best_ok_extract(inf, G, cs, P.root_best(G, cs, d), hok,
-            fin_fold)
-  +hcost_tree = Logic.Proof.and_true_r(
-                  FVal.FV.valid_b(Eval.Eval.tree_of(P.root_best(G, cs, d)),
-                    G, cs),
-                  Nat.is_le(Tree.cost(
-                      Eval.Eval.tree_of(P.root_best(G, cs, d)), cs),
-                    Eval.Eval.cost_of(P.root_best(G, cs, d))), hext)
-  +hle = NatProof.Nat.is_le_trans(
-           Tree.cost(Eval.Eval.tree_of(P.root_best(G, cs, d)), cs),
-           Eval.Eval.cost_of(P.root_best(G, cs, d)), Tree.cost(T2, cs),
-           hcost_tree,
-           NatProof.Nat.is_le_trans(Eval.Eval.cost_of(P.root_best(G, cs, d)),
-             Eval.Eval.cost_of(P.ref_p(G, cs, p)), Tree.cost(T2, cs),
-             hle_ref, opt))
-  (Eval.Eval.tree_of(P.root_best(G, cs, d)), (es, hle))
-
-# Transporting the accumulator invariant along an equality of results.
-def P.best_ok_transport(+limit: Nat, +G: +List<+List<Nat>>,
-    +S: +List<+List<Nat>>, -r1: SolveRef.Best, -r2: SolveRef.Best,
-    +e: {r1 == r2 : SolveRef.Best},
-    +h: {FVal.FV.best_ok_b(limit, G, S, r1) == True{} : Bool}) ->
-  {FVal.FV.best_ok_b(limit, G, S, r2) == True{} : Bool}:
-  %e : {FVal.FV.best_ok_b(limit, G, S, _) == True{} : Bool}
-  h
-
-# The chunked root is valid.
-def P.solve_chunked_valid(+G: +List<+List<Nat>>, +cs: +List<+List<Nat>>,
-    +d: Nat, +p: Nat, +T: Tree.Tree,
-    +en: {Groups.len_words(cs) == 1n+p : Nat},
-    +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool},
-    +ai: {FO.FO.all_in_ref(cs, G) == True{} : Bool},
-    e: {SolveK.solve_chunked(G, cs, d) == Some{T} : Maybe<Tree.Tree>}) ->
-  Tree.Valid(T, G, cs):
-  +inf : Nat = SolveRef.inf_of(Groups.len_words(cs))
-  +hok = P.root_ok(G, cs, p, d, en, h3n, ai)
-  +hok_fold : {FVal.FV.best_ok_b(inf, G, cs,
-      SolveK.fold_results(
-        SolveK.par_chunks(d, G, 0, Groups.len_words(cs), G,
-          SolveFast.glist_of_guesses(G, 0, 1),
-          SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-          cs, Groups.len_words(cs), SolveFast.no_dup_fast(cs),
-          SolveFast.init_floor(Groups.len_words(cs)),
-          SolveRef.inf_of(Groups.len_words(cs))),
-        SolveFast.dummy_inf(SolveRef.inf_of(Groups.len_words(cs)))))
-    == True{} : Bool} =
-    P.best_ok_transport(inf, G, cs, P.root_best(G, cs, d),
-      SolveK.fold_results(
-        SolveK.par_chunks(d, G, 0, Groups.len_words(cs), G,
-          SolveFast.glist_of_guesses(G, 0, 1),
-          SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-          cs, Groups.len_words(cs), SolveFast.no_dup_fast(cs),
-          SolveFast.init_floor(Groups.len_words(cs)),
-          SolveRef.inf_of(Groups.len_words(cs))),
-        SolveFast.dummy_inf(SolveRef.inf_of(Groups.len_words(cs)))),
-      {==}, hok)
-  FOpt.FOpt.valid_from_best_maybe(G, cs, inf,
-    SolveK.fold_results(
-      SolveK.par_chunks(d, G, 0, Groups.len_words(cs), G,
-        SolveFast.glist_of_guesses(G, 0, 1),
-        SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G))),
-        cs, Groups.len_words(cs), SolveFast.no_dup_fast(cs),
-        SolveFast.init_floor(Groups.len_words(cs)),
-        SolveRef.inf_of(Groups.len_words(cs))),
-      SolveFast.dummy_inf(SolveRef.inf_of(Groups.len_words(cs)))),
-    T, hok_fold, e)
+  +nd : Bool = SolveFast.no_dup_fast(cs)
+  +has_buf : Bool = FH.FH.mk_buf_has(nd, G, cs, n)
+  +gG = SolveFast.glist_of_guesses(G, 0, 1)
+  +cwS = SolveFast.build_cwords(cs, G, 0, U32.from_nat(Groups.len_words(G)))
+  +ecwS = FT.FT.build_cwords_words(cs, G, 0, U32.from_nat(Groups.len_words(G)))
+  +hcwS = FOpt.FOpt.build_cwords_ok_if(has_buf, G, cs, n, ai)
+  +hnd = FOpt.FOpt.nodup_ok_of_fast(cs)
+  +hpr = GR.GR.root_prepare_spec(p, inf, G, cs, nd, has_buf, gG, cwS,
+           SolveFast.mk_buf_tbl(nd, G, cs, n), en, {==}, ecwS, hcwS, ai, hnd,
+           FH.FH.mk_buf_tbl_ok(nd, G, cs, n, {==}))
+  P.after_prep_optimal(d, p, G, cs, nd,
+    Greedy.root_prepare(G, gG, cwS, n, inf, SolveFast.mk_buf_tbl(nd, G, cs, n)),
+    T2, en, h3n, ai, hnd, hpr, opt, fin)
 
 # ---------------------------------------------------------------------------
 # Validity and optimality of `SolveK.solve_k` for every chunk count
@@ -2983,8 +2203,7 @@ def P.solve_small_valid(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               +cs : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
               +p : Nat = Groups.len_words(w2 <> (w3 <> t3))
               +en : {Groups.len_words(cs) == 1n+p : Nat} = {==}
-              +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{}
-                      : Bool} =
+              +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool} =
                 NatProof.Nat.is_le_zero_l(Groups.len_words(t3))
               P.solve_chunked_valid(G, cs, d, p, T, en, h3n, ai, e)
 
@@ -3010,8 +2229,7 @@ def P.solve_small_optimal(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               +cs : +List<+List<Nat>> = w <> (w2 <> (w3 <> t3))
               +p : Nat = Groups.len_words(w2 <> (w3 <> t3))
               +en : {Groups.len_words(cs) == 1n+p : Nat} = {==}
-              +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{}
-                      : Bool} =
+              +h3n : {Nat.is_le(3n, Groups.len_words(cs)) == True{} : Bool} =
                 NatProof.Nat.is_le_zero_l(Groups.len_words(t3))
               OQStrong.F2.use_pair(
                 Exists(Tree.Tree, T =>
@@ -3081,29 +2299,13 @@ def P.solve_k_valid(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +k: Nat, +T: Tree.Tree,
     e: {SolveK.solve_k(G, C, k) == Some{T} : Maybe<Tree.Tree>}) ->
   Tree.Valid(T, G, C):
-  match k:
-    case 0n:
-      FOpt.FOpt.solve_valid(G, C, T, e)
-    case 1n+p:
-      match p:
-        case 0n:
-          FOpt.FOpt.solve_valid(G, C, T, e)
-        case 1n+q:
-          P.solve_k_checked_valid(G, C, SolveK.depth_of(1n+p),
-            SolveFast.all_in_fast(C, G), {==}, T, e)
+  P.solve_k_checked_valid(G, C, SolveK.depth_of(k),
+    SolveFast.all_in_fast(C, G), {==}, T, e)
 
 def P.solve_k_optimal(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +k: Nat, +T2: Tree.Tree, v: Tree.Valid(T2, G, C)) ->
   Exists(Tree.Tree, T =>
     {SolveK.solve_k(G, C, k) == Some{T} : Maybe<Tree.Tree>}
     & {Nat.is_le(Tree.cost(T, C), Tree.cost(T2, C)) == True{} : Bool}):
-  match k:
-    case 0n:
-      FOpt.FOpt.solve_optimal(G, C, T2, v)
-    case 1n+p:
-      match p:
-        case 0n:
-          FOpt.FOpt.solve_optimal(G, C, T2, v)
-        case 1n+q:
-          P.solve_k_checked_optimal(G, C, SolveK.depth_of(1n+p),
-            SolveFast.all_in_fast(C, G), {==}, T2, v)
+  P.solve_k_checked_optimal(G, C, SolveK.depth_of(k),
+    SolveFast.all_in_fast(C, G), {==}, T2, v)
