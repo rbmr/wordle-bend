@@ -44,7 +44,9 @@ import ./fast_nodup.bend as FN
 import ./fast_perm.bend as FP
 import ./fast_tbl.bend as FT
 import ./fast_three.bend as FT3
+import ./fast_lb2.bend as LB2
 import ./fast_hist5.bend as FH
+import ./fast_tight.bend as FTight
 import ./fast_valid.bend as FVal
 
 # ---------------------------------------------------------------------------
@@ -767,7 +769,8 @@ def FOpt.body_dead(+groups: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                           {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                            == True{} : Bool},
                                           Arr.Arr.DPair<
-                                            {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                            {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                             == True{} : Bool},
                                             Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                               FH.FH.BodyMatch(G, C_root, n_root,
                                                 has_buf, nodup, n, restg, restb2)>>>>>>,
@@ -781,7 +784,8 @@ def FOpt.body_dead(+groups: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                         {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               has_buf, nodup, n, restg, restb2)>>>>>,
@@ -794,7 +798,8 @@ def FOpt.body_dead(+groups: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                       {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                        == True{} : Bool},
                                       Arr.Arr.DPair<
-                                        {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                        {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                         == True{} : Bool},
                                         Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                           FH.FH.BodyMatch(G, C_root, n_root,
                                             has_buf, nodup, n, restg, restb2)>>>>,
@@ -804,7 +809,8 @@ def FOpt.body_dead(+groups: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                     {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                      {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                         FH.FH.BodyMatch(G, C_root, n_root,
                                           has_buf, nodup, n, restg, restb2)>>>,
@@ -813,13 +819,15 @@ def FOpt.body_dead(+groups: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                   {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                    == True{} : Bool},
                                   Arr.Arr.DPair<
-                                    {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                    {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                     == True{} : Bool},
                                     Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                       FH.FH.BodyMatch(G, C_root, n_root,
                                         has_buf, nodup, n, restg, restb2)>>,
                                   r4)
                           +r6 = Arr.Arr.dpair_r(
-                                  {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                  {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                   == True{} : Bool},
                                   Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                     FH.FH.BodyMatch(G, C_root, n_root,
                                       has_buf, nodup, n, restg, restb2)>,
@@ -1083,14 +1091,34 @@ def FOpt.done_ws_valid_cost(+ws: +List<+List<Nat>>, +G: +List<+List<Nat>>,
                        Nat.is_le(Tree.cost(tr, ws4), c)) == True{} : Bool},
                     Logic.Proof.false_ne_true(hdws))
 
-# Direct lower-bound theorem for `FH.body_lb`: whenever `B <= inf` and
-# `B <= sum_ref + FH.body_lb(nodup, |S|, body)` for a body matching `groups`,
+def FOpt.add_sub_eq(b: Nat, a: Nat,
+    +h: {Nat.is_le(b, a) == True{} : Bool}) ->
+  {Nat.add(b, Nat.sub(a, b)) == a : Nat}:
+  match b a:
+    case 0n _:
+      FLB.FS.sub_zero(a)
+    case 1n+bp 0n:
+      Empty.absurd({Nat.add(1n+bp, Nat.sub(0n, 1n+bp)) == 0n : Nat},
+        Logic.Proof.false_ne_true(h))
+    case 1n+bp 1n+ap:
+      Equal.cong(Nat, Nat, x => 1n+x, Nat.add(bp, Nat.sub(ap, bp)), ap,
+        FOpt.add_sub_eq(bp, ap, h))
+
+def FOpt.add_sub_eq_r(+b: Nat, +a: Nat,
+    +h: {Nat.is_le(b, a) == True{} : Bool}) ->
+  {Nat.add(Nat.sub(a, b), b) == a : Nat}:
+  Equal.trans(Nat, Nat.add(Nat.sub(a, b), b), Nat.add(b, Nat.sub(a, b)), a,
+    NatProof.NatPrf.add_comm(Nat.sub(a, b), b), FOpt.add_sub_eq(b, a, h))
+
+# Direct lower-bound theorem for `FH.tail_lb_ok_b`: whenever `B <= inf` and
+# `B <= sum_ref + tlb_in` with `FH.tail_lb_ok_b(G, nodup, |S|, body, tlb_in)`
+# for a body matching `groups`,
 # `B <= Fold.OQ.ks_cost(inf, S, Eval.items(p, G, S, g, groups, Nil{}, sum_ref, inf))`.
 def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
     +body: +List<SolveFast.Item>, +p: Nat, +inf: Nat, +G: +List<+List<Nat>>,
     +C_root: +List<+List<Nat>>, +n_root: Nat, +has_buf: Bool,
     +S: +List<+List<Nat>>, +nodup: Bool, +g: +List<Nat>, +sum_ref: Nat,
-    +B: Nat,
+    +B: Nat, +tlb_in: Nat,
     bounds: MV.MV.Bounds(p, MV.MV.next_groups(groups)),
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
@@ -1100,18 +1128,24 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
     +hB: {Nat.is_le(B, inf) == True{} : Bool},
     +hbm: FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup,
             Groups.len_words(S), groups, body),
-    +hcur: {Nat.is_le(B,
-              Nat.add(sum_ref, FH.FH.body_lb(nodup, Groups.len_words(S), body)))
-            == True{} : Bool}) ->
+    +htlb: {FH.FH.tail_lb_ok_b(G, nodup, Groups.len_words(S), body, tlb_in)
+            == True{} : Bool},
+    +hcur: {Nat.is_le(B, Nat.add(sum_ref, tlb_in)) == True{} : Bool}) ->
   {Nat.is_le(B, Fold.OQ.ks_cost(inf, S,
      Eval.Eval.items(p, G, S, g, groups, Nil{}, sum_ref, inf)))
    == True{} : Bool}:
   match groups:
     case Nil{}:
       +n : Nat = Groups.len_words(S)
-      +elb : {FH.FH.body_lb(nodup, n, body) == n : Nat} =
-        Equal.cong(+List<SolveFast.Item>, Nat,
-          b => FH.FH.body_lb(nodup, n, b), body, SolveFast.End{} <> Nil{}, hbm)
+      +heq_n : {Nat.is_eq(tlb_in, n) == True{} : Bool} =
+        Equal.trans(Bool, Nat.is_eq(tlb_in, n),
+          FH.FH.tail_lb_ok_b(G, nodup, n, body, tlb_in), True{},
+          Equal.cong(+List<SolveFast.Item>, Bool,
+            b => FH.FH.tail_lb_ok_b(G, nodup, n, b, tlb_in),
+            SolveFast.End{} <> Nil{}, body,
+            Equal.sym(+List<SolveFast.Item>, body, SolveFast.End{} <> Nil{},
+              hbm)), htlb)
+      +elb : {tlb_in == n : Nat} = NatProof.NatPrf.is_eq_true(tlb_in, n, heq_n)
       +hplain : {Nat.is_le(B, Nat.add(Nat.add(n, sum_ref), 0n)) == True{} : Bool} =
         Fold.OQ.le_cong_r(B, Nat.add(sum_ref, n),
           Nat.add(Nat.add(n, sum_ref), 0n),
@@ -1120,10 +1154,9 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
             NatProof.NatPrf.add_comm(sum_ref, n),
             Equal.sym(Nat, Nat.add(Nat.add(n, sum_ref), 0n), Nat.add(n, sum_ref),
               NatProof.NatPrf.add_zero(Nat.add(n, sum_ref)))),
-          Fold.OQ.le_cong_r(B, Nat.add(sum_ref, FH.FH.body_lb(nodup, n, body)),
-            Nat.add(sum_ref, n),
-            Equal.cong(Nat, Nat, x => Nat.add(sum_ref, x),
-              FH.FH.body_lb(nodup, n, body), n, elb), hcur))
+          Fold.OQ.le_cong_r(B, Nat.add(sum_ref, tlb_in), Nat.add(sum_ref, n),
+            Equal.cong(Nat, Nat, x => Nat.add(sum_ref, x), tlb_in, n, elb),
+            hcur))
       Fold.OQ.le_cong_r(B, Nat.add(SolveRef.sat_add(inf, n, sum_ref), 0n),
         SolveRef.sat_add(inf, n, sum_ref),
         NatProof.NatPrf.add_zero(SolveRef.sat_add(inf, n, sum_ref)),
@@ -1160,14 +1193,28 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                   +ngt = Logic.Proof.and_true_r(FN.FN.nodup_ok(nodup, ws),
                            FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(restg)),
                            ng)
+                  +hle1 = Logic.Proof.and_true_l(Nat.is_le(1n, tlb_in),
+                            FH.FH.tail_lb_ok_b(G, nodup, n, restb,
+                              Nat.sub(tlb_in, 1n)), htlb)
+                  +htlb2 = Logic.Proof.and_true_r(Nat.is_le(1n, tlb_in),
+                             FH.FH.tail_lb_ok_b(G, nodup, n, restb,
+                               Nat.sub(tlb_in, 1n)), htlb)
+                  +hcur1 : {Nat.is_le(B,
+                              Nat.add(sum_ref, Nat.add(1n, Nat.sub(tlb_in, 1n))))
+                            == True{} : Bool} =
+                    Fold.OQ.le_cong_r(B, Nat.add(sum_ref, tlb_in),
+                      Nat.add(sum_ref, Nat.add(1n, Nat.sub(tlb_in, 1n))),
+                      Equal.cong(Nat, Nat, x => Nat.add(sum_ref, x), tlb_in,
+                        Nat.add(1n, Nat.sub(tlb_in, 1n)),
+                        Equal.sym(Nat, Nat.add(1n, Nat.sub(tlb_in, 1n)), tlb_in,
+                          FOpt.add_sub_eq(1n, tlb_in, hle1))), hcur)
                   +ref_c : Nat = Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))
                   +sr : Nat = SolveRef.sat_add(inf, sum_ref, ref_c)
-                  +hcur2 : {Nat.is_le(B,
-                              Nat.add(sr, FH.FH.body_lb(nodup, n, restb)))
+                  +hcur2 : {Nat.is_le(B, Nat.add(sr, Nat.sub(tlb_in, 1n)))
                             == True{} : Bool} =
                     FOpt.body_lb_step_go(inf, B, sum_ref, 1n,
-                      FH.FH.body_lb(nodup, n, restb), ref_c,
-                      Nat.is_lt(ref_c, inf), {==}, hB, hcur,
+                      Nat.sub(tlb_in, 1n), ref_c,
+                      Nat.is_lt(ref_c, inf), {==}, hB, hcur1,
                       +hlt =>
                         +eclb : {1n == SolveFast.class_lb(ws) : Nat} =
                           Equal.trans(Nat, 1n, SolveFast.class_lb(w <> Nil{}),
@@ -1193,8 +1240,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                       FVal.FV.ks_cost_items_step(p, inf, G, S, g, fb, ws, restg,
                         sum_ref)),
                     FOpt.body_lb_le_ks_cost(restg, restb, p, inf, G, C_root,
-                      n_root, has_buf, S, nodup, g, sr, B, bt, hz, h3, h6, ngt,
-                      hB, hbm2, hcur2))
+                      n_root, has_buf, S, nodup, g, sr, B, Nat.sub(tlb_in, 1n),
+                      bt, hz, h3, h6, ngt, hB, hbm2, htlb2, hcur2))
                 case SolveFast.TwoItem{+f, +w1, +w2}:
                   (+ble, bt) = bounds
                   +n : Nat = Groups.len_words(S)
@@ -1247,14 +1294,28 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                       Equal.cong(+List<+List<Nat>>, Bool,
                         l => Nat.is_le(Groups.len_words(l), p), ws2, ws,
                         Equal.sym(+List<+List<Nat>>, ws, ws2, ews)), ble)
+                  +hle3 = Logic.Proof.and_true_l(Nat.is_le(3n, tlb_in),
+                            FH.FH.tail_lb_ok_b(G, nodup, n, restb,
+                              Nat.sub(tlb_in, 3n)), htlb)
+                  +htlb2 = Logic.Proof.and_true_r(Nat.is_le(3n, tlb_in),
+                             FH.FH.tail_lb_ok_b(G, nodup, n, restb,
+                               Nat.sub(tlb_in, 3n)), htlb)
+                  +hcur1 : {Nat.is_le(B,
+                              Nat.add(sum_ref, Nat.add(3n, Nat.sub(tlb_in, 3n))))
+                            == True{} : Bool} =
+                    Fold.OQ.le_cong_r(B, Nat.add(sum_ref, tlb_in),
+                      Nat.add(sum_ref, Nat.add(3n, Nat.sub(tlb_in, 3n))),
+                      Equal.cong(Nat, Nat, x => Nat.add(sum_ref, x), tlb_in,
+                        Nat.add(3n, Nat.sub(tlb_in, 3n)),
+                        Equal.sym(Nat, Nat.add(3n, Nat.sub(tlb_in, 3n)), tlb_in,
+                          FOpt.add_sub_eq(3n, tlb_in, hle3))), hcur)
                   +ref_c : Nat = Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))
                   +sr : Nat = SolveRef.sat_add(inf, sum_ref, ref_c)
-                  +hcur2 : {Nat.is_le(B,
-                              Nat.add(sr, FH.FH.body_lb(nodup, n, restb)))
+                  +hcur2 : {Nat.is_le(B, Nat.add(sr, Nat.sub(tlb_in, 3n)))
                             == True{} : Bool} =
                     FOpt.body_lb_step_go(inf, B, sum_ref, 3n,
-                      FH.FH.body_lb(nodup, n, restb), ref_c,
-                      Nat.is_lt(ref_c, inf), {==}, hB, hcur,
+                      Nat.sub(tlb_in, 3n), ref_c,
+                      Nat.is_lt(ref_c, inf), {==}, hB, hcur1,
                       +hlt =>
                         Fold.OQ.le_cong_r(3n,
                           Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws2)),
@@ -1279,8 +1340,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                       FVal.FV.ks_cost_items_step(p, inf, G, S, g, fb, ws, restg,
                         sum_ref)),
                     FOpt.body_lb_le_ks_cost(restg, restb, p, inf, G, C_root,
-                      n_root, has_buf, S, nodup, g, sr, B, bt, hz, h3, h6, ngt,
-                      hB, hbm2, hcur2))
+                      n_root, has_buf, S, nodup, g, sr, B, Nat.sub(tlb_in, 3n),
+                      bt, hz, h3, h6, ngt, hB, hbm2, htlb2, hcur2))
                 case SolveFast.DoneItem{+f, +tr, +c}:
                   (+ble, bt) = bounds
                   +n : Nat = Groups.len_words(S)
@@ -1321,14 +1382,28 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                       Equal.cong(Bool, Bool, b => FN.FN.nodup_ok(b, ws),
                         True{}, nodup, Equal.sym(Bool, nodup, True{}, end)),
                       ndh0)
+                  +hlec = Logic.Proof.and_true_l(Nat.is_le(c, tlb_in),
+                            FH.FH.tail_lb_ok_b(G, nodup, n, restb,
+                              Nat.sub(tlb_in, c)), htlb)
+                  +htlb2 = Logic.Proof.and_true_r(Nat.is_le(c, tlb_in),
+                             FH.FH.tail_lb_ok_b(G, nodup, n, restb,
+                               Nat.sub(tlb_in, c)), htlb)
+                  +hcur1 : {Nat.is_le(B,
+                              Nat.add(sum_ref, Nat.add(c, Nat.sub(tlb_in, c))))
+                            == True{} : Bool} =
+                    Fold.OQ.le_cong_r(B, Nat.add(sum_ref, tlb_in),
+                      Nat.add(sum_ref, Nat.add(c, Nat.sub(tlb_in, c))),
+                      Equal.cong(Nat, Nat, x => Nat.add(sum_ref, x), tlb_in,
+                        Nat.add(c, Nat.sub(tlb_in, c)),
+                        Equal.sym(Nat, Nat.add(c, Nat.sub(tlb_in, c)), tlb_in,
+                          FOpt.add_sub_eq(c, tlb_in, hlec))), hcur)
                   +ref_c : Nat = Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))
                   +sr : Nat = SolveRef.sat_add(inf, sum_ref, ref_c)
-                  +hcur2 : {Nat.is_le(B,
-                              Nat.add(sr, FH.FH.body_lb(nodup, n, restb)))
+                  +hcur2 : {Nat.is_le(B, Nat.add(sr, Nat.sub(tlb_in, c)))
                             == True{} : Bool} =
                     FOpt.body_lb_step_go(inf, B, sum_ref, c,
-                      FH.FH.body_lb(nodup, n, restb), ref_c,
-                      Nat.is_lt(ref_c, inf), {==}, hB, hcur,
+                      Nat.sub(tlb_in, c), ref_c,
+                      Nat.is_lt(ref_c, inf), {==}, hB, hcur1,
                       +hlt => FOpt.done_ws_le_ref(ws, p, inf, G, tr, c, ble,
                                 hz, h6, ndh, hdws))
                   Fold.OQ.le_cong_r(B,
@@ -1346,8 +1421,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                       FVal.FV.ks_cost_items_step(p, inf, G, S, g, fb, ws, restg,
                         sum_ref)),
                     FOpt.body_lb_le_ks_cost(restg, restb, p, inf, G, C_root,
-                      n_root, has_buf, S, nodup, g, sr, B, bt, hz, h3, h6, ngt,
-                      hB, hbm2, hcur2))
+                      n_root, has_buf, S, nodup, g, sr, B, Nat.sub(tlb_in, c),
+                      bt, hz, h3, h6, ngt, hB, hbm2, htlb2, hcur2))
                 case SolveFast.ClassItem{+f, +cws, +wlen, +tlb}:
                   match restb:
                     case Nil{}:
@@ -1371,7 +1446,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                                           {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                            == True{} : Bool},
                                           Arr.Arr.DPair<
-                                            {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                            {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                             == True{} : Bool},
                                             Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                               FH.FH.BodyMatch(G, C_root, n_root,
                                                 has_buf, nodup, n, restg, restb2)>>>>>>,
@@ -1385,7 +1461,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                                         {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               has_buf, nodup, n, restg, restb2)>>>>>,
@@ -1398,7 +1475,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                                         {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               has_buf, nodup, n, restg, restb2)>>>>,
@@ -1411,27 +1489,19 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                                       {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                        == True{} : Bool},
                                       Arr.Arr.DPair<
-                                        {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                        {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                         == True{} : Bool},
                                         Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                           FH.FH.BodyMatch(G, C_root, n_root,
                                             has_buf, nodup, n, restg, restb2)>>>>,
                                   r2)
-                          +elen = Arr.Arr.dpair_l({wlen == Groups.len_words(ws) : Nat},
-                                    Arr.Arr.DPair<
-                                      {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
-                                       == True{} : Bool},
-                                      Arr.Arr.DPair<
-                                        {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
-                                        Arr.Arr.DPair<{tlb2 == tlb : Nat},
-                                          FH.FH.BodyMatch(G, C_root, n_root,
-                                            has_buf, nodup, n, restg, restb2)>>>,
-                                    r3)
                           +r4 = Arr.Arr.dpair_r({wlen == Groups.len_words(ws) : Nat},
                                   Arr.Arr.DPair<
                                     {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                      {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                         FH.FH.BodyMatch(G, C_root, n_root,
                                           has_buf, nodup, n, restg, restb2)>>>,
@@ -1440,13 +1510,22 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                                   {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                    == True{} : Bool},
                                   Arr.Arr.DPair<
-                                    {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                    {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                     == True{} : Bool},
                                     Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                       FH.FH.BodyMatch(G, C_root, n_root,
                                         has_buf, nodup, n, restg, restb2)>>,
                                   r4)
+                          +htlb_sub = Arr.Arr.dpair_l(
+                                        {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                         == True{} : Bool},
+                                        Arr.Arr.DPair<{tlb2 == tlb : Nat},
+                                          FH.FH.BodyMatch(G, C_root, n_root,
+                                            has_buf, nodup, n, restg, restb2)>,
+                                        r5)
                           +r6 = Arr.Arr.dpair_r(
-                                  {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                  {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                   == True{} : Bool},
                                   Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                     FH.FH.BodyMatch(G, C_root, n_root,
                                       has_buf, nodup, n, restg, restb2)>,
@@ -1454,36 +1533,45 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                           +hbm2 = Arr.Arr.dpair_r({tlb2 == tlb : Nat},
                                     FH.FH.BodyMatch(G, C_root, n_root,
                                       has_buf, nodup, n, restg, restb2), r6)
-                          +ndh = Logic.Proof.and_true_l(FN.FN.nodup_ok(nodup, ws),
-                                   FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(restg)),
-                                   ng)
                           +ngt = Logic.Proof.and_true_r(FN.FN.nodup_ok(nodup, ws),
                                    FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(restg)),
                                    ng)
-                          +c_lb : Nat =
-                            SolveFast.class_lb_fast(nodup, wlen,
-                              SolveFast.cwords_words(cws))
-                          +eclb : {c_lb == SolveFast.class_lb(ws) : Nat} =
-                            Equal.trans(Nat, c_lb,
-                              SolveFast.class_lb_fast(nodup, wlen, ws),
-                              SolveFast.class_lb(ws),
-                              Equal.cong(+List<+List<Nat>>, Nat,
-                                l => SolveFast.class_lb_fast(nodup, wlen, l),
-                                SolveFast.cwords_words(cws), ws, ecws),
-                              FN.FN.class_lb_fast_eq(nodup, wlen, ws, elen, ndh))
+                          +c_lb : Nat = Nat.sub(tlb_in, tlb)
+                          +hle_t = Logic.Proof.and_true_l(Nat.is_le(tlb, tlb_in),
+                                     LB2.LB2.clb_ok_b(G, nodup,
+                                       SolveFast.cwords_words(cws), c_lb), htlb)
+                          +hclb_cw = Logic.Proof.and_true_r(Nat.is_le(tlb, tlb_in),
+                                       LB2.LB2.clb_ok_b(G, nodup,
+                                         SolveFast.cwords_words(cws), c_lb), htlb)
+                          +hclb : {LB2.LB2.clb_ok_b(G, nodup, ws, c_lb)
+                                   == True{} : Bool} =
+                            Equal.trans(Bool, LB2.LB2.clb_ok_b(G, nodup, ws, c_lb),
+                              LB2.LB2.clb_ok_b(G, nodup,
+                                SolveFast.cwords_words(cws), c_lb), True{},
+                              Equal.cong(+List<+List<Nat>>, Bool,
+                                l => LB2.LB2.clb_ok_b(G, nodup, l, c_lb),
+                                ws, SolveFast.cwords_words(cws),
+                                Equal.sym(+List<+List<Nat>>,
+                                  SolveFast.cwords_words(cws), ws, ecws)),
+                              hclb_cw)
+                          +hcur1 : {Nat.is_le(B,
+                                      Nat.add(sum_ref, Nat.add(c_lb, tlb)))
+                                    == True{} : Bool} =
+                            Fold.OQ.le_cong_r(B, Nat.add(sum_ref, tlb_in),
+                              Nat.add(sum_ref, Nat.add(c_lb, tlb)),
+                              Equal.cong(Nat, Nat, x => Nat.add(sum_ref, x),
+                                tlb_in, Nat.add(c_lb, tlb),
+                                Equal.sym(Nat, Nat.add(c_lb, tlb), tlb_in,
+                                  FOpt.add_sub_eq_r(tlb, tlb_in, hle_t))), hcur)
                           +ref_c : Nat = Eval.Eval.cost_of(FS.FS.ref_run_at(p, inf, G, ws))
                           +sr : Nat = SolveRef.sat_add(inf, sum_ref, ref_c)
-                          +hcur2 : {Nat.is_le(B,
-                                      Nat.add(sr, FH.FH.body_lb(nodup, n, restb2)))
+                          +hcur2 : {Nat.is_le(B, Nat.add(sr, tlb))
                                     == True{} : Bool} =
-                            FOpt.body_lb_step_go(inf, B, sum_ref, c_lb,
-                              FH.FH.body_lb(nodup, n, restb2), ref_c,
-                              Nat.is_lt(ref_c, inf), {==}, hB, hcur,
+                            FOpt.body_lb_step_go(inf, B, sum_ref, c_lb, tlb,
+                              ref_c, Nat.is_lt(ref_c, inf), {==}, hB, hcur1,
                               +hlt =>
-                                Fold.OQ.le_cong_l(c_lb, SolveFast.class_lb(ws),
-                                  ref_c, eclb,
-                                  FLB.FS.child_size_le(p, inf, G, ws, ble, hz,
-                                    hlt)))
+                                LB2.LB2.child_lb_le_ref(p, inf, G, nodup, ws,
+                                  c_lb, ble, hz, hlt, hclb))
                           Fold.OQ.le_cong_r(B,
                             Fold.OQ.ks_cost(inf, S,
                               Eval.Eval.items(p, G, S, g, restg, Nil{}, sr, inf)),
@@ -1499,8 +1587,8 @@ def FOpt.body_lb_le_ks_cost(+groups: +List<Groups.Group>,
                               FVal.FV.ks_cost_items_step(p, inf, G, S, g, fb, ws,
                                 restg, sum_ref)),
                             FOpt.body_lb_le_ks_cost(restg, restb2, p, inf, G,
-                              C_root, n_root, has_buf, S, nodup, g, sr, B, bt,
-                              hz, h3, h6, ngt, hB, hbm2, hcur2))
+                              C_root, n_root, has_buf, S, nodup, g, sr, B, tlb,
+                              bt, hz, h3, h6, ngt, hB, hbm2, htlb_sub, hcur2))
                         case SolveFast.Begin{g2}:
                           Empty.absurd(
                             {Nat.is_le(B, Fold.OQ.ks_cost(inf, S,
@@ -2233,7 +2321,8 @@ def FOpt.live_group_class_sk(+p: Nat, +gs: SolveFast.GList,
                      tlb)) : Bool},
     bt: MV.MV.Bounds(p, MV.MV.next_groups(restg)),
     +ef2: {f2 == fb : +List<Feedback.Color>},
-    +etlb: {tlb == FH.FH.body_lb(nodup, Groups.len_words(S), restb2) : Nat},
+    +etlb: {FH.FH.tail_lb_ok_b(G, nodup, Groups.len_words(S), restb2, tlb)
+            == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
     +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
@@ -2427,19 +2516,12 @@ def FOpt.live_group_class_sk(+p: Nat, +gs: SolveFast.GList,
       +hge_sr_tlb : {Nat.is_le(B, Nat.add(sr, tlb)) == True{} : Bool} =
         FOpt.le_sr_tlb_of_ge(B, sf, sr, tlb, Nat.is_le(B, sr), {==}, hge_sf,
           hsum2)
-      +hge_sr_blb : {Nat.is_le(B,
-                       Nat.add(sr, FH.FH.body_lb(nodup, n, restb2)))
-                     == True{} : Bool} =
-        Fold.OQ.le_cong_r(B, Nat.add(sr, tlb),
-          Nat.add(sr, FH.FH.body_lb(nodup, n, restb2)),
-          Equal.cong(Nat, Nat, x => Nat.add(sr, x),
-            tlb, FH.FH.body_lb(nodup, n, restb2), etlb), hge_sr_tlb)
       +hb_le_r : {Nat.is_le(B, Fold.OQ.ks_cost(inf, S,
                     Eval.Eval.items(p, G, S, g, restg, Nil{}, sr, inf)))
                   == True{} : Bool} =
         FOpt.body_lb_le_ks_cost(restg, restb2, p, inf, G, C_root, n_root,
-          has_buf, S, nodup, g, sr, B, bt, hz, h3, h6, ngt, hbest, hbm2,
-          hge_sr_blb)
+          has_buf, S, nodup, g, sr, B, tlb, bt, hz, h3, h6, ngt, hbest, hbm2,
+          etlb, hge_sr_tlb)
       +ek_step = FVal.FV.ks_cost_items_step(p, inf, G, S, g, fb, ws, restg, sum_ref)
       +hb_le_full : {Nat.is_le(B, Fold.OQ.ks_cost(inf, S,
                        Eval.Eval.items(p, G, S, g,
@@ -2539,7 +2621,8 @@ def FOpt.live_group_class_sr(+p: Nat, +gs: SolveFast.GList,
             : SolveFast.StepRes},
     bt: MV.MV.Bounds(p, MV.MV.next_groups(restg)),
     +ef2: {f2 == fb : +List<Feedback.Color>},
-    +etlb: {tlb == FH.FH.body_lb(nodup, Groups.len_words(S), restb2) : Nat},
+    +etlb: {FH.FH.tail_lb_ok_b(G, nodup, Groups.len_words(S), restb2, tlb)
+            == True{} : Bool},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
     +h6: {Nat.is_lt(6n, inf) == True{} : Bool},
@@ -2647,7 +2730,8 @@ def FOpt.live_group_class_dup2(+p: Nat, +gs: SolveFast.GList,
     +ef2: {f2 == fb : +List<Feedback.Color>},
     +ecws: {SolveFast.cwords_words(cws) == ws : +List<+List<Nat>>},
     +elen: {wlen == Groups.len_words(ws) : Nat},
-    +etlb: {tlb == FH.FH.body_lb(nodup, Groups.len_words(S), restb2) : Nat},
+    +etlb: {FH.FH.tail_lb_ok_b(G, nodup, Groups.len_words(S), restb2, tlb)
+            == True{} : Bool},
     +etlb2: {tlb2 == tlb : Nat},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
@@ -2864,7 +2948,8 @@ def FOpt.live_group_class_dup1(+p: Nat, +gs: SolveFast.GList,
     +ecws: {SolveFast.cwords_words(cws) == ws : +List<+List<Nat>>},
     +elen: {wlen == Groups.len_words(ws) : Nat},
     +hcws: {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws) == True{} : Bool},
-    +etlb: {tlb == FH.FH.body_lb(nodup, Groups.len_words(S), restb2) : Nat},
+    +etlb: {FH.FH.tail_lb_ok_b(G, nodup, Groups.len_words(S), restb2, tlb)
+            == True{} : Bool},
     +etlb2: {tlb2 == tlb : Nat},
     +hz: {Nat.is_lt(0n, inf) == True{} : Bool},
     +h3: {Nat.is_lt(3n, inf) == True{} : Bool},
@@ -3346,7 +3431,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                           {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                            == True{} : Bool},
                                           Arr.Arr.DPair<
-                                            {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                            {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                             == True{} : Bool},
                                             Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                               FH.FH.BodyMatch(G, C_root, n_root,
                                                 has_buf, nodup, n, restg, restb2)>>>>>>,
@@ -3361,7 +3447,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                           {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                            == True{} : Bool},
                                           Arr.Arr.DPair<
-                                            {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                            {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                             == True{} : Bool},
                                             Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                               FH.FH.BodyMatch(G, C_root, n_root,
                                                 has_buf, nodup, n, restg, restb2)>>>>>>,
@@ -3375,7 +3462,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                          {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                           == True{} : Bool},
                                          Arr.Arr.DPair<
-                                           {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                           {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                            == True{} : Bool},
                                            Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                              FH.FH.BodyMatch(G, C_root, n_root,
                                                has_buf, nodup, n, restg, restb2)>>>>>,
@@ -3389,7 +3477,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                         {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               has_buf, nodup, n, restg, restb2)>>>>>,
@@ -3402,7 +3491,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                         {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               has_buf, nodup, n, restg, restb2)>>>>,
@@ -3415,7 +3505,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                       {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                        == True{} : Bool},
                                       Arr.Arr.DPair<
-                                        {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                        {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                         == True{} : Bool},
                                         Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                           FH.FH.BodyMatch(G, C_root, n_root,
                                             has_buf, nodup, n, restg, restb2)>>>>,
@@ -3425,7 +3516,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                       {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                        == True{} : Bool},
                                       Arr.Arr.DPair<
-                                        {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                        {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                         == True{} : Bool},
                                         Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                           FH.FH.BodyMatch(G, C_root, n_root,
                                             has_buf, nodup, n, restg, restb2)>>>,
@@ -3435,7 +3527,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                     {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                      {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                         FH.FH.BodyMatch(G, C_root, n_root,
                                           has_buf, nodup, n, restg, restb2)>>>,
@@ -3444,7 +3537,8 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                     {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                      {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                         FH.FH.BodyMatch(G, C_root, n_root,
                                           has_buf, nodup, n, restg, restb2)>>,
@@ -3453,19 +3547,22 @@ def FOpt.live_groups_ok(+groups: +List<Groups.Group>,
                                   {FH.FH.cwords_ok_if(has_buf, G, C_root, n_root, cws)
                                    == True{} : Bool},
                                   Arr.Arr.DPair<
-                                    {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                    {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                     == True{} : Bool},
                                     Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                       FH.FH.BodyMatch(G, C_root, n_root,
                                         has_buf, nodup, n, restg, restb2)>>,
                                   r4)
                           +etlb = Arr.Arr.dpair_l(
-                                    {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                    {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                     == True{} : Bool},
                                     Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                       FH.FH.BodyMatch(G, C_root, n_root,
                                         has_buf, nodup, n, restg, restb2)>,
                                     r5)
                           +r6 = Arr.Arr.dpair_r(
-                                  {tlb == FH.FH.body_lb(nodup, n, restb2) : Nat},
+                                  {FH.FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                   == True{} : Bool},
                                   Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                     FH.FH.BodyMatch(G, C_root, n_root,
                                       has_buf, nodup, n, restg, restb2)>,
@@ -3986,6 +4083,161 @@ def FOpt.guess_case_ok(+p: Nat, +gs: SolveFast.GList, +G: +List<+List<Nat>>,
                 Equal.sym(SolveRef.Best,
                   Eval.Eval.guess(p, G, S, g, inf, best), best, geq)),
               NatProof.Nat.is_le_refl(Eval.Eval.cost_of(best))))
+        case FH.GCSkipBody{+ord, +body, +tot, +perm}:
+          +n : Nat = Groups.len_words(S)
+          +fl : Nat = FOpt.floor_val(mode, n)
+          +gG : SolveFast.GList = FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{})
+          +full : +List<Groups.Group> = Groups.groups_build(g, S, Nil{})
+          +eits = Arr.Arr.dpair_l({items == Nil{} : +List<SolveFast.Item>},
+                    Arr.Arr.DPair<{Groups.groups_smaller(S, full) == True{} : Bool},
+                      Arr.Arr.DPair<FP.FP.PermOk(perm, full, ord),
+                        Arr.Arr.DPair<
+                          FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                            ord, body),
+                          Arr.Arr.DPair<
+                            {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                             == True{} : Bool},
+                            {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                             == True{} : Bool}>>>>, hgc)
+          +r1 = Arr.Arr.dpair_r({items == Nil{} : +List<SolveFast.Item>},
+                  Arr.Arr.DPair<{Groups.groups_smaller(S, full) == True{} : Bool},
+                    Arr.Arr.DPair<FP.FP.PermOk(perm, full, ord),
+                      Arr.Arr.DPair<
+                        FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                          ord, body),
+                        Arr.Arr.DPair<
+                          {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                           == True{} : Bool},
+                          {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                           == True{} : Bool}>>>>, hgc)
+          +hus = Arr.Arr.dpair_l({Groups.groups_smaller(S, full) == True{} : Bool},
+                   Arr.Arr.DPair<FP.FP.PermOk(perm, full, ord),
+                     Arr.Arr.DPair<
+                       FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                         ord, body),
+                       Arr.Arr.DPair<
+                         {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                          == True{} : Bool},
+                         {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                          == True{} : Bool}>>>, r1)
+          +r2 = Arr.Arr.dpair_r({Groups.groups_smaller(S, full) == True{} : Bool},
+                  Arr.Arr.DPair<FP.FP.PermOk(perm, full, ord),
+                    Arr.Arr.DPair<
+                      FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                        ord, body),
+                      Arr.Arr.DPair<
+                        {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                         == True{} : Bool},
+                        {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                         == True{} : Bool}>>>, r1)
+          +hperm = Arr.Arr.dpair_l(FP.FP.PermOk(perm, full, ord),
+                     Arr.Arr.DPair<
+                       FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                         ord, body),
+                       Arr.Arr.DPair<
+                         {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                          == True{} : Bool},
+                         {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                          == True{} : Bool}>>, r2)
+          +r3 = Arr.Arr.dpair_r(FP.FP.PermOk(perm, full, ord),
+                  Arr.Arr.DPair<
+                    FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                      ord, body),
+                    Arr.Arr.DPair<
+                      {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                       == True{} : Bool},
+                      {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                       == True{} : Bool}>>, r2)
+          +hbm = Arr.Arr.dpair_l(
+                   FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                     ord, body),
+                   Arr.Arr.DPair<
+                     {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                      == True{} : Bool},
+                     {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                      == True{} : Bool}>, r3)
+          +r4 = Arr.Arr.dpair_r(
+                  FH.FH.BodyMatch(G, C_root, n_root, has_buf, nodup, n,
+                    ord, body),
+                  Arr.Arr.DPair<
+                    {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot)
+                     == True{} : Bool},
+                    {Nat.is_le(Eval.Eval.cost_of(best), tot)
+                     == True{} : Bool}>, r3)
+          +htlb = Arr.Arr.dpair_l(
+                    {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot) == True{} : Bool},
+                    {Nat.is_le(Eval.Eval.cost_of(best), tot) == True{} : Bool},
+                    r4)
+          +hle_tot = Arr.Arr.dpair_r(
+                       {FH.FH.tail_lb_ok_b(G, nodup, n, body, tot) == True{} : Bool},
+                       {Nat.is_le(Eval.Eval.cost_of(best), tot) == True{} : Bool},
+                       r4)
+          bounds_full : MV.MV.Bounds(p, MV.MV.next_groups(full)) =
+            MV.MV.group_bounds(p, S, full, ele,
+              GM.GM.groups_smaller_sound(S, full, hus))
+          bounds_ord : MV.MV.Bounds(p, MV.MV.next_groups(ord)) =
+            FP.FP.bounds_perm(perm, p, full, ord, hperm, bounds_full)
+          +ng_full = FN.FN.nodup_ok_next_groups(nodup, full, S,
+                       CoverGroups.Cover.all_subseq_nil(g, S), nd)
+          +ng_ord : {FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(ord))
+                     == True{} : Bool} =
+            Equal.trans(Bool, FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(ord)),
+              FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(full)), True{},
+              Equal.sym(Bool,
+                FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(full)),
+                FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(ord)),
+                FP.FP.nodup_ok_jobs_perm(perm, nodup, full, ord, hperm)),
+              ng_full)
+          +hle_ord : {Nat.is_le(Eval.Eval.cost_of(best),
+                        Fold.OQ.ks_cost(inf, S,
+                          Eval.Eval.items(p, G, S, g, ord, Nil{}, 0n, inf)))
+                      == True{} : Bool} =
+            FOpt.body_lb_le_ks_cost(ord, body, p, inf, G, C_root, n_root,
+              has_buf, S, nodup, g, 0n, Eval.Eval.cost_of(best), tot,
+              bounds_ord, hz, h3, h6, ng_ord, hbest, hbm, htlb, hle_tot)
+          +ks = Eval.Eval.items(p, G, S, g, full, Nil{}, 0n, inf)
+          +cc : Nat = Fold.OQ.ks_cost(inf, S, ks)
+          +ct : Tree.Tree = Fold.OQ.ks_tree(g, ks)
+          +hle_cc : {Nat.is_le(Eval.Eval.cost_of(best), cc) == True{} : Bool} =
+            FP.FP.ks_cost_le_of_perm(perm, p, inf, G, S, g, full, ord,
+              Eval.Eval.cost_of(best), hperm, hbest, hle_ord)
+          +eg_blk : {Eval.Eval.guess(p, G, S, g, inf, best)
+                     == Eval.Eval.block(p, G, S, g, inf, full, best)
+                     : SolveRef.Best} =
+            Equal.cong(Bool, SolveRef.Best,
+              u => Eval.Eval.guess_bool(p, G, S, g, full, inf, u, best),
+              Groups.groups_smaller(S, full), True{}, hus)
+          +hlet : {Nat.is_le(Eval.Eval.cost_of(best),
+                     Eval.Eval.cost_of(Eval.Eval.guess(p, G, S, g, inf, best)))
+                   == True{} : Bool} =
+            Fold.OQ.le_cong_r(Eval.Eval.cost_of(best),
+              Eval.Eval.cost_of(SolveRef.better(cc, ct, best)),
+              Eval.Eval.cost_of(Eval.Eval.guess(p, G, S, g, inf, best)),
+              Equal.trans(Nat,
+                Eval.Eval.cost_of(SolveRef.better(cc, ct, best)),
+                Eval.Eval.cost_of(Eval.Eval.block(p, G, S, g, inf, full, best)),
+                Eval.Eval.cost_of(Eval.Eval.guess(p, G, S, g, inf, best)),
+                Equal.sym(Nat,
+                  Eval.Eval.cost_of(
+                    Eval.Eval.block(p, G, S, g, inf, full, best)),
+                  Eval.Eval.cost_of(SolveRef.better(cc, ct, best)),
+                  Fold.OQ.block_cost_eq(inf, g, S, ks, best)),
+                Equal.cong(SolveRef.Best, Nat, Eval.Eval.cost_of,
+                  Eval.Eval.block(p, G, S, g, inf, full, best),
+                  Eval.Eval.guess(p, G, S, g, inf, best),
+                  Equal.sym(SolveRef.Best,
+                    Eval.Eval.guess(p, G, S, g, inf, best),
+                    Eval.Eval.block(p, G, S, g, inf, full, best), eg_blk))),
+              FVal.FV.le_better_of_le_both(Eval.Eval.cost_of(best), cc, ct,
+                best, hle_cc, NatProof.Nat.is_le_refl(Eval.Eval.cost_of(best))))
+          %Equal.sym(+List<SolveFast.Item>, items, Nil{}, eits) :
+            FOpt.StepRes(p, gs, G, C_root, n_root, has_buf, gG, cwS, S, nodup,
+              fl, inf, Nil{}, _, Nil{}, 0n, best, buf, limit,
+              Eval.Eval.cost_of(Eval.Eval.guess(p, G, S, g, inf, best)))
+          FOpt.step_res_keep(p, gs, G, C_root, n_root, has_buf, gG, cwS, S,
+            nodup, fl, inf, best, buf, limit,
+            Eval.Eval.cost_of(Eval.Eval.guess(p, G, S, g, inf, best)),
+            hbuf, hok, hd, hlet)
         case FH.GCLive{+ord, +body, +perm}:
           +n : Nat = Groups.len_words(S)
           +fl : Nat = FOpt.floor_val(mode, n)
@@ -4320,7 +4572,8 @@ def FOpt.walk_pop_dup(+p: Nat, +G: +List<+List<Nat>>,
       FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, Groups.len_words(S),
       nodup, FOpt.floor_val(mode, Groups.len_words(S)), inf,
       Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{}, False{},
-      SolveFast.guess_items_buf(nodup, row, g, cwS, Groups.len_words(S),
+      SolveFast.guess_items_buf(nodup, row, g,
+        FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, Groups.len_words(S),
         FOpt.floor_val(mode, Groups.len_words(S)), best, buf))):
   (b1, dp2) = dp
   (b2, pe) = dp2
@@ -4342,32 +4595,33 @@ def FOpt.walk_pop_dup(+p: Nat, +G: +List<+List<Nat>>,
       FN.FN.nodup_ok(nodup, S), True{},
       Equal.cong(+List<+List<Nat>>, Bool, l => FN.FN.nodup_ok(nodup, l),
         SolveFast.cwords_words(cwS), S, ecwS), nd)
-  +hr2_cw = FH.FH.guess_items_buf_spec(G, C_root, n_root, has_buf, nodup, row,
-              g, cwS, n, fl, best, b2, en, hnd_cw, hrow, hcwS, hbuf2)
+  +hr2_cw = FTight.FTight.guess_items_buf_spec(rwsG, G, C_root, n_root, has_buf,
+              nodup, row, g, cwS, n, fl, best, b2, erwsG, hrwsG, en, hnd_cw,
+              hrow, hcwS, hbuf2)
   +hr2 : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best,
-           SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2)) =
+           SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b2)) =
     %ecwS : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, _, n, fl,
               best,
-              SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2))
+              SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b2))
     hr2_cw
-  +er : {SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2)
-         == SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b1)
+  +er : {SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b2)
+         == SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b1)
          : SolveFast.GuessRes} =
     Equal.cong(SolveFast.Buf5, SolveFast.GuessRes,
-      b => SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b),
+      b => SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b),
       b2, b1, eb2)
   +hr1 : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best,
-           SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b1)) =
+           SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b1)) =
     %er : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best, _)
     hr2
   %eb1 : FOpt.JobResSpec(1n+p, inf, G, C_root, n_root, has_buf, nodup, S, limit,
            SolveFast.step(1n+p, gt, 1n, Nil{}, gG, cwS, n, nodup, fl, inf,
              Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{},
              False{},
-             SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, _)))
+             SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, _)))
   FOpt.walk_pop_go(p, G, C_root, n_root, has_buf, rwsG, cwS, S, nodup, mode,
     inf, g, t, tail, best, limit,
-    SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b1), hr1,
+    SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b1), hr1,
     erwsG, hrwsG, wg, ele, hz, h1, h3, h6, ai, nd, hbest, hok, hd, hinv, ecif,
     rec)
 
@@ -4472,7 +4726,7 @@ def FOpt.walk_cons(+p: Nat, +G: +List<+List<Nat>>,
         S, limit,
         SolveFast.step(1n+p, gt, 1n, Nil{}, gG, cwS, n, nodup, fl, inf, Nil{},
           Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{}, False{},
-          SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, buf)),
+          SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, buf)),
         SolveFast.step(1n+p, SolveFast.GTry{row, g, gt}, 0n, Nil{}, gG, cwS, n,
           nodup, fl, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(),
           False{}, False{}, SolveFast.GuessRes{Nil{}, buf}),
@@ -4484,7 +4738,7 @@ def FOpt.walk_cons(+p: Nat, +G: +List<+List<Nat>>,
           SolveFast.step(1n+p, gt, 1n, Nil{}, gG, cwS, n, nodup, fl, inf,
             Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{},
             False{},
-            SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, buf)),
+            SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, buf)),
           FS.FS.pop_guess_succ(p, row, g, gt, gG, cwS, n, nodup, fl, inf, best,
             buf)),
         FOpt.walk_pop_dup(p, G, C_root, n_root, has_buf, rwsG, cwS, S, nodup,

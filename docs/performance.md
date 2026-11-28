@@ -7,15 +7,17 @@ The exact solver in `src/solve.bend` (the `k = 1` instance of `src/solve_k.bend`
 (`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend`). It uses a precomputed `|G| x |C|`
 `Array<U32>` feedback table and single root-threaded `Buf5` scratch buffer for 5-letter
 duplicate-free runs, Pass-1 root bucket sorting by depth-two lower bound (`n + 2*m - k`), top-5
-table-backed `greedy(lb)` upper-bound seeding (`src/greedy.bend`), depth-two lower bounds, tight
-recursive cutoff propagation, O(1) singleton, duplicate-free two-word, and table-backed three-word
-(`DoneItem`) class resolution, largest-class-first child ordering, candidate-first staged search
-(`S` before `G` with a `2*|S|` post-`S` floor and stage-2 self-guess skipping), and mid-histogram
-collision-budget early abort. The exhaustive reference solver in `src/solve_ref.bend`
-(`Ref.solve_valid`, `Ref.solve_optimal`) and the parallel root solver in `src/solve_par.bend`
-(`Par.solve_eq`) stay in the tree as specifications. The full bundled lists in `words/` still need
-stronger interior lower bounds (such as sibling-level depth-two tightening and capacity bounds) and
-interior move ordering; speed is the remaining work, correctness is not.
+table-backed `greedy(lb)` upper-bound seeding (`src/greedy.bend`), depth-two lower bounds,
+sibling-level depth-two lookahead tightening (`tighten_bigs_go` / `scan_lb2_step` on classes of
+size `>= 8`, tightening per-class bounds before child recursion and pruning the parent guess
+immediately when the combined lower bound reaches `best_cost`), tight recursive cutoff propagation,
+O(1) singleton, duplicate-free two-word, and table-backed three-word (`DoneItem`) class resolution,
+largest-class-first child ordering, candidate-first staged search (`S` before `G` with a `2*|S|`
+post-`S` floor and stage-2 self-guess skipping), and mid-histogram collision-budget early abort. The
+exhaustive reference solver in `src/solve_ref.bend` (`Ref.solve_valid`, `Ref.solve_optimal`) and
+the parallel root solver in `src/solve_par.bend` (`Par.solve_eq`) stay in the tree as
+specifications. The full bundled lists in `words/` still need stronger interior lower bounds (such
+as capacity bounds) and interior move ordering; speed is the remaining work, correctness is not.
 
 ## Seeded and chunked root
 

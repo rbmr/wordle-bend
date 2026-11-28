@@ -51,6 +51,7 @@ import ./fast_perm.bend as FP
 import ./fast_tbl.bend as FT
 import ./fast_three.bend as FT3
 import ./fast_hist5.bend as FH
+import ./fast_tight.bend as FTight
 import ./fast_valid.bend as FVal
 import ./fast_opt.bend as FOpt
 import ./par_fold.bend as ParFold
@@ -460,7 +461,8 @@ def P.walk_pop_dup(+p: Nat, +G: +List<+List<Nat>>,
       FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, Groups.len_words(S),
       nodup, FOpt.FOpt.floor_val(mode, Groups.len_words(S)), inf,
       Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{}, False{},
-      SolveFast.guess_items_buf(nodup, row, g, cwS, Groups.len_words(S),
+      SolveFast.guess_items_buf(nodup, row, g,
+        FT.FT.glist_of_rws(rwsG, SolveFast.GEnd{}), cwS, Groups.len_words(S),
         FOpt.FOpt.floor_val(mode, Groups.len_words(S)), best, buf))):
   (b1, dp2) = dp
   (b2, pe) = dp2
@@ -482,32 +484,33 @@ def P.walk_pop_dup(+p: Nat, +G: +List<+List<Nat>>,
       FN.FN.nodup_ok(nodup, S), True{},
       Equal.cong(+List<+List<Nat>>, Bool, l => FN.FN.nodup_ok(nodup, l),
         SolveFast.cwords_words(cwS), S, ecwS), nd)
-  +hr2_cw = FH.FH.guess_items_buf_spec(G, C_root, n_root, has_buf, nodup, row,
-              g, cwS, n, fl, best, b2, en, hnd_cw, hrow, hcwS, hbuf2)
+  +hr2_cw = FTight.FTight.guess_items_buf_spec(rwsG, G, C_root, n_root, has_buf,
+              nodup, row, g, cwS, n, fl, best, b2, erwsG, hrwsG, en, hnd_cw,
+              hrow, hcwS, hbuf2)
   +hr2 : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best,
-           SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2)) =
+           SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b2)) =
     %ecwS : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, _, n, fl,
               best,
-              SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2))
+              SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b2))
     hr2_cw
-  +er : {SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b2)
-         == SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b1)
+  +er : {SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b2)
+         == SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b1)
          : SolveFast.GuessRes} =
     Equal.cong(SolveFast.Buf5, SolveFast.GuessRes,
-      b => SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b),
+      b => SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b),
       b2, b1, eb2)
   +hr1 : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best,
-           SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b1)) =
+           SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b1)) =
     %er : FH.FH.GuessSpec(G, C_root, n_root, has_buf, nodup, g, S, n, fl, best, _)
     hr2
   %eb1 : P.ChunkSpec(1n+p, inf, G, gs, C_root, n_root, has_buf, nodup, S, limit,
            SolveFast.step(1n+p, gt, 1n, Nil{}, gG, cwS, n, nodup, fl, inf,
              Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{},
              False{},
-             SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, _)))
+             SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, _)))
   P.walk_pop_go(p, G, gs, C_root, n_root, has_buf, rwsG, cwS, S, nodup, mode,
     inf, g, t, tail, best, limit,
-    SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, b1), hr1,
+    SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, b1), hr1,
     erwsG, hrwsG, wg, ele, hz, h1, h3, h6, ai, nd, hbest, hok, hd, hinv, ecif,
     rec)
 
@@ -613,7 +616,7 @@ def P.walk_cons(+p: Nat, +G: +List<+List<Nat>>,
         S, limit,
         SolveFast.step(1n+p, gt, 1n, Nil{}, gG, cwS, n, nodup, fl, inf, Nil{},
           Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{}, False{},
-          SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, buf)),
+          SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, buf)),
         SolveFast.step(1n+p, SolveFast.GTry{row, g, gt}, 0n, Nil{}, gG, cwS, n,
           nodup, fl, inf, Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(),
           False{}, False{}, SolveFast.GuessRes{Nil{}, buf}),
@@ -625,7 +628,7 @@ def P.walk_cons(+p: Nat, +G: +List<+List<Nat>>,
           SolveFast.step(1n+p, gt, 1n, Nil{}, gG, cwS, n, nodup, fl, inf,
             Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{},
             False{},
-            SolveFast.guess_items_buf(nodup, row, g, cwS, n, fl, best, buf)),
+            SolveFast.guess_items_buf(nodup, row, g, gG, cwS, n, fl, best, buf)),
           FS.FS.pop_guess_succ(p, row, g, gt, gG, cwS, n, nodup, fl, inf, best,
             buf)),
         P.walk_pop_dup(p, G, gs, C_root, n_root, has_buf, rwsG, cwS, S, nodup,
