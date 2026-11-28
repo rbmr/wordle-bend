@@ -1387,7 +1387,7 @@ def rev_cwords_len(+xs: +List<CWord>, +acc: +List<CWord>,
       rev_cwords_len(t, cw <> acc, Nat.add(1n, len))
 
 type BigClass is Data:
-  BigClass{fb: +List<Feedback.Color>, ws: +List<CWord>, len: Nat}
+  BigClass{fb: +List<Feedback.Color>, ws: +List<CWord>, len: Nat, clb: Nat}
 
 def next_big_le(+len: Nat, +bs: +List<BigClass>) -> Bool:
   match bs:
@@ -1395,7 +1395,7 @@ def next_big_le(+len: Nat, +bs: +List<BigClass>) -> Bool:
       True{}
     case Con{h, t}:
       match h:
-        case BigClass{fb2, ws2, len2}:
+        case BigClass{fb2, ws2, len2, clb2}:
           Nat.is_le(len, len2)
 
 def insert_big(+bc: BigClass, +len: Nat, +bs: +List<BigClass>,
@@ -1416,8 +1416,7 @@ def emit_bigs(+bs: +List<BigClass>, +rem_lb: Nat, +acc: +List<Item>) -> +List<It
       acc
     case Con{bc, rest}:
       match bc:
-        case BigClass{+fb, +ws, +len}:
-          +clb = Nat.sub(Nat.add(len, len), 1n)
+        case BigClass{+fb, +ws, +len, +clb}:
           emit_bigs(rest, Nat.add(clb, rem_lb),
             ClassItem{fb, ws, len, rem_lb} <> (Add{fb, rem_lb} <> acc))
 
@@ -1533,8 +1532,9 @@ def drain5_add_ge2(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                    rl: RevCWordsLen) -> Drain5State:
   match rl:
     case RevCWordsLen{+len, +ws}:
+      +clb = Nat.sub(Nat.add(len, len), 1n)
       Drain5State{buckets, tbl, rem_lb, items,
-        insert_big(BigClass{fb, ws, len}, len, bigs, next_big_le(len, bigs))}
+        insert_big(BigClass{fb, ws, len, clb}, len, bigs, next_big_le(len, bigs))}
 
 def drain5_add_three(+fb: +List<Feedback.Color>, +rem_lb: Nat,
                      +items: +List<Item>, +bigs: +List<BigClass>,
@@ -1594,6 +1594,169 @@ def drain5_go(+touched: +List<U32>, st: Drain5State) -> Drain5State:
             drain5_swap(code, rem_lb, items, bigs, tbl,
               Array.swap(+List<CWord>, buckets, code, Nil{})))
 
+# Sibling-level depth-two lookahead tightening for large classes (`len >= 8`).
+# Scans candidate guesses `ws` then `glist_G` using `hist5_go` to tighten a
+# class's lower bound above `2*len - 1`, pruning the parent guess immediately
+# when the combined lower bound reaches `best_cost(best)`.
+type LB2Res is Type:
+  LB2Res{lb: Nat, seen: Array<Nat>, tbl: Array<U32>, gen: Nat, hit: Bool}
+
+def lb2_pick_min(+lb: Nat, +cur: Nat, lt: Bool) -> Nat:
+  match lt:
+    case True{}:
+      lb
+    case False{}:
+      cur
+
+def lb2_hist_usable(+len: Nat, +cur: Nat, +floor: Nat, +m: Nat, +k: Nat,
+                    seen2: Array<Nat>, tbl2: Array<U32>, +gen2: Nat,
+                    usable: Bool) -> LB2Res:
+  match usable:
+    case False{}:
+      LB2Res{cur, seen2, tbl2, gen2, Nat.is_le(cur, floor)}
+    case True{}:
+      +lb = Nat.sub(Nat.add(len, Nat.add(m, m)), k)
+      +cur2 = lb2_pick_min(lb, cur, Nat.is_lt(lb, cur))
+      LB2Res{cur2, seen2, tbl2, gen2, Nat.is_le(cur2, floor)}
+
+def lb2_hist_res(+len: Nat, +cur: Nat, +floor: Nat, +gen: Nat,
+                 hr: Hist5Res) -> LB2Res:
+  match hr:
+    case Hist5Pruned{seen2, tbl2}:
+      LB2Res{cur, seen2, tbl2, Nat.add(1n, gen), Nat.is_le(cur, floor)}
+    case Hist5Ok{seen2, tbl2, +m, +k, budget}:
+      lb2_hist_usable(len, cur, floor, m, k, seen2, tbl2, Nat.add(1n, gen),
+        Bool.or(Nat.is_lt(m, len), Nat.is_le(2n, k)))
+
+def lb2_bgt(+len: Nat, +cur: Nat, skip_self: Bool) -> Nat:
+  match skip_self:
+    case True{}:
+      Nat.sub(Nat.sub(cur, Nat.add(len, len)), 1n)
+    case False{}:
+      Nat.sub(cur, Nat.add(len, len))
+
+def scan_lb2_step(+gs: GList, +ws: +List<CWord>, +len: Nat, +floor: Nat,
+                  +skip_self: Bool, st: LB2Res) -> LB2Res:
+  match gs:
+    case GEnd{}:
+      st
+    case GThen{grest}:
+      match st:
+        case LB2Res{+cur, seen, tbl, +gen, hit}:
+          match hit:
+            case True{}:
+              LB2Res{cur, seen, tbl, gen, True{}}
+            case False{}:
+              +fl2 = Nat.add(len, len)
+              scan_lb2_step(grest, ws, len, fl2, True{},
+                LB2Res{cur, seen, tbl, gen, Nat.is_le(cur, fl2)})
+    case GTry{+row, +g, +grest}:
+      match st:
+        case LB2Res{+cur, seen, tbl, +gen, hit}:
+          match hit:
+            case True{}:
+              LB2Res{cur, seen, tbl, gen, True{}}
+            case False{}:
+              +bgt = lb2_bgt(len, cur, skip_self)
+              scan_lb2_step(grest, ws, len, floor, skip_self,
+                lb2_hist_res(len, cur, floor, gen,
+                  hist5_go(row, ws, gen, skip_self,
+                    Hist5Ok{seen, tbl, 0n, 0n, bgt})))
+
+def bigs_lb_sum(+bs: +List<BigClass>, +acc: Nat) -> Nat:
+  match bs:
+    case Nil{}:
+      acc
+    case Con{bc, rest}:
+      match bc:
+        case BigClass{fb, ws, len, +clb}:
+          bigs_lb_sum(rest, Nat.add(clb, acc))
+
+type TightRes is Type:
+  TightPruned{seen: Array<Nat>, tbl: Array<U32>, gen: Nat}
+  TightOk{total_lb: Nat, bigs: +List<BigClass>, seen: Array<Nat>,
+          tbl: Array<U32>, gen: Nat}
+
+def tighten_one_check(+fb: +List<Feedback.Color>, +ws: +List<CWord>,
+                      +len: Nat, +new_clb: Nat, +new_tot: Nat,
+                      +rest_bigs: +List<BigClass>, seen2: Array<Nat>,
+                      tbl2: Array<U32>, +gen2: Nat, pruned: Bool) -> TightRes:
+  match pruned:
+    case True{}:
+      TightPruned{seen2, tbl2, gen2}
+    case False{}:
+      TightOk{new_tot, BigClass{fb, ws, len, new_clb} <> rest_bigs,
+              seen2, tbl2, gen2}
+
+def tighten_one_finish(+fb: +List<Feedback.Color>, +ws: +List<CWord>,
+                       +len: Nat, +base_lb: Nat, +b_cost: Nat,
+                       +rest_bigs: +List<BigClass>, lr: LB2Res) -> TightRes:
+  match lr:
+    case LB2Res{+new_clb, seen2, tbl2, +gen2, hit}:
+      +new_tot = Nat.add(new_clb, base_lb)
+      tighten_one_check(fb, ws, len, new_clb, new_tot, rest_bigs,
+        seen2, tbl2, gen2, Nat.is_le(b_cost, new_tot))
+
+def tighten_one(+glist_G: GList, +fb: +List<Feedback.Color>, +ws: +List<CWord>,
+                +len: Nat, +old_clb: Nat, +total_lb: Nat, +b_cost: Nat,
+                +rest_bigs: +List<BigClass>, seen: Array<Nat>, tbl: Array<U32>,
+                +gen: Nat, do_scan: Bool) -> TightRes:
+  match do_scan:
+    case False{}:
+      TightOk{total_lb, BigClass{fb, ws, len, old_clb} <> rest_bigs,
+              seen, tbl, gen}
+    case True{}:
+      +slack = Nat.sub(b_cost, total_lb)
+      +cap = Nat.add(old_clb, slack)
+      +base_lb = Nat.sub(total_lb, old_clb)
+      +fl = Nat.sub(Nat.add(len, len), 1n)
+      tighten_one_finish(fb, ws, len, base_lb, b_cost, rest_bigs,
+        scan_lb2_step(glist_of_cwords(ws, GThen{glist_G}), ws, len, fl, False{},
+          LB2Res{cap, seen, tbl, gen, Nat.is_le(cap, fl)}))
+
+def tighten_bigs_step(+glist_G: GList, +fb: +List<Feedback.Color>,
+                      +ws: +List<CWord>, +len: Nat, +clb: Nat, +b_cost: Nat,
+                      tr: TightRes) -> TightRes:
+  match tr:
+    case TightPruned{seen2, tbl2, +gen2}:
+      TightPruned{seen2, tbl2, gen2}
+    case TightOk{+tot2, +rest2, seen2, tbl2, +gen2}:
+      tighten_one(glist_G, fb, ws, len, clb, tot2, b_cost, rest2,
+        seen2, tbl2, gen2, Nat.is_le(8n, len))
+
+def tighten_bigs_go(+glist_G: GList, +bs: +List<BigClass>, +total_lb: Nat,
+                    +b_cost: Nat, seen: Array<Nat>, tbl: Array<U32>,
+                    +gen: Nat) -> TightRes:
+  match bs:
+    case Nil{}:
+      TightOk{total_lb, Nil{}, seen, tbl, gen}
+    case Con{bc, rest}:
+      match bc:
+        case BigClass{+fb, +ws, +len, +clb}:
+          tighten_bigs_step(glist_G, fb, ws, len, clb, b_cost,
+            tighten_bigs_go(glist_G, rest, total_lb, b_cost, seen, tbl, gen))
+
+def finish_tight(+g: +List<Nat>, +rem_lb: Nat, +items: +List<Item>,
+                 buckets3: Array<+List<CWord>>, tr: TightRes) -> GuessRes:
+  match tr:
+    case TightPruned{seen2, tbl2, +gen2}:
+      GuessRes{Nil{}, Buf5{seen2, buckets3, tbl2, gen2}}
+    case TightOk{+tot2, +bigs2, seen2, tbl2, +gen2}:
+      GuessRes{Begin{g} <> emit_bigs(bigs2, rem_lb, items),
+               Buf5{seen2, buckets3, tbl2, gen2}}
+
+def finish_drain5_check(+g: +List<Nat>, +glist_G: GList, +b_cost: Nat,
+                        +rem_lb: Nat, +total_lb: Nat, +items: +List<Item>,
+                        +bigs: +List<BigClass>, seen: Array<Nat>,
+                        buckets3: Array<+List<CWord>>, tbl3: Array<U32>,
+                        +gen2: Nat, skip: Bool) -> GuessRes:
+  match skip:
+    case True{}:
+      GuessRes{Nil{}, Buf5{seen, buckets3, tbl3, gen2}}
+    case False{}:
+      finish_tight(g, rem_lb, items, buckets3,
+        tighten_bigs_go(glist_G, bigs, total_lb, b_cost, seen, tbl3, gen2))
+
 def finish_drain5(+g: +List<Nat>, seen: Array<Nat>, +gen2: Nat,
                   dr: Drain5State) -> GuessRes:
   match dr:
@@ -1608,36 +1771,56 @@ def run_drain5(+g: +List<Nat>, +n: Nat, seen: Array<Nat>, +gen2: Nat,
       finish_drain5(g, seen, gen2,
         drain5_go(touched, Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
 
-def schedule5_lb(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                 seen: Array<Nat>, buckets: Array<+List<CWord>>,
-                 tbl: Array<U32>, +gen2: Nat, skip: Bool) -> GuessRes:
+def finish_drain5_tight(+g: +List<Nat>, +glist_G: GList, +best: SolveRef.Best,
+                        seen: Array<Nat>, +gen2: Nat, dr: Drain5State) -> GuessRes:
+  match dr:
+    case Drain5State{buckets3, tbl3, +rem_lb, +items, +bigs}:
+      +tot = bigs_lb_sum(bigs, rem_lb)
+      +bc = best_cost(best)
+      finish_drain5_check(g, glist_G, bc, rem_lb, tot, items, bigs,
+        seen, buckets3, tbl3, gen2, Nat.is_le(bc, tot))
+
+def run_drain5_tight(+g: +List<Nat>, +glist_G: GList, +n: Nat,
+                     +best: SolveRef.Best, seen: Array<Nat>, +gen2: Nat,
+                     fs: Fill5State) -> GuessRes:
+  match fs:
+    case Fill5State{buckets2, tbl2, +touched}:
+      finish_drain5_tight(g, glist_G, best, seen, gen2,
+        drain5_go(touched, Drain5State{buckets2, tbl2, n, End{} <> Nil{}, Nil{}}))
+
+def schedule5_lb(+row: U32, +g: +List<Nat>, +glist_G: GList, +S: +List<CWord>,
+                 +n: Nat, +best: SolveRef.Best, seen: Array<Nat>,
+                 buckets: Array<+List<CWord>>, tbl: Array<U32>,
+                 +gen2: Nat, skip: Bool) -> GuessRes:
   match skip:
     case True{}:
       GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2}}
     case False{}:
-      run_drain5(g, n, seen, gen2,
+      run_drain5_tight(g, glist_G, n, best, seen, gen2,
         fill5_go(row, S, Fill5State{buckets, tbl, Nil{}}))
 
-def schedule5_usable(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                     +best: SolveRef.Best, seen: Array<Nat>,
-                     buckets: Array<+List<CWord>>, tbl: Array<U32>,
-                     +gen2: Nat, +m: Nat, +k: Nat, usable: Bool) -> GuessRes:
+def schedule5_usable(+row: U32, +g: +List<Nat>, +glist_G: GList,
+                     +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                     seen: Array<Nat>, buckets: Array<+List<CWord>>,
+                     tbl: Array<U32>, +gen2: Nat, +m: Nat, +k: Nat,
+                     usable: Bool) -> GuessRes:
   match usable:
     case False{}:
       GuessRes{Nil{}, Buf5{seen, buckets, tbl, gen2}}
     case True{}:
       +lb = Nat.sub(Nat.add(n, Nat.add(m, m)), k)
-      schedule5_lb(row, g, S, n, seen, buckets, tbl, gen2,
+      schedule5_lb(row, g, glist_G, S, n, best, seen, buckets, tbl, gen2,
         skippable(best, lb))
 
-def schedule5_hist(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                   +best: SolveRef.Best, buckets: Array<+List<CWord>>,
-                   +gen: Nat, hr: Hist5Res) -> GuessRes:
+def schedule5_hist(+row: U32, +g: +List<Nat>, +glist_G: GList,
+                   +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                   buckets: Array<+List<CWord>>, +gen: Nat,
+                   hr: Hist5Res) -> GuessRes:
   match hr:
     case Hist5Pruned{seen2, tbl2}:
       GuessRes{Nil{}, Buf5{seen2, buckets, tbl2, Nat.add(1n, gen)}}
     case Hist5Ok{seen2, tbl2, +m, +k, budget}:
-      schedule5_usable(row, g, S, n, best, seen2, buckets, tbl2,
+      schedule5_usable(row, g, glist_G, S, n, best, seen2, buckets, tbl2,
         Nat.add(1n, gen), m, k,
         Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))
 
@@ -1648,8 +1831,9 @@ def budget_for(+n: Nat, +best: SolveRef.Best, skip_self: Bool) -> Nat:
     case False{}:
       Nat.sub(best_cost(best), Nat.add(n, n))
 
-def guess_body_buf_ge2(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                       +best: SolveRef.Best, +skip_self: Bool, buf: Buf5) -> GuessRes:
+def guess_body_buf_ge2(+row: U32, +g: +List<Nat>, +glist_G: GList,
+                       +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                       +skip_self: Bool, buf: Buf5) -> GuessRes:
   match buf:
     case NoBuf{}:
       +fg = fgroups_build_fast(g, cwords_words(S), Nil{})
@@ -1657,7 +1841,7 @@ def guess_body_buf_ge2(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
                NoBuf{}}
     case Buf5{seen, buckets, tbl, +gen}:
       +budget0 = budget_for(n, best, skip_self)
-      schedule5_hist(row, g, S, n, best, buckets, gen,
+      schedule5_hist(row, g, glist_G, S, n, best, buckets, gen,
         hist5_go(row, S, gen, skip_self, Hist5Ok{seen, tbl, 0n, 0n, budget0}))
 
 # How many candidates `S` holds, capped at two. Reading the shape in a
@@ -1692,8 +1876,9 @@ def guess_body_buf_one(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
       GuessRes{schedule_one_guess(g, best, word_eq_fast(g, cword_w(cw))), buf}
 
 def guess_body_shape(sh: CWordsShape, +row: U32, +g: +List<Nat>,
-                     +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
-                     +skip_self: Bool, buf: Buf5) -> GuessRes:
+                     +glist_G: GList, +S: +List<CWord>, +n: Nat,
+                     +best: SolveRef.Best, +skip_self: Bool,
+                     buf: Buf5) -> GuessRes:
   match sh:
     case ShapeNil{}:
       +fg = fgroups_build_fast(g, Nil{}, Nil{})
@@ -1702,37 +1887,39 @@ def guess_body_shape(sh: CWordsShape, +row: U32, +g: +List<Nat>,
     case ShapeOne{}:
       guess_body_buf_one(row, g, S, n, best, skip_self, buf)
     case ShapeMany{}:
-      guess_body_buf_ge2(row, g, S, n, best, skip_self, buf)
+      guess_body_buf_ge2(row, g, glist_G, S, n, best, skip_self, buf)
 
-def guess_body_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                   +best: SolveRef.Best, +skip_self: Bool, buf: Buf5) -> GuessRes:
-  guess_body_shape(cwords_shape(S), row, g, S, n, best, skip_self, buf)
+def guess_body_buf(+row: U32, +g: +List<Nat>, +glist_G: GList,
+                   +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                   +skip_self: Bool, buf: Buf5) -> GuessRes:
+  guess_body_shape(cwords_shape(S), row, g, glist_G, S, n, best, skip_self, buf)
 
-def guess_items_mem_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                        +best: SolveRef.Best, +skip_self: Bool, buf: Buf5,
-                        in_s: Bool) -> GuessRes:
+def guess_items_mem_buf(+row: U32, +g: +List<Nat>, +glist_G: GList,
+                        +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                        +skip_self: Bool, buf: Buf5, in_s: Bool) -> GuessRes:
   match in_s:
     case True{}:
-      guess_body_buf(row, g, S, n, best, skip_self, buf)
+      guess_body_buf(row, g, glist_G, S, n, best, skip_self, buf)
     case False{}:
       GuessRes{Nil{}, buf}
 
-def guess_items_nodup_buf(+row: U32, +g: +List<Nat>, +S: +List<CWord>, +n: Nat,
-                          +best: SolveRef.Best, +skip_self: Bool, buf: Buf5,
-                          le_2n: Bool) -> GuessRes:
+def guess_items_nodup_buf(+row: U32, +g: +List<Nat>, +glist_G: GList,
+                          +S: +List<CWord>, +n: Nat, +best: SolveRef.Best,
+                          +skip_self: Bool, buf: Buf5, le_2n: Bool) -> GuessRes:
   match le_2n:
     case False{}:
-      guess_body_buf(row, g, S, n, best, skip_self, buf)
+      guess_body_buf(row, g, glist_G, S, n, best, skip_self, buf)
     case True{}:
-      guess_items_mem_buf(row, g, S, n, best, skip_self, buf,
+      guess_items_mem_buf(row, g, glist_G, S, n, best, skip_self, buf,
         member_word_fast(g, cwords_words(S)))
 
-def guess_items_buf(+nodup: Bool, +row: U32, +g: +List<Nat>, +S: +List<CWord>,
-                    +n: Nat, +floor: Nat, +best: SolveRef.Best, buf: Buf5) -> GuessRes:
+def guess_items_buf(+nodup: Bool, +row: U32, +g: +List<Nat>, +glist_G: GList,
+                    +S: +List<CWord>, +n: Nat, +floor: Nat,
+                    +best: SolveRef.Best, buf: Buf5) -> GuessRes:
   match nodup:
     case True{}:
       +skip_self = Nat.is_eq(floor, Nat.add(n, n))
-      guess_items_nodup_buf(row, g, S, n, best, skip_self, buf,
+      guess_items_nodup_buf(row, g, glist_G, S, n, best, skip_self, buf,
         skippable(best, Nat.add(n, n)))
     case False{}:
       +ws = cwords_words(S)
@@ -2078,7 +2265,7 @@ def step(+fuel: Nat, +gs: GList, +phase: Nat, +cs: +List<Item>,
                           step(fuel, grest, 1n, Nil{}, glist_G, S, n,
                                nodup, floor, inf, Nil{}, Nil{}, 0n, best,
                                dummy_step_zero(), False{}, False{},
-                               guess_items_buf(nodup, row2, g2, S, n, floor, best, buf))
+                               guess_items_buf(nodup, row2, g2, glist_G, S, n, floor, best, buf))
                 case Con{item, rest}:
                   match item:
                     case Begin{g3}:

@@ -36,6 +36,7 @@ import ./fast_fb5.bend as FF5
 import ./fast_perm.bend as FP
 import ./fast_tbl.bend as FT
 import ./fast_three.bend as FT3
+import ./fast_lb2.bend as LB2
 
 # ---------------------------------------------------------------------------
 # Small Nat and Bool helpers
@@ -3230,6 +3231,120 @@ def FH.body_lb(+nodup: Bool, +n: Nat, +body: +List<SolveFast.Item>) -> Nat:
         case SolveFast.End{}:
           n
 
+def FH.nat_sub_self(x: Nat) -> {Nat.sub(x, x) == 0n : Nat}:
+  match x:
+    case 0n:
+      {==}
+    case 1n+p:
+      FH.nat_sub_self(p)
+
+def FH.le_add_l(+a: Nat, +b: Nat) ->
+  {Nat.is_le(a, Nat.add(a, b)) == True{} : Bool}:
+  match a:
+    case 0n:
+      NatProof.Nat.is_le_zero_l(b)
+    case 1n+p:
+      FH.le_add_l(p, b)
+
+def FH.le_add_r(+a: Nat, +b: Nat) ->
+  {Nat.is_le(b, Nat.add(a, b)) == True{} : Bool}:
+  NatProof.Nat.is_le_eq_r(b, Nat.add(b, a), Nat.add(a, b),
+    NatProof.NatPrf.add_comm(b, a), FH.le_add_l(b, a))
+
+# Certified lower-bound predicate for a schedule body `body` (allowing
+# tightened depth-two lookahead bounds on `ClassItem`s).
+def FH.tail_lb_ok_b(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +body: +List<SolveFast.Item>, +lb: Nat) -> Bool:
+  match body:
+    case Nil{}:
+      Nat.is_eq(lb, 0n)
+    case Con{it, rest}:
+      match it:
+        case SolveFast.Begin{g}:
+          Nat.is_eq(lb, 0n)
+        case SolveFast.OneItem{fb, w}:
+          Bool.and(Nat.is_le(1n, lb),
+            FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, 1n)))
+        case SolveFast.TwoItem{fb, w1, w2}:
+          Bool.and(Nat.is_le(3n, lb),
+            FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, 3n)))
+        case SolveFast.DoneItem{fb, tree, cost}:
+          Bool.and(Nat.is_le(cost, lb),
+            FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, cost)))
+        case SolveFast.ClassItem{fb, cws, wlen, tlb}:
+          Bool.and(Nat.is_le(tlb, lb),
+            LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws),
+              Nat.sub(lb, tlb)))
+        case SolveFast.Add{fb, tlb}:
+          FH.tail_lb_ok_b(G, nodup, n, rest, lb)
+        case SolveFast.End{}:
+          Nat.is_eq(lb, n)
+
+def FH.tail_lb_ok_one(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +fb: +List<Feedback.Color>, +w: +List<Nat>, +rest: +List<SolveFast.Item>,
+    +lb: Nat, +hr: {FH.tail_lb_ok_b(G, nodup, n, rest, lb) == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n, SolveFast.OneItem{fb, w} <> rest,
+     Nat.add(1n, lb)) == True{} : Bool}:
+  FH.bool_and_intro(Nat.is_le(0n, lb),
+    FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, 0n)),
+    NatProof.Nat.is_le_zero_l(lb),
+    Equal.trans(Bool,
+      FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, 0n)),
+      FH.tail_lb_ok_b(G, nodup, n, rest, lb), True{},
+      Equal.cong(Nat, Bool, x => FH.tail_lb_ok_b(G, nodup, n, rest, x),
+        Nat.sub(lb, 0n), lb, FLB.FS.sub_zero(lb)), hr))
+
+def FH.tail_lb_ok_two(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +fb: +List<Feedback.Color>, +w1: +List<Nat>, +w2: +List<Nat>,
+    +rest: +List<SolveFast.Item>, +lb: Nat,
+    +hr: {FH.tail_lb_ok_b(G, nodup, n, rest, lb) == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n, SolveFast.TwoItem{fb, w1, w2} <> rest,
+     Nat.add(3n, lb)) == True{} : Bool}:
+  FH.bool_and_intro(Nat.is_le(0n, lb),
+    FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, 0n)),
+    NatProof.Nat.is_le_zero_l(lb),
+    Equal.trans(Bool,
+      FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(lb, 0n)),
+      FH.tail_lb_ok_b(G, nodup, n, rest, lb), True{},
+      Equal.cong(Nat, Bool, x => FH.tail_lb_ok_b(G, nodup, n, rest, x),
+        Nat.sub(lb, 0n), lb, FLB.FS.sub_zero(lb)), hr))
+
+def FH.tail_lb_ok_done(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +fb: +List<Feedback.Color>, +tree: Tree.Tree, +cost: Nat,
+    +rest: +List<SolveFast.Item>, +lb: Nat,
+    +hr: {FH.tail_lb_ok_b(G, nodup, n, rest, lb) == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n, SolveFast.DoneItem{fb, tree, cost} <> rest,
+     Nat.add(cost, lb)) == True{} : Bool}:
+  FH.bool_and_intro(Nat.is_le(cost, Nat.add(cost, lb)),
+    FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(Nat.add(cost, lb), cost)),
+    FH.le_add_l(cost, lb),
+    Equal.trans(Bool,
+      FH.tail_lb_ok_b(G, nodup, n, rest, Nat.sub(Nat.add(cost, lb), cost)),
+      FH.tail_lb_ok_b(G, nodup, n, rest, lb), True{},
+      Equal.cong(Nat, Bool, x => FH.tail_lb_ok_b(G, nodup, n, rest, x),
+        Nat.sub(Nat.add(cost, lb), cost), lb, FLB.FS.add_sub_cancel_l(cost, lb)),
+      hr))
+
+def FH.tail_lb_ok_class(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +fb: +List<Feedback.Color>, +cws: +List<SolveFast.CWord>, +wlen: Nat,
+    +tlb: Nat, +rest: +List<SolveFast.Item>, +clb: Nat,
+    +hclb: {LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws), clb)
+            == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n, SolveFast.ClassItem{fb, cws, wlen, tlb} <> rest,
+     Nat.add(clb, tlb)) == True{} : Bool}:
+  FH.bool_and_intro(Nat.is_le(tlb, Nat.add(clb, tlb)),
+    LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws),
+      Nat.sub(Nat.add(clb, tlb), tlb)),
+    FH.le_add_r(clb, tlb),
+    Equal.trans(Bool,
+      LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws),
+        Nat.sub(Nat.add(clb, tlb), tlb)),
+      LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws), clb), True{},
+      Equal.cong(Nat, Bool,
+        x => LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws), x),
+        Nat.sub(Nat.add(clb, tlb), tlb), clb, FLB.FS.add_sub_cancel(clb, tlb)),
+      hclb))
+
 def FH.done_ws_ok_b(+G: +List<+List<Nat>>, +ws: +List<+List<Nat>>,
     +tree: Tree.Tree, +cost: Nat) -> Bool:
   match ws:
@@ -3311,8 +3426,8 @@ def FH.BodyMatch(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
                                     {FH.cwords_ok_if(has_buf, G, C, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.body_lb(nodup, n, restb2)
-                                       : Nat},
+                                      {FH.tail_lb_ok_b(G, nodup, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<
                                         {tlb2 == tlb : Nat},
                                         FH.BodyMatch(G, C, n_root, has_buf,
@@ -3537,14 +3652,150 @@ def FH.group_items_body_lb(+nodup: Bool, +n: Nat,
           +ih = FH.group_items_body_lb(nodup, n, rest, ngt)
           FH.group_items_body_lb_ws(nodup, n, fb, ws, rest, ndh, ih)
 
+def FH.group_items_two_tail_lb_ok(+G: +List<+List<Nat>>, nodup: Bool, +n: Nat,
+    +fb: +List<Feedback.Color>, +w: +List<Nat>, +w2: +List<Nat>,
+    +rest: +List<Groups.Group>,
+    +ndh: {FN.FN.nodup_ok(nodup, w <> (w2 <> Nil{})) == True{} : Bool},
+    +ih: {FH.tail_lb_ok_b(G, nodup, n,
+            List.append(&2, SolveFast.Item,
+              SolveFast.group_items(nodup, n, rest),
+              SolveFast.End{} <> Nil{}),
+            SolveFast.lower_bound(n, rest)) == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n,
+     List.append(&2, SolveFast.Item,
+       SolveFast.group_items_two(nodup, n, fb, w, w2, rest,
+         SolveFast.group_items(nodup, n, rest)),
+       SolveFast.End{} <> Nil{}),
+     SolveFast.lower_bound(n, Groups.Group{fb, w <> (w2 <> Nil{})} <> rest))
+   == True{} : Bool}:
+  match nodup:
+    case True{}:
+      +ws2 : +List<+List<Nat>> = w <> (w2 <> Nil{})
+      +tl = List.append(&2, SolveFast.Item, SolveFast.group_items(True{}, n, rest),
+              SolveFast.End{} <> Nil{})
+      +rlb = SolveFast.lower_bound(n, rest)
+      +e3 : {3n == SolveFast.class_lb(ws2) : Nat} =
+        FN.FN.class_lb_nodup_eq(ws2, ndh)
+      Equal.trans(Bool,
+        FH.tail_lb_ok_b(G, True{}, n, SolveFast.TwoItem{fb, w, w2} <> tl,
+          Nat.add(SolveFast.class_lb(ws2), rlb)),
+        FH.tail_lb_ok_b(G, True{}, n, SolveFast.TwoItem{fb, w, w2} <> tl,
+          Nat.add(3n, rlb)), True{},
+        Equal.cong(Nat, Bool,
+          x => FH.tail_lb_ok_b(G, True{}, n, SolveFast.TwoItem{fb, w, w2} <> tl,
+                 Nat.add(x, rlb)),
+          SolveFast.class_lb(ws2), 3n,
+          Equal.sym(Nat, 3n, SolveFast.class_lb(ws2), e3)),
+        FH.tail_lb_ok_two(G, True{}, n, fb, w, w2, tl, rlb, ih))
+    case False{}:
+      +ws2 : +List<+List<Nat>> = w <> (w2 <> Nil{})
+      +tl = List.append(&2, SolveFast.Item, SolveFast.group_items(False{}, n, rest),
+              SolveFast.End{} <> Nil{})
+      +rlb = SolveFast.lower_bound(n, rest)
+      FH.tail_lb_ok_class(G, False{}, n, fb, SolveFast.dummy_cwords(ws2), 2n,
+        rlb, SolveFast.Add{fb, rlb} <> tl, SolveFast.class_lb(ws2),
+        LB2.LB2.clb_ok_of_le_class_lb(G, False{}, ws2, SolveFast.class_lb(ws2),
+          NatProof.Nat.is_le_refl(SolveFast.class_lb(ws2))))
+
+def FH.group_items_tail_lb_ok_ws(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +fb: +List<Feedback.Color>, +ws: +List<+List<Nat>>,
+    +rest: +List<Groups.Group>,
+    +ndh: {FN.FN.nodup_ok(nodup, ws) == True{} : Bool},
+    +ih: {FH.tail_lb_ok_b(G, nodup, n,
+            List.append(&2, SolveFast.Item,
+              SolveFast.group_items(nodup, n, rest),
+              SolveFast.End{} <> Nil{}),
+            SolveFast.lower_bound(n, rest)) == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n,
+     List.append(&2, SolveFast.Item,
+       SolveFast.group_items(nodup, n, Groups.Group{fb, ws} <> rest),
+       SolveFast.End{} <> Nil{}),
+     SolveFast.lower_bound(n, Groups.Group{fb, ws} <> rest)) == True{} : Bool}:
+  match ws:
+    case Nil{}:
+      +tl = List.append(&2, SolveFast.Item, SolveFast.group_items(nodup, n, rest),
+              SolveFast.End{} <> Nil{})
+      +rlb = SolveFast.lower_bound(n, rest)
+      FH.tail_lb_ok_class(G, nodup, n, fb, Nil{}, 0n, rlb,
+        SolveFast.Add{fb, rlb} <> tl, 0n,
+        LB2.LB2.clb_ok_of_le_class_lb(G, nodup, Nil{}, 0n, {==}))
+    case Con{+w, +wt}:
+      match wt:
+        case Nil{}:
+          +tl = List.append(&2, SolveFast.Item, SolveFast.group_items(nodup, n, rest),
+                  SolveFast.End{} <> Nil{})
+          +rlb = SolveFast.lower_bound(n, rest)
+          +e1 : {1n == SolveFast.class_lb(w <> Nil{}) : Nat} =
+            FN.FN.class_lb_nodup_eq(w <> Nil{}, {==})
+          Equal.trans(Bool,
+            FH.tail_lb_ok_b(G, nodup, n, SolveFast.OneItem{fb, w} <> tl,
+              Nat.add(SolveFast.class_lb(w <> Nil{}), rlb)),
+            FH.tail_lb_ok_b(G, nodup, n, SolveFast.OneItem{fb, w} <> tl,
+              Nat.add(1n, rlb)), True{},
+            Equal.cong(Nat, Bool,
+              x => FH.tail_lb_ok_b(G, nodup, n, SolveFast.OneItem{fb, w} <> tl,
+                     Nat.add(x, rlb)),
+              SolveFast.class_lb(w <> Nil{}), 1n,
+              Equal.sym(Nat, 1n, SolveFast.class_lb(w <> Nil{}), e1)),
+            FH.tail_lb_ok_one(G, nodup, n, fb, w, tl, rlb, ih))
+        case Con{+w2, +wt2}:
+          match wt2:
+            case Nil{}:
+              FH.group_items_two_tail_lb_ok(G, nodup, n, fb, w, w2, rest, ndh,
+                ih)
+            case Con{+w3, +wt3}:
+              +tl = List.append(&2, SolveFast.Item, SolveFast.group_items(nodup, n, rest),
+                      SolveFast.End{} <> Nil{})
+              +rlb = SolveFast.lower_bound(n, rest)
+              +ws3 : +List<+List<Nat>> = w <> (w2 <> (w3 <> wt3))
+              +cws3 = SolveFast.dummy_cwords(ws3)
+              +ecws : {SolveFast.cwords_words(cws3) == ws3 : +List<+List<Nat>>} =
+                FH.cwords_dummy_words(ws3)
+              +hclb : {LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws3),
+                         SolveFast.class_lb(ws3)) == True{} : Bool} =
+                Equal.trans(Bool,
+                  LB2.LB2.clb_ok_b(G, nodup, SolveFast.cwords_words(cws3),
+                    SolveFast.class_lb(ws3)),
+                  LB2.LB2.clb_ok_b(G, nodup, ws3, SolveFast.class_lb(ws3)),
+                  True{},
+                  Equal.cong(+List<+List<Nat>>, Bool,
+                    l => LB2.LB2.clb_ok_b(G, nodup, l, SolveFast.class_lb(ws3)),
+                    SolveFast.cwords_words(cws3), ws3, ecws),
+                  LB2.LB2.clb_ok_of_le_class_lb(G, nodup, ws3,
+                    SolveFast.class_lb(ws3),
+                    NatProof.Nat.is_le_refl(SolveFast.class_lb(ws3))))
+              FH.tail_lb_ok_class(G, nodup, n, fb, cws3, Groups.len_words(ws3),
+                rlb, SolveFast.Add{fb, rlb} <> tl, SolveFast.class_lb(ws3), hclb)
+
+def FH.group_items_tail_lb_ok(+G: +List<+List<Nat>>, +nodup: Bool, +n: Nat,
+    +groups: +List<Groups.Group>,
+    +ng: {FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(groups))
+          == True{} : Bool}) ->
+  {FH.tail_lb_ok_b(G, nodup, n,
+     List.append(&2, SolveFast.Item, SolveFast.group_items(nodup, n, groups),
+       SolveFast.End{} <> Nil{}),
+     SolveFast.lower_bound(n, groups)) == True{} : Bool}:
+  match groups:
+    case Nil{}:
+      NatProof.NatPrf.is_eq_refl(n)
+    case Con{gp, rest}:
+      match gp:
+        case Groups.Group{+fb, +ws}:
+          +ndh = Logic.Proof.and_true_l(FN.FN.nodup_ok(nodup, ws),
+                   FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(rest)), ng)
+          +ngt = Logic.Proof.and_true_r(FN.FN.nodup_ok(nodup, ws),
+                   FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(rest)), ng)
+          FH.group_items_tail_lb_ok_ws(G, nodup, n, fb, ws, rest, ndh,
+            FH.group_items_tail_lb_ok(G, nodup, n, rest, ngt))
+
 def FH.group_items_two_body_match(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, nodup: Bool, +n: Nat, +fb: +List<Feedback.Color>,
     +w: +List<Nat>, +w2: +List<Nat>, +rest: +List<Groups.Group>,
-    +elbr: {SolveFast.lower_bound(n, rest)
-            == FH.body_lb(nodup, n,
-                 List.append(&2, SolveFast.Item,
-                   SolveFast.group_items(nodup, n, rest),
-                   SolveFast.End{} <> Nil{})) : Nat},
+    +htlbr: {FH.tail_lb_ok_b(G, nodup, n,
+               List.append(&2, SolveFast.Item,
+                 SolveFast.group_items(nodup, n, rest),
+                 SolveFast.End{} <> Nil{}),
+               SolveFast.lower_bound(n, rest)) == True{} : Bool},
     +hrest: FH.BodyMatch(G, C, n_root, False{}, nodup, n, rest,
               List.append(&2, SolveFast.Item,
                 SolveFast.group_items(nodup, n, rest),
@@ -3560,16 +3811,16 @@ def FH.group_items_two_body_match(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{{==}, hrest}}}
     case False{}:
       Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{{==},
-        Arr.DPair{{==}, Arr.DPair{elbr, Arr.DPair{{==}, hrest}}}}}}}
+        Arr.DPair{{==}, Arr.DPair{htlbr, Arr.DPair{{==}, hrest}}}}}}}
 
 def FH.group_items_body_match_ws(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, +nodup: Bool, +n: Nat, +fb: +List<Feedback.Color>,
     +ws: +List<+List<Nat>>, +rest: +List<Groups.Group>,
-    +elbr: {SolveFast.lower_bound(n, rest)
-            == FH.body_lb(nodup, n,
-                 List.append(&2, SolveFast.Item,
-                   SolveFast.group_items(nodup, n, rest),
-                   SolveFast.End{} <> Nil{})) : Nat},
+    +htlbr: {FH.tail_lb_ok_b(G, nodup, n,
+               List.append(&2, SolveFast.Item,
+                 SolveFast.group_items(nodup, n, rest),
+                 SolveFast.End{} <> Nil{}),
+               SolveFast.lower_bound(n, rest)) == True{} : Bool},
     +hrest: FH.BodyMatch(G, C, n_root, False{}, nodup, n, rest,
               List.append(&2, SolveFast.Item,
                 SolveFast.group_items(nodup, n, rest),
@@ -3582,7 +3833,7 @@ def FH.group_items_body_match_ws(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
   match ws:
     case Nil{}:
       Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{{==},
-        Arr.DPair{{==}, Arr.DPair{elbr, Arr.DPair{{==}, hrest}}}}}}}
+        Arr.DPair{{==}, Arr.DPair{htlbr, Arr.DPair{{==}, hrest}}}}}}}
     case Con{+w, +wt}:
       match wt:
         case Nil{}:
@@ -3591,13 +3842,13 @@ def FH.group_items_body_match_ws(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           match wt2:
             case Nil{}:
               FH.group_items_two_body_match(G, C, n_root, nodup, n,
-                fb, w, w2, rest, elbr, hrest)
+                fb, w, w2, rest, htlbr, hrest)
             case Con{+w3, +wt3}:
               +ws3 : +List<+List<Nat>> = w <> (w2 <> (w3 <> wt3))
               Arr.DPair{{==}, Arr.DPair{{==},
                 Arr.DPair{FH.cwords_dummy_words(ws3),
                   Arr.DPair{{==}, Arr.DPair{{==},
-                    Arr.DPair{elbr, Arr.DPair{{==}, hrest}}}}}}}
+                    Arr.DPair{htlbr, Arr.DPair{{==}, hrest}}}}}}}
 
 def FH.group_items_body_match(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, +nodup: Bool, +n: Nat, +groups: +List<Groups.Group>,
@@ -3615,20 +3866,9 @@ def FH.group_items_body_match(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           +ngt = Logic.Proof.and_true_r(FN.FN.nodup_ok(nodup, ws),
                    FN.FN.nodup_ok_jobs(nodup, MV.MV.next_groups(rest)), ng)
           +hrest = FH.group_items_body_match(G, C, n_root, nodup, n, rest, ngt)
-          +elbr : {SolveFast.lower_bound(n, rest)
-                   == FH.body_lb(nodup, n,
-                        List.append(&2, SolveFast.Item,
-                          SolveFast.group_items(nodup, n, rest),
-                          SolveFast.End{} <> Nil{})) : Nat} =
-            Equal.sym(Nat,
-              FH.body_lb(nodup, n,
-                List.append(&2, SolveFast.Item,
-                  SolveFast.group_items(nodup, n, rest),
-                  SolveFast.End{} <> Nil{})),
-              SolveFast.lower_bound(n, rest),
-              FH.group_items_body_lb(nodup, n, rest, ngt))
+          +htlbr = FH.group_items_tail_lb_ok(G, nodup, n, rest, ngt)
           FH.group_items_body_match_ws(G, C, n_root, nodup, n, fb, ws, rest,
-            elbr, hrest)
+            htlbr, hrest)
 
 # ---------------------------------------------------------------------------
 # Pass 1: table-backed `hist5_go` with `skip_self` and early abort
@@ -7351,7 +7591,7 @@ def FH.disjoint_codes_snoc(+pre: +List<SolveFast.FGroup>,
 
 def FH.big_group(bc: SolveFast.BigClass) -> Groups.Group:
   match bc:
-    case SolveFast.BigClass{fb, ws, len}:
+    case SolveFast.BigClass{fb, ws, len, clb}:
       Groups.Group{fb, SolveFast.cwords_words(ws)}
 
 def FH.bigs_groups(+bs: +List<SolveFast.BigClass>) -> +List<Groups.Group>:
@@ -7364,9 +7604,11 @@ def FH.bigs_groups(+bs: +List<SolveFast.BigClass>) -> +List<Groups.Group>:
 def FH.big_ok_b(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
     bc: SolveFast.BigClass) -> Bool:
   match bc:
-    case SolveFast.BigClass{fb, +ws, len}:
+    case SolveFast.BigClass{fb, +ws, +len, +clb}:
       Bool.and(FT.FT.cwords_ok_b(G, C, n_root, ws),
-        Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))))
+        Bool.and(Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))),
+          Bool.and(FN.FN.no_dup_ref(SolveFast.cwords_words(ws)),
+            LB2.LB2.clb_ok_b(G, True{}, SolveFast.cwords_words(ws), clb))))
 
 def FH.bigs_ok_b(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
     +bs: +List<SolveFast.BigClass>) -> Bool:
@@ -7529,47 +7771,63 @@ def FH.emit_bigs_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +rem_lb: Nat, +items: +List<SolveFast.Item>, +ig: +List<Groups.Group>,
     +hbs: {FH.bigs_ok_b(G, C, n_root, bs) == True{} : Bool},
     +hbm: FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig, ig, items),
-    +elb: {rem_lb == FH.body_lb(True{}, n_orig, items) : Nat}) ->
-  FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig,
-    FP.FP.rev_groups(FH.bigs_groups(bs), ig),
-    SolveFast.emit_bigs(bs, rem_lb, items)):
+    +htlb: {FH.tail_lb_ok_b(G, True{}, n_orig, items, rem_lb) == True{} : Bool}) ->
+  Arr.Arr.DPair<
+    FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig,
+      FP.FP.rev_groups(FH.bigs_groups(bs), ig),
+      SolveFast.emit_bigs(bs, rem_lb, items)),
+    {FH.tail_lb_ok_b(G, True{}, n_orig,
+       SolveFast.emit_bigs(bs, rem_lb, items),
+       SolveFast.bigs_lb_sum(bs, rem_lb)) == True{} : Bool}>:
   match bs:
     case Nil{}:
-      hbm
+      Arr.DPair{hbm, htlb}
     case Con{bc, +rest}:
       match bc:
-        case SolveFast.BigClass{+fb, +ws, +len}:
+        case SolveFast.BigClass{+fb, +ws, +len, +clb}:
+          +bc1 : SolveFast.BigClass = SolveFast.BigClass{fb, ws, len, clb}
           +hbc = Logic.Proof.and_true_l(
-                   FH.big_ok_b(G, C, n_root, SolveFast.BigClass{fb, ws, len}),
+                   FH.big_ok_b(G, C, n_root, bc1),
                    FH.bigs_ok_b(G, C, n_root, rest), hbs)
           +hrest = Logic.Proof.and_true_r(
-                     FH.big_ok_b(G, C, n_root, SolveFast.BigClass{fb, ws, len}),
+                     FH.big_ok_b(G, C, n_root, bc1),
                      FH.bigs_ok_b(G, C, n_root, rest), hbs)
+          +ws_w = SolveFast.cwords_words(ws)
           +hcws = Logic.Proof.and_true_l(
                     FT.FT.cwords_ok_b(G, C, n_root, ws),
-                    Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))),
-                    hbc)
-          +elen = NatProof.NatPrf.is_eq_true(len,
-                    Groups.len_words(SolveFast.cwords_words(ws)),
-                    Logic.Proof.and_true_r(
-                      FT.FT.cwords_ok_b(G, C, n_root, ws),
-                      Nat.is_eq(len, Groups.len_words(SolveFast.cwords_words(ws))),
-                      hbc))
-          +clb = Nat.sub(Nat.add(len, len), 1n)
+                    Bool.and(Nat.is_eq(len, Groups.len_words(ws_w)),
+                      Bool.and(FN.FN.no_dup_ref(ws_w),
+                        LB2.LB2.clb_ok_b(G, True{}, ws_w, clb))), hbc)
+          +hr1 = Logic.Proof.and_true_r(
+                   FT.FT.cwords_ok_b(G, C, n_root, ws),
+                   Bool.and(Nat.is_eq(len, Groups.len_words(ws_w)),
+                     Bool.and(FN.FN.no_dup_ref(ws_w),
+                       LB2.LB2.clb_ok_b(G, True{}, ws_w, clb))), hbc)
+          +elen = NatProof.NatPrf.is_eq_true(len, Groups.len_words(ws_w),
+                    Logic.Proof.and_true_l(
+                      Nat.is_eq(len, Groups.len_words(ws_w)),
+                      Bool.and(FN.FN.no_dup_ref(ws_w),
+                        LB2.LB2.clb_ok_b(G, True{}, ws_w, clb)), hr1))
+          +hr2 = Logic.Proof.and_true_r(
+                   Nat.is_eq(len, Groups.len_words(ws_w)),
+                   Bool.and(FN.FN.no_dup_ref(ws_w),
+                     LB2.LB2.clb_ok_b(G, True{}, ws_w, clb)), hr1)
+          +hclb = Logic.Proof.and_true_r(FN.FN.no_dup_ref(ws_w),
+                    LB2.LB2.clb_ok_b(G, True{}, ws_w, clb), hr2)
           +items2 : +List<SolveFast.Item> =
             SolveFast.ClassItem{fb, ws, len, rem_lb}
             <> (SolveFast.Add{fb, rem_lb} <> items)
           +ig2 : +List<Groups.Group> =
-            Groups.Group{fb, SolveFast.cwords_words(ws)} <> ig
+            Groups.Group{fb, ws_w} <> ig
           +hbm2 : FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig, ig2, items2) =
             Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{{==}, Arr.DPair{elen,
-              Arr.DPair{hcws, Arr.DPair{elb, Arr.DPair{{==}, hbm}}}}}}}
-          +elb2 : {Nat.add(clb, rem_lb) == FH.body_lb(True{}, n_orig, items2)
-                   : Nat} =
-            Equal.cong(Nat, Nat, x => Nat.add(clb, x),
-              rem_lb, FH.body_lb(True{}, n_orig, items), elb)
+              Arr.DPair{hcws, Arr.DPair{htlb, Arr.DPair{{==}, hbm}}}}}}}
+          +htlb2 : {FH.tail_lb_ok_b(G, True{}, n_orig, items2,
+                      Nat.add(clb, rem_lb)) == True{} : Bool} =
+            FH.tail_lb_ok_class(G, True{}, n_orig, fb, ws, len, rem_lb,
+              SolveFast.Add{fb, rem_lb} <> items, clb, hclb)
           FH.emit_bigs_spec(G, C, n_root, n_orig, rest, Nat.add(clb, rem_lb),
-            items2, ig2, hrest, hbm2, elb2)
+            items2, ig2, hrest, hbm2, htlb2)
 
 def FH.len_rev_words(+xs: +List<+List<Nat>>, +acc: +List<+List<Nat>>) ->
   {Groups.len_words(SolveFast.rev_words(xs, acc))
@@ -7594,7 +7852,7 @@ type FH.DrainWit<+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
        perm: FP.FP.Perm,
        hok_bigs: {FH.bigs_ok_b(G, C, n_root, bigs2) == True{} : Bool},
        hbm: FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig, ig, items2),
-       elb: {lb2 == FH.body_lb(True{}, n_orig, items2) : Nat},
+       elb: {FH.tail_lb_ok_b(G, True{}, n_orig, items2, lb2) == True{} : Bool},
        hperm: FP.FP.PermOk(perm,
                 List.append(&2, Groups.Group, FN.FN.fgroups_to_groups(fg),
                   List.append(&2, Groups.Group, FH.bigs_groups(bigs0), ig0)),
@@ -7700,13 +7958,14 @@ def FH.drain5_add_three_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                       SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f)),
                       tree, cost} <> items2) =
             Arr.DPair{{==}, Arr.DPair{edec, Arr.DPair{hdws, hbm1}}}
-          +elb2 : {Nat.add(cost, lb2)
-                   == FH.body_lb(True{}, n_orig,
-                        SolveFast.DoneItem{
-                          SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f)),
-                          tree, cost} <> items2) : Nat} =
-            Equal.cong(Nat, Nat, x => Nat.add(cost, x),
-              lb2, FH.body_lb(True{}, n_orig, items2), elb1)
+          +elb2 : {FH.tail_lb_ok_b(G, True{}, n_orig,
+                     SolveFast.DoneItem{
+                       SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f)),
+                       tree, cost} <> items2,
+                     Nat.add(cost, lb2)) == True{} : Bool} =
+            FH.tail_lb_ok_done(G, True{}, n_orig,
+              SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f)), tree, cost,
+              items2, lb2, elb1)
           Arr.DPair{hb3, Arr.DPair{
             Equal.trans(Array<U32>, tbl3, tbl2, tbl0, et32, etbl2),
             DWit{gp_g <> ig1,
@@ -7729,6 +7988,7 @@ def FH.drain5_add_ge4_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
             : +List<Feedback.Color>},
     +ews: {SolveFast.cwords_words(FT.FT.rev_cwords_ws(rl))
            == SolveFast.rev_words(rws, Nil{}) : +List<+List<Nat>>},
+    +hnd_gp: {FN.FN.no_dup_ref(SolveFast.rev_words(rws, Nil{})) == True{} : Bool},
     +elen: {FT.FT.rev_cwords_len_val(rl)
             == Groups.len_words(SolveFast.cwords_words(FT.FT.rev_cwords_ws(rl)))
             : Nat},
@@ -7746,23 +8006,46 @@ def FH.drain5_add_ge4_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       match dw1:
         case DWit{+ig1, +perm1, +hok_bigs1, +hbm1, +elb1, +hperm1}:
           +fdec = SolveFast.decode_fb5(FF5.FF5.encode_fb5_list(f))
-          +bc : SolveFast.BigClass = SolveFast.BigClass{fdec, ws, rlen}
+          +clb = Nat.sub(Nat.add(rlen, rlen), 1n)
+          +bc : SolveFast.BigClass = SolveFast.BigClass{fdec, ws, rlen, clb}
           +le0 = SolveFast.next_big_le(rlen, bigs2)
           +bigs3 = SolveFast.insert_big(bc, rlen, bigs2, le0)
+          +ws_w = SolveFast.cwords_words(ws)
+          +hnd_ws : {FN.FN.no_dup_ref(ws_w) == True{} : Bool} =
+            Equal.trans(Bool, FN.FN.no_dup_ref(ws_w),
+              FN.FN.no_dup_ref(SolveFast.rev_words(rws, Nil{})), True{},
+              Equal.cong(+List<+List<Nat>>, Bool, xs => FN.FN.no_dup_ref(xs),
+                ws_w, SolveFast.rev_words(rws, Nil{}), ews), hnd_gp)
+          +eclb : {clb == SolveFast.class_lb(ws_w) : Nat} =
+            Equal.trans(Nat, clb,
+              Nat.sub(Nat.add(Groups.len_words(ws_w), Groups.len_words(ws_w)),
+                1n),
+              SolveFast.class_lb(ws_w),
+              Equal.cong(Nat, Nat, x => Nat.sub(Nat.add(x, x), 1n),
+                rlen, Groups.len_words(ws_w), elen),
+              FN.FN.class_lb_nodup_eq(ws_w, hnd_ws))
+          +hclb_ok : {LB2.LB2.clb_ok_b(G, True{}, ws_w, clb) == True{} : Bool} =
+            LB2.LB2.clb_ok_of_le_class_lb(G, True{}, ws_w, clb,
+              NatProof.Nat.is_le_eq_r(clb, clb, SolveFast.class_lb(ws_w),
+                eclb, NatProof.Nat.is_le_refl(clb)))
           +hbc : {FH.big_ok_b(G, C, n_root, bc) == True{} : Bool} =
             FH.bool_and_intro(FT.FT.cwords_ok_b(G, C, n_root, ws),
-              Nat.is_eq(rlen, Groups.len_words(SolveFast.cwords_words(ws))),
+              Bool.and(Nat.is_eq(rlen, Groups.len_words(ws_w)),
+                Bool.and(FN.FN.no_dup_ref(ws_w),
+                  LB2.LB2.clb_ok_b(G, True{}, ws_w, clb))),
               hcws,
-              Equal.trans(Bool,
-                Nat.is_eq(rlen, Groups.len_words(SolveFast.cwords_words(ws))),
-                Nat.is_eq(Groups.len_words(SolveFast.cwords_words(ws)),
-                  Groups.len_words(SolveFast.cwords_words(ws))),
-                True{},
-                Equal.cong(Nat, Bool, x => Nat.is_eq(x,
-                  Groups.len_words(SolveFast.cwords_words(ws))),
-                  rlen, Groups.len_words(SolveFast.cwords_words(ws)), elen),
-                NatProof.NatPrf.is_eq_refl(
-                  Groups.len_words(SolveFast.cwords_words(ws)))))
+              FH.bool_and_intro(Nat.is_eq(rlen, Groups.len_words(ws_w)),
+                Bool.and(FN.FN.no_dup_ref(ws_w),
+                  LB2.LB2.clb_ok_b(G, True{}, ws_w, clb)),
+                Equal.trans(Bool,
+                  Nat.is_eq(rlen, Groups.len_words(ws_w)),
+                  Nat.is_eq(Groups.len_words(ws_w), Groups.len_words(ws_w)),
+                  True{},
+                  Equal.cong(Nat, Bool, x => Nat.is_eq(x, Groups.len_words(ws_w)),
+                    rlen, Groups.len_words(ws_w), elen),
+                  NatProof.NatPrf.is_eq_refl(Groups.len_words(ws_w))),
+                FH.bool_and_intro(FN.FN.no_dup_ref(ws_w),
+                  LB2.LB2.clb_ok_b(G, True{}, ws_w, clb), hnd_ws, hclb_ok)))
           +hok_bigs3 = FH.insert_big_ok(G, C, n_root, bc, rlen, bigs2, le0,
                          hbc, hok_bigs1)
           +gp_g : Groups.Group = Groups.Group{f, SolveFast.rev_words(rws, Nil{})}
@@ -7908,6 +8191,14 @@ def FH.drain5_add_spec_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                 Equal.cong(+List<+List<Nat>>, Nat, xs => Groups.len_words(xs),
                   Nil{}, SolveFast.rev_words(rws, Nil{}), ews),
                 Arr.DPair{{==}, Arr.DPair{elb1, Arr.DPair{{==}, hbm1}}}}}}}
+          +elb2 : {FH.tail_lb_ok_b(G, True{}, n_orig, it_new, lb2)
+                   == True{} : Bool} =
+            FH.bool_and_intro(Nat.is_le(lb2, lb2),
+              LB2.LB2.clb_ok_b(G, True{}, Nil{}, Nat.sub(lb2, lb2)),
+              NatProof.Nat.is_le_refl(lb2),
+              Equal.cong(Nat, Bool,
+                x => LB2.LB2.clb_ok_b(G, True{}, Nil{}, x),
+                Nat.sub(lb2, lb2), 0n, FH.nat_sub_self(lb2)))
           +base = List.append(&2, Groups.Group, FH.bigs_groups(bigs0), ig0)
           +bs_g = FH.bigs_groups(bigs2)
           Arr.DPair{hb3, Arr.DPair{etbl2,
@@ -7915,7 +8206,7 @@ def FH.drain5_add_spec_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               FP.PTrans{gp_g <> List.append(&2, Groups.Group, bs_g, ig1),
                 FP.PSkip{perm1},
                 FP.FP.perm_sym(FP.FP.perm_pull(gp_g, bs_g, ig1))},
-              hok_bigs1, hbm2, elb1,
+              hok_bigs1, hbm2, elb2,
               FH.drain_perm_item(gp_g, FN.FN.fgroups_to_groups(rest), base,
                 bs_g, ig1, perm1, hperm1)}}}
     case Con{+cw, +wt}:
@@ -7942,10 +8233,9 @@ def FH.drain5_add_spec_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
               +hbm2 : FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig,
                         gp_g <> ig1, it_new) =
                 Arr.DPair{edec, Arr.DPair{ews, hbm1}}
-              +elb2 : {Nat.add(1n, lb2) == FH.body_lb(True{}, n_orig, it_new)
-                       : Nat} =
-                Equal.cong(Nat, Nat, x => Nat.add(1n, x),
-                  lb2, FH.body_lb(True{}, n_orig, items2), elb1)
+              +elb2 : {FH.tail_lb_ok_b(G, True{}, n_orig, it_new,
+                         Nat.add(1n, lb2)) == True{} : Bool} =
+                FH.tail_lb_ok_one(G, True{}, n_orig, fdec, w, items2, lb2, elb1)
               +base = List.append(&2, Groups.Group, FH.bigs_groups(bigs0), ig0)
               +bs_g = FH.bigs_groups(bigs2)
               Arr.DPair{hb3, Arr.DPair{etbl2,
@@ -7991,10 +8281,10 @@ def FH.drain5_add_spec_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                   +hbm2 : FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig,
                             gp_g <> ig1, it_new) =
                     Arr.DPair{{==}, Arr.DPair{edec, Arr.DPair{ews, hbm1}}}
-                  +elb2 : {Nat.add(3n, lb2) == FH.body_lb(True{}, n_orig, it_new)
-                           : Nat} =
-                    Equal.cong(Nat, Nat, x => Nat.add(3n, x),
-                      lb2, FH.body_lb(True{}, n_orig, items2), elb1)
+                  +elb2 : {FH.tail_lb_ok_b(G, True{}, n_orig, it_new,
+                             Nat.add(3n, lb2)) == True{} : Bool} =
+                    FH.tail_lb_ok_two(G, True{}, n_orig, fdec, w2, w, items2,
+                      lb2, elb1)
                   +base = List.append(&2, Groups.Group, FH.bigs_groups(bigs0), ig0)
                   +bs_g = FH.bigs_groups(bigs2)
                   Arr.DPair{hb3, Arr.DPair{etbl2,
@@ -8253,7 +8543,7 @@ def FH.drain5_add_spec_go(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                             w4 <> (w3 <> (w2 <> (w <> Nil{})))))))
                   FH.drain5_add_ge4_spec(G, C, n_root, pre, f, len, rws, rest,
                     n_orig, ig0, bigs0, lb2, items2, bigs2, bkts3, tbl0, tbl2,
-                    rl, edec, ews_rev, elen_ws, hws_ok, hb3, etbl2, dw1)
+                    rl, edec, ews_rev, hnd_gp, elen_ws, hws_ok, hb3, etbl2, dw1)
 
 def FH.drain5_add_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, +pre: +List<SolveFast.FGroup>,
@@ -8890,7 +9180,7 @@ def FH.drain5_go_spec(+fg: +List<SolveFast.FGroup>, +G: +List<+List<Nat>>,
                 MV.MV.next_groups(FN.FN.fgroups_to_groups(fg))) == True{} : Bool},
     +hok_bigs0: {FH.bigs_ok_b(G, C, n_root, bigs0) == True{} : Bool},
     +hbm0: FH.BodyMatch(G, C, n_root, True{}, True{}, n_orig, ig0, items0),
-    +elb0: {lb0 == FH.body_lb(True{}, n_orig, items0) : Nat},
+    +elb0: {FH.tail_lb_ok_b(G, True{}, n_orig, items0, lb0) == True{} : Bool},
     +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts,
            List.append(&2, SolveFast.FGroup, pre, fg)),
     +htbl: FT.FT.TblOk(G, C, n_root, tbl)) ->
@@ -9156,12 +9446,14 @@ def FH.buf_dup(buf: SolveFast.Buf5) ->
         Arr.Arr.dup(+List<SolveFast.CWord>, bkts),
         Arr.Arr.dup(U32, tbl))
 
-# Semantic 5-case classification for `guess_items_buf`.
+# Semantic 6-case classification for `guess_items_buf`.
 type FH.GuessCase is Data:
   GCSkipSelf{}
   GCSkipUnusable{}
   GCSkipPre{}
   GCSkipLb{}
+  GCSkipBody{ord: +List<Groups.Group>, body: +List<SolveFast.Item>, tot: Nat,
+             perm: FP.FP.Perm}
   GCLive{ord: +List<Groups.Group>, body: +List<SolveFast.Item>, perm: FP.FP.Perm}
 
 def FH.GuessCaseOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
@@ -9193,6 +9485,19 @@ def FH.GuessCaseOk(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>, +n_root: Nat,
         {Nat.is_le(Eval.Eval.cost_of(best),
            SolveFast.lower_bound(n, Groups.groups_build(g, S, Nil{})))
          == True{} : Bool}>
+    case GCSkipBody{ord, body, tot, perm}:
+      Arr.Arr.DPair<
+        {items == Nil{} : +List<SolveFast.Item>},
+        Arr.Arr.DPair<
+          {Groups.groups_smaller(S, Groups.groups_build(g, S, Nil{}))
+           == True{} : Bool},
+          Arr.Arr.DPair<
+            FP.FP.PermOk(perm, Groups.groups_build(g, S, Nil{}), ord),
+            Arr.Arr.DPair<
+              FH.BodyMatch(G, C, n_root, has_buf, nodup, n, ord, body),
+              Arr.Arr.DPair<
+                {FH.tail_lb_ok_b(G, nodup, n, body, tot) == True{} : Bool},
+                {Nat.is_le(Eval.Eval.cost_of(best), tot) == True{} : Bool}>>>>>
     case GCLive{ord, body, perm}:
       Arr.Arr.DPair<
         {items == SolveFast.Begin{g} <> body : +List<SolveFast.Item>},
@@ -9244,8 +9549,12 @@ def FH.run_drain5_spec_dw(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
       +bs_g = FH.bigs_groups(bigs3)
       +ord = FP.FP.rev_groups(bs_g, ig)
       +body = SolveFast.emit_bigs(bigs3, lb3, items3)
-      +hbm_all = FH.emit_bigs_spec(G, C, n_root, n, bigs3, lb3, items3, ig,
-                   hok_bigs, hbm, elb)
+      +hem = FH.emit_bigs_spec(G, C, n_root, n, bigs3, lb3, items3, ig,
+               hok_bigs, hbm, elb)
+      +hbm_all = Arr.Arr.dpair_l(
+                   FH.BodyMatch(G, C, n_root, True{}, True{}, n, ord, body),
+                   {FH.tail_lb_ok_b(G, True{}, n, body,
+                      SolveFast.bigs_lb_sum(bigs3, lb3)) == True{} : Bool}, hem)
       +efg_app : {Groups.groups_build(g, S, Nil{})
                   == List.append(&2, Groups.Group,
                        FN.FN.fgroups_to_groups(fg), Nil{})
@@ -9367,7 +9676,7 @@ def FH.run_drain5_spec_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         CoverGroups.Cover.all_subseq_nil(g, S), hnd_s))
   +hdr2 = FH.drain5_go_spec(fg, G, C, n_root, Nil{}, n, Nil{}, Nil{}, n,
             SolveFast.End{} <> Nil{}, b2, t2, hwf, FH.disjoint_codes_nil(fg),
-            hnd_fg, {==}, {==}, {==}, hb_b2, ht_t2)
+            hnd_fg, {==}, {==}, NatProof.NatPrf.is_eq_refl(n), hb_b2, ht_t2)
   +hdr_t0 = FH.drain_spec_transport_tbl(G, C, n_root, Nil{}, fg, n, Nil{}, Nil{},
               t2, tbl0,
               SolveFast.drain5_go(FH.rev_codes(fg, Nil{}),
@@ -9458,75 +9767,6 @@ def FH.run_drain5_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
         bkts2, tbl0, tbl2, touched, hus, hnd_s, hs, htbl0, et20, hb2, et, hwf,
         Arr.Arr.dup(+List<SolveFast.CWord>, bkts2), Arr.Arr.dup(U32, tbl2))
 
-def FH.schedule5_lb_false_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
-    +n: Nat, +floor: Nat, +best: SolveRef.Best, -seen: Array<Nat>,
-    -bkts: Array<+List<SolveFast.CWord>>, -tbl: Array<U32>, +gen2: Nat,
-    +hrow: {FT.FT.gentry_ok_b(G, n_root, row, g) == True{} : Bool},
-    +hS: {FT.FT.cwords_ok_b(G, C, n_root, S) == True{} : Bool},
-    +hus: {Groups.groups_smaller(SolveFast.cwords_words(S),
-             Groups.groups_build(g, SolveFast.cwords_words(S), Nil{}))
-           == True{} : Bool},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hs: FH.SeenTree(10n, 0, seen, gen2, Nil{}),
-    +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-    +htbl: FT.FT.TblOk(G, C, n_root, tbl),
-    dpb: &b1: Array<+List<SolveFast.CWord>> -> &b2: Array<+List<SolveFast.CWord>> ->
-         {b1 == bkts : Array<+List<SolveFast.CWord>>}
-         & {b2 == b1 : Array<+List<SolveFast.CWord>>},
-    dpt: &t1: Array<U32> -> &t2: Array<U32> ->
-         {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>}) ->
-  FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.run_drain5(g, n, seen, gen2,
-      SolveFast.fill5_go(row, S, SolveFast.Fill5State{bkts, tbl, Nil{}}))):
-  (b1, dpb2) = dpb
-  (b2, peb) = dpb2
-  (+eb1, +eb2) = peb
-  (t1, dpt2) = dpt
-  (t2, pet) = dpt2
-  (+et1, +et2) = pet
-  +ws = SolveFast.cwords_words(S)
-  +fg = SolveFast.fgroups_build_fast(g, ws, Nil{})
-  +eb2_bk : {b2 == bkts : Array<+List<SolveFast.CWord>>} =
-    Equal.trans(Array<+List<SolveFast.CWord>>, b2, b1, bkts, eb2, eb1)
-  +et2_t : {t2 == tbl : Array<U32>} = Equal.trans(Array<U32>, t2, t1, tbl, et2, et1)
-  +hb2 = FH.bkt_tree_transport(G, C, n_root, 10n, 0, bkts, b2, Nil{},
-           Equal.sym(Array<+List<SolveFast.CWord>>, b2, bkts, eb2_bk), hb)
-  +ht2 = FT.FT.tbl_ok_transport(G, C, n_root, tbl, t2,
-           Equal.sym(Array<U32>, t2, tbl, et2_t), htbl)
-  +hfs2 = FH.fill5_go_spec(S, G, C, n_root, row, g, Nil{}, b2, t2, Nil{}, Nil{},
-            ht2, hrow, hS, {==}, {==}, hb2)
-  +hfs_t0 = FH.fill_spec_transport_tbl(G, C, n_root, fg, Nil{}, t2, tbl,
-              SolveFast.fill5_go(row, S, SolveFast.Fill5State{b2, t2, Nil{}}),
-              et2_t, hfs2)
-  +eq_12 : {SolveFast.fill5_go(row, S, SolveFast.Fill5State{b2, t2, Nil{}})
-            == SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t1, Nil{}})
-            : SolveFast.Fill5State} =
-    Equal.trans(SolveFast.Fill5State,
-      SolveFast.fill5_go(row, S, SolveFast.Fill5State{b2, t2, Nil{}}),
-      SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t2, Nil{}}),
-      SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t1, Nil{}}),
-      Equal.cong(Array<+List<SolveFast.CWord>>, SolveFast.Fill5State,
-        x => SolveFast.fill5_go(row, S, SolveFast.Fill5State{x, t2, Nil{}}),
-        b2, b1, eb2),
-      Equal.cong(Array<U32>, SolveFast.Fill5State,
-        y => SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, y, Nil{}}),
-        t2, t1, et2))
-  +hfs1 = FH.fill_spec_transport(G, C, n_root, fg, Nil{}, tbl,
-            SolveFast.fill5_go(row, S, SolveFast.Fill5State{b2, t2, Nil{}}),
-            SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t1, Nil{}}),
-            eq_12, hfs_t0)
-  %eb1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.run_drain5(g, n, seen, gen2,
-             SolveFast.fill5_go(row, S, SolveFast.Fill5State{_, tbl, Nil{}})))
-  %et1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.run_drain5(g, n, seen, gen2,
-             SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, _, Nil{}})))
-  FH.run_drain5_spec(G, C, n_root, g, ws, n, floor, best, seen, tbl, gen2,
-    SolveFast.fill5_go(row, S, SolveFast.Fill5State{b1, t1, Nil{}}),
-    hus, hnd_s, hs, htbl, hfs1)
-
 def FH.fgroups_lb_nodup_eq_lb(+g: +List<Nat>, +ws: +List<+List<Nat>>, +n: Nat,
     +hnd: {FN.FN.no_dup_ref(ws) == True{} : Bool}) ->
   {SolveFast.fgroups_lb_nodup(SolveFast.fgroups_build_fast(g, ws, Nil{}), n)
@@ -9555,121 +9795,6 @@ def FH.fgroups_lb_nodup_eq_lb(+g: +List<Nat>, +ws: +List<+List<Nat>>, +n: Nat,
     FN.FN.fgroups_lb_eq(True{}, n, fg, hlok, hng),
     Equal.cong(+List<Groups.Group>, Nat, gs => SolveFast.lower_bound(n, gs),
       FN.FN.fgroups_to_groups(fg), Groups.groups_build(g, ws, Nil{}), egrp))
-
-def FH.schedule5_lb_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
-    +n: Nat, +floor: Nat, +best: SolveRef.Best, -seen: Array<Nat>,
-    bkts: Array<+List<SolveFast.CWord>>, tbl: Array<U32>, +gen2: Nat,
-    +lb: Nat, skip: Bool,
-    +esk: {skip == SolveFast.skippable(best, lb) : Bool},
-    +elb: {lb == SolveFast.lower_bound(n,
-                   Groups.groups_build(g, SolveFast.cwords_words(S), Nil{}))
-           : Nat},
-    +hrow: {FT.FT.gentry_ok_b(G, n_root, row, g) == True{} : Bool},
-    +hS: {FT.FT.cwords_ok_b(G, C, n_root, S) == True{} : Bool},
-    +hus: {Groups.groups_smaller(SolveFast.cwords_words(S),
-             Groups.groups_build(g, SolveFast.cwords_words(S), Nil{}))
-           == True{} : Bool},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hs: FH.SeenTree(10n, 0, seen, gen2, Nil{}),
-    +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-    +htbl: FT.FT.TblOk(G, C, n_root, tbl)) ->
-  FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.schedule5_lb(row, g, S, n, seen, bkts, tbl, gen2, skip)):
-  match skip:
-    case True{}:
-      +ws = SolveFast.cwords_words(S)
-      +hle_lb : {Nat.is_le(Eval.Eval.cost_of(best), lb) == True{} : Bool} =
-        FLB.FS.skippable_to_le(best, lb,
-          Equal.sym(Bool, True{}, SolveFast.skippable(best, lb), esk))
-      +hle : {Nat.is_le(Eval.Eval.cost_of(best),
-                SolveFast.lower_bound(n, Groups.groups_build(g, ws, Nil{})))
-              == True{} : Bool} =
-        NatProof.Nat.is_le_eq_r(Eval.Eval.cost_of(best), lb,
-          SolveFast.lower_bound(n, Groups.groups_build(g, ws, Nil{})),
-          elb, hle_lb)
-      Arr.DPair{
-        GWit{GCSkipLb{}, Arr.DPair{{==}, hle}},
-        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb, htbl}}}}
-    case False{}:
-      FH.schedule5_lb_false_dup(G, C, n_root, row, g, S, n, floor, best, seen,
-        bkts, tbl, gen2, hrow, hS, hus, hnd_s, hs, hb, htbl,
-        Arr.Arr.dup(+List<SolveFast.CWord>, bkts), Arr.Arr.dup(U32, tbl))
-
-def FH.schedule5_usable_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
-    +n: Nat, +floor: Nat, +best: SolveRef.Best, -seen: Array<Nat>,
-    bkts: Array<+List<SolveFast.CWord>>, tbl: Array<U32>, +gen2: Nat,
-    +m: Nat, +k: Nat, usable: Bool,
-    +eus: {usable == Groups.groups_smaller(SolveFast.cwords_words(S),
-                       Groups.groups_build(g, SolveFast.cwords_words(S), Nil{}))
-           : Bool},
-    +hrow: {FT.FT.gentry_ok_b(G, n_root, row, g) == True{} : Bool},
-    +hS: {FT.FT.cwords_ok_b(G, C, n_root, S) == True{} : Bool},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hwf: {FH.fgroups_wf(
-             SolveFast.fgroups_build_fast(g, SolveFast.cwords_words(S), Nil{}))
-           == True{} : Bool},
-    +hm: {m == FH.fgroups_total(
-                 SolveFast.fgroups_build_fast(g, SolveFast.cwords_words(S),
-                   Nil{})) : Nat},
-    +hk: {k == FH.fgroups_count(
-                 SolveFast.fgroups_build_fast(g, SolveFast.cwords_words(S),
-                   Nil{})) : Nat},
-    +hs: FH.SeenTree(10n, 0, seen, gen2, Nil{}),
-    +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-    +htbl: FT.FT.TblOk(G, C, n_root, tbl)) ->
-  FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.schedule5_usable(row, g, S, n, best, seen, bkts, tbl, gen2,
-      m, k, usable)):
-  match usable:
-    case False{}:
-      +ws = SolveFast.cwords_words(S)
-      Arr.DPair{
-        GWit{GCSkipUnusable{},
-          Arr.DPair{{==},
-            Equal.sym(Bool, False{},
-              Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})), eus)}},
-        Arr.DPair{{==}, Arr.DPair{hs, Arr.DPair{hb, htbl}}}}
-    case True{}:
-      +ws = SolveFast.cwords_words(S)
-      +fg = SolveFast.fgroups_build_fast(g, ws, Nil{})
-      +lb = Nat.sub(Nat.add(n, Nat.add(m, m)), k)
-      +hpos = FH.fgroups_pos_of_wf(fg, hwf)
-      +elb_fg : {SolveFast.fgroups_lb_nodup(fg, n) == lb : Nat} =
-        Equal.trans(Nat,
-          SolveFast.fgroups_lb_nodup(fg, n),
-          Nat.sub(
-            Nat.add(n, Nat.add(FH.fgroups_total(fg), FH.fgroups_total(fg))),
-            FH.fgroups_count(fg)),
-          lb,
-          FH.fgroups_lb_nodup_formula(n, fg, hpos),
-          Equal.trans(Nat,
-            Nat.sub(
-              Nat.add(n, Nat.add(FH.fgroups_total(fg), FH.fgroups_total(fg))),
-              FH.fgroups_count(fg)),
-            Nat.sub(Nat.add(n, Nat.add(m, m)), FH.fgroups_count(fg)), lb,
-            Equal.cong(Nat, Nat,
-              x => Nat.sub(Nat.add(n, Nat.add(x, x)), FH.fgroups_count(fg)),
-              FH.fgroups_total(fg), m, Equal.sym(Nat, m, FH.fgroups_total(fg), hm)),
-            Equal.cong(Nat, Nat,
-              y => Nat.sub(Nat.add(n, Nat.add(m, m)), y),
-              FH.fgroups_count(fg), k, Equal.sym(Nat, k, FH.fgroups_count(fg), hk))))
-      +elb : {lb == SolveFast.lower_bound(n, Groups.groups_build(g, ws, Nil{}))
-              : Nat} =
-        Equal.trans(Nat, lb, SolveFast.fgroups_lb_nodup(fg, n),
-          SolveFast.lower_bound(n, Groups.groups_build(g, ws, Nil{})),
-          Equal.sym(Nat, SolveFast.fgroups_lb_nodup(fg, n), lb, elb_fg),
-          FH.fgroups_lb_nodup_eq_lb(g, ws, n, hnd_s))
-      +hus : {Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{}))
-              == True{} : Bool} =
-        Equal.sym(Bool, True{},
-          Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})), eus)
-      FH.schedule5_lb_spec(G, C, n_root, row, g, S, n, floor, best, seen, bkts,
-        tbl, gen2, lb, SolveFast.skippable(best, lb), {==}, elb, hrow, hS, hus,
-        hnd_s, hs, hb, htbl)
 
 def FH.pruned_skippable_true(+g: +List<Nat>, +S: +List<+List<Nat>>, +n: Nat,
     +best: SolveRef.Best,
@@ -9899,309 +10024,6 @@ def FH.schedule5_pruned_wit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                    FH.fgroups_lb_nodup_eq_lb(g, ws, n, hnd), hle_fg)
           GWit{GCSkipLb{}, Arr.DPair{{==}, hle}}
 
-def FH.schedule5_hist_ok_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
-    +n: Nat, +floor: Nat, +best: SolveRef.Best, +skip_self: Bool,
-    -seen2: Array<Nat>, bkts: Array<+List<SolveFast.CWord>>,
-    -tbl0: Array<U32>, tbl2: Array<U32>, +gen: Nat, +m: Nat, +k: Nat, +b: Nat,
-    +hge1: {Nat.is_le(1n, n) == True{} : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FT.FT.gentry_ok_b(G, n_root, row, g) == True{} : Bool},
-    +hS: {FT.FT.cwords_ok_b(G, C, n_root, S) == True{} : Bool},
-    +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-    +htbl0: FT.FT.TblOk(G, C, n_root, tbl0),
-    +hhr: FH.HistSpec(g, SolveFast.cwords_words(S), Nil{}, gen,
-            SolveFast.budget_for(n, best, skip_self), skip_self, tbl0,
-            SolveFast.Hist5Ok{seen2, tbl2, m, k, b}),
-    dp: &s1: Array<Nat> -> &s2: Array<Nat> ->
-        {s1 == seen2 : Array<Nat>} & {s2 == s1 : Array<Nat>}) ->
-  FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.schedule5_usable(row, g, S, n, best, seen2, bkts, tbl2,
-      Nat.add(1n, gen), m, k, Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)))):
-  (s1, dp2) = dp
-  (s2, pe) = dp2
-  (+es1, +es2) = pe
-  +ws = SolveFast.cwords_words(S)
-  +fg = SolveFast.fgroups_build_fast(g, ws, Nil{})
-  +budget0 = SolveFast.budget_for(n, best, skip_self)
-  +hs2 = Arr.Arr.dpair_l(
-           FH.SeenTree(10n, 0, seen2, gen, fg),
-           Arr.Arr.DPair<{tbl2 == tbl0 : Array<U32>},
-             Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
-               Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
-                 Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                   Arr.Arr.DPair<
-                     {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-                     {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-                      == True{} : Bool}>>>>>, hhr)
-  +r1 = Arr.Arr.dpair_r(
-          FH.SeenTree(10n, 0, seen2, gen, fg),
-          Arr.Arr.DPair<{tbl2 == tbl0 : Array<U32>},
-            Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
-              Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
-                Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                  Arr.Arr.DPair<
-                    {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-                    {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-                     == True{} : Bool}>>>>>, hhr)
-  +et20 = Arr.Arr.dpair_l({tbl2 == tbl0 : Array<U32>},
-            Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
-              Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
-                Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                  Arr.Arr.DPair<
-                    {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-                    {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-                     == True{} : Bool}>>>>, r1)
-  +r2 = Arr.Arr.dpair_r({tbl2 == tbl0 : Array<U32>},
-          Arr.Arr.DPair<{FH.fgroups_wf(fg) == True{} : Bool},
-            Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
-              Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-                Arr.Arr.DPair<
-                  {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-                  {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-                   == True{} : Bool}>>>>, r1)
-  +hwf = Arr.Arr.dpair_l({FH.fgroups_wf(fg) == True{} : Bool},
-           Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
-             Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-               Arr.Arr.DPair<
-                 {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-                 {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-                  == True{} : Bool}>>>, r2)
-  +r3 = Arr.Arr.dpair_r({FH.fgroups_wf(fg) == True{} : Bool},
-          Arr.Arr.DPair<{m == FH.fgroups_total(fg) : Nat},
-            Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-              Arr.Arr.DPair<
-                {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-                {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-                 == True{} : Bool}>>>, r2)
-  +hm = Arr.Arr.dpair_l({m == FH.fgroups_total(fg) : Nat},
-          Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-            Arr.Arr.DPair<
-              {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-              {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-               == True{} : Bool}>>, r3)
-  +r4 = Arr.Arr.dpair_r({m == FH.fgroups_total(fg) : Nat},
-          Arr.Arr.DPair<{k == FH.fgroups_count(fg) : Nat},
-            Arr.Arr.DPair<
-              {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-              {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-               == True{} : Bool}>>, r3)
-  +hk = Arr.Arr.dpair_l({k == FH.fgroups_count(fg) : Nat},
-          Arr.Arr.DPair<
-            {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-            {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-             == True{} : Bool}>, r4)
-  +r5 = Arr.Arr.dpair_r({k == FH.fgroups_count(fg) : Nat},
-          Arr.Arr.DPair<
-            {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-            {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n))
-             == True{} : Bool}>, r4)
-  +hle0 = Arr.Arr.dpair_r(
-            {Nat.add(b, m) == Nat.add(budget0, k) : Nat},
-            {Nat.is_le(m, Nat.add(Groups.len_words(ws), 0n)) == True{} : Bool},
-            r5)
-  +es2_seen : {s2 == seen2 : Array<Nat>} =
-    Equal.trans(Array<Nat>, s2, s1, seen2, es2, es1)
-  +hs_s2 = FH.seen_tree_transport(10n, 0, seen2, s2, gen, fg,
-             Equal.sym(Array<Nat>, s2, seen2, es2_seen), hs2)
-  +hbump = FH.seen_tree_transport(10n, 0, s2, seen2, Nat.add(1n, gen), Nil{},
-             es2_seen, FH.seen_tree_bump(10n, 0, s2, gen, fg, hs_s2))
-  +htbl2 = FT.FT.tbl_ok_transport(G, C, n_root, tbl0, tbl2,
-             Equal.sym(Array<U32>, tbl2, tbl0, et20), htbl0)
-  +hle_n : {Nat.is_le(FH.fgroups_total(fg), n) == True{} : Bool} =
-    NatProof.Nat.is_le_eq_r(FH.fgroups_total(fg),
-      Nat.add(Groups.len_words(ws), 0n), n,
-      Equal.trans(Nat, Nat.add(Groups.len_words(ws), 0n), Groups.len_words(ws),
-        n, NatProof.NatPrf.add_zero(Groups.len_words(ws)),
-        Equal.sym(Nat, n, Groups.len_words(ws), en)),
-      NatProof.Nat.is_le_eq_l(Nat.add(Groups.len_words(ws), 0n), m,
-        FH.fgroups_total(fg), hm, hle0))
-  +eus_fg : {SolveFast.fgroups_smaller(n, fg)
-             == Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)) : Bool} =
-    Equal.trans(Bool,
-      SolveFast.fgroups_smaller(n, fg),
-      Bool.or(Nat.is_lt(FH.fgroups_total(fg), n),
-        Nat.is_le(2n, FH.fgroups_count(fg))),
-      Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)),
-      FH.fgroups_smaller_formula(n, fg, FH.fgroups_pos_of_wf(fg, hwf),
-        hge1, hle_n),
-      Equal.trans(Bool,
-        Bool.or(Nat.is_lt(FH.fgroups_total(fg), n),
-          Nat.is_le(2n, FH.fgroups_count(fg))),
-        Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, FH.fgroups_count(fg))),
-        Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)),
-        Equal.cong(Nat, Bool,
-          x => Bool.or(Nat.is_lt(x, n), Nat.is_le(2n, FH.fgroups_count(fg))),
-          FH.fgroups_total(fg), m, Equal.sym(Nat, m, FH.fgroups_total(fg), hm)),
-        Equal.cong(Nat, Bool,
-          y => Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, y)),
-          FH.fgroups_count(fg), k, Equal.sym(Nat, k, FH.fgroups_count(fg), hk))))
-  +eus_g : {SolveFast.fgroups_smaller(n, fg)
-            == Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{}))
-            : Bool} =
-    Equal.trans(Bool,
-      SolveFast.fgroups_smaller(n, fg),
-      SolveFast.fgroups_smaller(Groups.len_words(ws), fg),
-      Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})),
-      Equal.cong(Nat, Bool, x => SolveFast.fgroups_smaller(x, fg),
-        n, Groups.len_words(ws), en),
-      Equal.trans(Bool,
-        SolveFast.fgroups_smaller(Groups.len_words(ws), fg),
-        Groups.groups_smaller(ws, FN.FN.fgroups_to_groups(fg)),
-        Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})),
-        FN.FN.fgroups_smaller_eq(ws, fg,
-          FN.FN.fgroups_build_lens_ok(g, ws, Nil{}, {==})),
-        Equal.cong(+List<Groups.Group>, Bool, gs => Groups.groups_smaller(ws, gs),
-          FN.FN.fgroups_to_groups(fg), Groups.groups_build(g, ws, Nil{}),
-          FN.FN.fgroups_build_eq(g, ws, Nil{}))))
-  +eus : {Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k))
-          == Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{}))
-          : Bool} =
-    Equal.trans(Bool,
-      Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)),
-      SolveFast.fgroups_smaller(n, fg),
-      Groups.groups_smaller(ws, Groups.groups_build(g, ws, Nil{})),
-      Equal.sym(Bool, SolveFast.fgroups_smaller(n, fg),
-        Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)), eus_fg), eus_g)
-  FH.schedule5_usable_spec(G, C, n_root, row, g, S, n, floor, best, seen2,
-    bkts, tbl2, Nat.add(1n, gen), m, k,
-    Bool.or(Nat.is_lt(m, n), Nat.is_le(2n, k)), eus, hrow, hS, hnd_s, hwf,
-    hm, hk, hbump, hb, htbl2)
-
-def FH.schedule5_hist_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
-    +n: Nat, +floor: Nat, +best: SolveRef.Best, +skip_self: Bool,
-    bkts: Array<+List<SolveFast.CWord>>, -tbl0: Array<U32>, +gen: Nat,
-    hr: SolveFast.Hist5Res,
-    +esk: {skip_self == Nat.is_eq(floor, Nat.add(n, n)) : Bool},
-    +hge1: {Nat.is_le(1n, n) == True{} : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FT.FT.gentry_ok_b(G, n_root, row, g) == True{} : Bool},
-    +hS: {FT.FT.cwords_ok_b(G, C, n_root, S) == True{} : Bool},
-    +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-    +htbl0: FT.FT.TblOk(G, C, n_root, tbl0),
-    +hhr: FH.HistSpec(g, SolveFast.cwords_words(S), Nil{}, gen,
-            SolveFast.budget_for(n, best, skip_self), skip_self, tbl0, hr)) ->
-  FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen, hr)):
-  match hr:
-    case SolveFast.Hist5Pruned{seen2, tbl2}:
-      +ws = SolveFast.cwords_words(S)
-      +budget0 = SolveFast.budget_for(n, best, skip_self)
-      +hs2 = Arr.Arr.dpair_l(
-               FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
-               Arr.Arr.DPair<{tbl2 == tbl0 : Array<U32>},
-                 {FH.pruned_reason(g, ws, Nil{}, budget0, skip_self)
-                  == True{} : Bool}>, hhr)
-      +hr1 = Arr.Arr.dpair_r(
-               FH.SeenTree(10n, 0, seen2, Nat.add(1n, gen), Nil{}),
-               Arr.Arr.DPair<{tbl2 == tbl0 : Array<U32>},
-                 {FH.pruned_reason(g, ws, Nil{}, budget0, skip_self)
-                  == True{} : Bool}>, hhr)
-      +et2 = Arr.Arr.dpair_l({tbl2 == tbl0 : Array<U32>},
-               {FH.pruned_reason(g, ws, Nil{}, budget0, skip_self)
-                == True{} : Bool}, hr1)
-      +hpr = Arr.Arr.dpair_r({tbl2 == tbl0 : Array<U32>},
-               {FH.pruned_reason(g, ws, Nil{}, budget0, skip_self)
-                == True{} : Bool}, hr1)
-      +htbl2 = FT.FT.tbl_ok_transport(G, C, n_root, tbl0, tbl2,
-                 Equal.sym(Array<U32>, tbl2, tbl0, et2), htbl0)
-      Arr.DPair{
-        FH.schedule5_pruned_wit(G, C, n_root, g, ws, n, floor, best, skip_self,
-          esk, en, hnd_s, Tree.member_word(g, ws), {==}, hpr),
-        Arr.DPair{{==}, Arr.DPair{hs2, Arr.DPair{hb, htbl2}}}}
-    case SolveFast.Hist5Ok{seen2, tbl2, +m, +k, +b}:
-      FH.schedule5_hist_ok_dup(G, C, n_root, row, g, S, n, floor, best,
-        skip_self, seen2, bkts, tbl0, tbl2, gen, m, k, b, hge1, en, hnd_s,
-        hrow, hS, hb, htbl0, hhr, Arr.Arr.dup(Nat, seen2))
-
-def FH.guess_body_buf5_dup(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +row: U32, +g: +List<Nat>, +S: +List<SolveFast.CWord>,
-    +n: Nat, +floor: Nat, +best: SolveRef.Best, +skip_self: Bool,
-    -seen: Array<Nat>, bkts: Array<+List<SolveFast.CWord>>, -tbl: Array<U32>,
-    +gen: Nat,
-    +esk: {skip_self == Nat.is_eq(floor, Nat.add(n, n)) : Bool},
-    +hge1: {Nat.is_le(1n, n) == True{} : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FT.FT.gentry_ok_b(G, n_root, row, g) == True{} : Bool},
-    +hS: {FT.FT.cwords_ok_b(G, C, n_root, S) == True{} : Bool},
-    +hs: FH.SeenTree(10n, 0, seen, gen, Nil{}),
-    +hb: FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-    +htbl: FT.FT.TblOk(G, C, n_root, tbl),
-    dps: &s1: Array<Nat> -> &s2: Array<Nat> ->
-         {s1 == seen : Array<Nat>} & {s2 == s1 : Array<Nat>},
-    dpt: &t1: Array<U32> -> &t2: Array<U32> ->
-         {t1 == tbl : Array<U32>} & {t2 == t1 : Array<U32>}) ->
-  FH.GuessSpec(G, C, n_root, True{}, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen,
-      SolveFast.hist5_go(row, S, gen, skip_self,
-        SolveFast.Hist5Ok{seen, tbl, 0n, 0n,
-          SolveFast.budget_for(n, best, skip_self)}))):
-  (s1, dps2) = dps
-  (s2, pes) = dps2
-  (+es1, +es2) = pes
-  (t1, dpt2) = dpt
-  (t2, pet) = dpt2
-  (+et1, +et2) = pet
-  +ws = SolveFast.cwords_words(S)
-  +budget0 = SolveFast.budget_for(n, best, skip_self)
-  +es2_s : {s2 == seen : Array<Nat>} = Equal.trans(Array<Nat>, s2, s1, seen, es2, es1)
-  +et2_t : {t2 == tbl : Array<U32>} = Equal.trans(Array<U32>, t2, t1, tbl, et2, et1)
-  +hs2 = FH.seen_tree_transport(10n, 0, seen, s2, gen, Nil{},
-           Equal.sym(Array<Nat>, s2, seen, es2_s), hs)
-  +ht2 = FT.FT.tbl_ok_transport(G, C, n_root, tbl, t2,
-           Equal.sym(Array<U32>, t2, tbl, et2_t), htbl)
-  +hhr2 = FH.hist5_go_spec(S, G, C, n_root, row, g, Nil{}, s2, t2, gen, 0n, 0n,
-            budget0, budget0, skip_self, ht2, hrow, hS, {==}, {==}, {==}, {==},
-            hs2)
-  +hhr_t0 = FH.hist_spec_transport_tbl(g, ws, Nil{}, gen, budget0, skip_self,
-              t2, tbl,
-              SolveFast.hist5_go(row, S, gen, skip_self,
-                SolveFast.Hist5Ok{s2, t2, 0n, 0n, budget0}), et2_t, hhr2)
-  +eq_12 : {SolveFast.hist5_go(row, S, gen, skip_self,
-              SolveFast.Hist5Ok{s2, t2, 0n, 0n, budget0})
-            == SolveFast.hist5_go(row, S, gen, skip_self,
-                 SolveFast.Hist5Ok{s1, t1, 0n, 0n, budget0})
-            : SolveFast.Hist5Res} =
-    Equal.trans(SolveFast.Hist5Res,
-      SolveFast.hist5_go(row, S, gen, skip_self,
-        SolveFast.Hist5Ok{s2, t2, 0n, 0n, budget0}),
-      SolveFast.hist5_go(row, S, gen, skip_self,
-        SolveFast.Hist5Ok{s1, t2, 0n, 0n, budget0}),
-      SolveFast.hist5_go(row, S, gen, skip_self,
-        SolveFast.Hist5Ok{s1, t1, 0n, 0n, budget0}),
-      Equal.cong(Array<Nat>, SolveFast.Hist5Res,
-        x => SolveFast.hist5_go(row, S, gen, skip_self,
-               SolveFast.Hist5Ok{x, t2, 0n, 0n, budget0}), s2, s1, es2),
-      Equal.cong(Array<U32>, SolveFast.Hist5Res,
-        y => SolveFast.hist5_go(row, S, gen, skip_self,
-               SolveFast.Hist5Ok{s1, y, 0n, 0n, budget0}), t2, t1, et2))
-  +hhr1 = FH.hist_spec_transport(g, ws, Nil{}, gen, budget0, skip_self, tbl,
-            SolveFast.hist5_go(row, S, gen, skip_self,
-              SolveFast.Hist5Ok{s2, t2, 0n, 0n, budget0}),
-            SolveFast.hist5_go(row, S, gen, skip_self,
-              SolveFast.Hist5Ok{s1, t1, 0n, 0n, budget0}), eq_12, hhr_t0)
-  %es1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen,
-             SolveFast.hist5_go(row, S, gen, skip_self,
-               SolveFast.Hist5Ok{_, tbl, 0n, 0n, budget0})))
-  %et1 : FH.GuessSpec(G, C, n_root, True{}, True{}, g, ws, n, floor, best,
-           SolveFast.schedule5_hist(row, g, S, n, best, bkts, gen,
-             SolveFast.hist5_go(row, S, gen, skip_self,
-               SolveFast.Hist5Ok{s1, _, 0n, 0n, budget0})))
-  FH.schedule5_hist_spec(G, C, n_root, row, g, S, n, floor, best, skip_self,
-    bkts, tbl, gen,
-    SolveFast.hist5_go(row, S, gen, skip_self,
-      SolveFast.Hist5Ok{s1, t1, 0n, 0n, budget0}),
-    esk, hge1, en, hnd_s, hrow, hS, hb, htbl, hhr1)
-
-# Helper for the non-`Buf5` (`schedule_fguess`) path.
 def FH.schedule_fguess_lb_wit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, +nodup: Bool, +g: +List<Nat>, +ws: +List<+List<Nat>>,
     +n: Nat, +floor: Nat, +best: SolveRef.Best, skip: Bool,
@@ -10464,178 +10286,6 @@ def FH.schedule_one_wit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
           Groups.Group{Feedback.feedback(g, w), w <> Nil{}} <> Nil{}, egrp)
       GWit{GCSkipUnusable{}, Arr.DPair{{==}, hnus}}
 
-def FH.guess_body_buf_ge2_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, has_buf: Bool, +row: U32, +g: +List<Nat>,
-    +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
-    +skip_self: Bool, buf: SolveFast.Buf5,
-    +esk: {skip_self == Nat.is_eq(floor, Nat.add(n, n)) : Bool},
-    +hge1: {Nat.is_le(1n, n) == True{} : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FH.gentry_ok_if(has_buf, G, n_root, row, g) == True{} : Bool},
-    +hS: {FH.cwords_ok_if(has_buf, G, C, n_root, S) == True{} : Bool},
-    +hbuf: FH.BufOk(G, C, n_root, has_buf, True{}, buf)) ->
-  FH.GuessSpec(G, C, n_root, has_buf, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.guess_body_buf_ge2(row, g, S, n, best, skip_self, buf)):
-  match has_buf:
-    case False{}:
-      match buf:
-        case SolveFast.NoBuf{}:
-          Arr.DPair{
-            FH.schedule_fguess_fast_wit(G, C, n_root, True{}, g,
-              SolveFast.cwords_words(S), n, floor, best, en, hnd_s),
-            Unit{}}
-        case SolveFast.Buf5{s0, k0, t0, g0}:
-          Empty.absurd(
-            FH.GuessSpec(G, C, n_root, False{}, True{}, g,
-              SolveFast.cwords_words(S), n, floor, best,
-              SolveFast.guess_body_buf_ge2(row, g, S, n, best, skip_self,
-                SolveFast.Buf5{s0, k0, t0, g0})), hbuf)
-    case True{}:
-      match buf:
-        case SolveFast.NoBuf{}:
-          Empty.absurd(
-            FH.GuessSpec(G, C, n_root, True{}, True{}, g,
-              SolveFast.cwords_words(S), n, floor, best,
-              SolveFast.guess_body_buf_ge2(row, g, S, n, best, skip_self,
-                SolveFast.NoBuf{})), hbuf)
-        case SolveFast.Buf5{seen, bkts, tbl, +gen}:
-          +r1 = Arr.Arr.dpair_r({True{} == True{} : Bool},
-                  Arr.Arr.DPair<FH.SeenTree(10n, 0, seen, gen, Nil{}),
-                    Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                      FT.FT.TblOk(G, C, n_root, tbl)>>, hbuf)
-          +hs = Arr.Arr.dpair_l(FH.SeenTree(10n, 0, seen, gen, Nil{}),
-                  Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                    FT.FT.TblOk(G, C, n_root, tbl)>, r1)
-          +r2 = Arr.Arr.dpair_r(FH.SeenTree(10n, 0, seen, gen, Nil{}),
-                  Arr.Arr.DPair<FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                    FT.FT.TblOk(G, C, n_root, tbl)>, r1)
-          +hb = Arr.Arr.dpair_l(FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                  FT.FT.TblOk(G, C, n_root, tbl), r2)
-          +htbl = Arr.Arr.dpair_r(FH.BktTree(G, C, n_root, 10n, 0, bkts, Nil{}),
-                    FT.FT.TblOk(G, C, n_root, tbl), r2)
-          FH.guess_body_buf5_dup(G, C, n_root, row, g, S, n, floor, best,
-            skip_self, seen, bkts, tbl, gen, esk, hge1, en, hnd_s, hrow, hS,
-            hs, hb, htbl, Arr.Arr.dup(Nat, seen), Arr.Arr.dup(U32, tbl))
-
-def FH.guess_body_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +has_buf: Bool, +row: U32, +g: +List<Nat>,
-    +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
-    +skip_self: Bool, buf: SolveFast.Buf5,
-    +esk: {skip_self == Nat.is_eq(floor, Nat.add(n, n)) : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FH.gentry_ok_if(has_buf, G, n_root, row, g) == True{} : Bool},
-    +hS: {FH.cwords_ok_if(has_buf, G, C, n_root, S) == True{} : Bool},
-    +hbuf: FH.BufOk(G, C, n_root, has_buf, True{}, buf)) ->
-  FH.GuessSpec(G, C, n_root, has_buf, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.guess_body_buf(row, g, S, n, best, skip_self, buf)):
-  match S:
-    case Nil{}:
-      %Equal.sym(Nat, n, 0n, en) :
-        FH.GuessSpec(G, C, n_root, has_buf, True{}, g, Nil{}, _, floor, best,
-          SolveFast.GuessRes{
-            SolveFast.schedule_fguess_lb(True{}, g, Nil{}, 0n,
-              SolveFast.skippable(best, 0n)), buf})
-      Arr.DPair{
-        FH.schedule_nil_wit(G, C, n_root, has_buf, True{}, g, floor, best,
-          SolveFast.skippable(best, 0n), {==}), hbuf}
-    case Con{cw, +t}:
-      match cw:
-        case SolveFast.CWord{+ci, +grow, +w}:
-          match t:
-            case Nil{}:
-              %Equal.sym(Nat, n, 1n, en) :
-                FH.GuessSpec(G, C, n_root, has_buf, True{}, g, w <> Nil{}, _,
-                  floor, best,
-                  SolveFast.GuessRes{
-                    SolveFast.schedule_one_guess(g, best,
-                      SolveFast.word_eq_fast(g, w)), buf})
-              Arr.DPair{
-                FH.schedule_one_wit(G, C, n_root, has_buf, True{}, g, w, floor,
-                  best, SolveFast.word_eq_fast(g, w), {==}), hbuf}
-            case Con{cw2, +t2}:
-              match cw2:
-                case SolveFast.CWord{+ci2, +grow2, +w2}:
-                  +cw1 : SolveFast.CWord = SolveFast.CWord{ci, grow, w}
-                  +cw2a : SolveFast.CWord = SolveFast.CWord{ci2, grow2, w2}
-                  +hge1 : {Nat.is_le(1n, n) == True{} : Bool} =
-                    Equal.cong(Nat, Bool, x => Nat.is_le(1n, x),
-                      n, 1n+(1n+Groups.len_words(SolveFast.cwords_words(t2))),
-                      en)
-                  FH.guess_body_buf_ge2_spec(G, C, n_root, has_buf, row, g,
-                    cw1 <> (cw2a <> t2), n, floor, best, skip_self, buf, esk,
-                    hge1, en, hnd_s, hrow, hS, hbuf)
-
-def FH.guess_items_mem_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +has_buf: Bool, +row: U32, +g: +List<Nat>,
-    +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
-    +skip_self: Bool, buf: SolveFast.Buf5, in_s: Bool,
-    +ein: {in_s == SolveFast.member_word_fast(g, SolveFast.cwords_words(S))
-           : Bool},
-    +ele2n: {SolveFast.skippable(best, Nat.add(n, n)) == True{} : Bool},
-    +esk: {skip_self == Nat.is_eq(floor, Nat.add(n, n)) : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FH.gentry_ok_if(has_buf, G, n_root, row, g) == True{} : Bool},
-    +hS: {FH.cwords_ok_if(has_buf, G, C, n_root, S) == True{} : Bool},
-    +hbuf: FH.BufOk(G, C, n_root, has_buf, True{}, buf)) ->
-  FH.GuessSpec(G, C, n_root, has_buf, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.guess_items_mem_buf(row, g, S, n, best, skip_self, buf, in_s)):
-  match in_s:
-    case True{}:
-      FH.guess_body_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor, best,
-        skip_self, buf, esk, en, hnd_s, hrow, hS, hbuf)
-    case False{}:
-      +ws = SolveFast.cwords_words(S)
-      +hnm : {Tree.member_word(g, ws) == False{} : Bool} =
-        Equal.trans(Bool, Tree.member_word(g, ws),
-          SolveFast.member_word_fast(g, ws), False{},
-          Equal.sym(Bool, SolveFast.member_word_fast(g, ws),
-            Tree.member_word(g, ws), FO.FO.member_word_fast_eq(g, ws)),
-          Equal.sym(Bool, False{}, SolveFast.member_word_fast(g, ws), ein))
-      +epre : {Nat.add(n, n) == SolveFast.pre_lb(n, g, ws) : Nat} =
-        Equal.cong(Nat, Nat, x => Nat.add(n, x),
-          n, SolveFast.keep_fast(g, ws),
-          Equal.trans(Nat, n, Groups.len_words(ws), SolveFast.keep_fast(g, ws),
-            en,
-            Equal.sym(Nat, SolveFast.keep_fast(g, ws), Groups.len_words(ws),
-              FN.FN.keep_of_not_member(g, ws, hnm))))
-      +hle : {Nat.is_le(Eval.Eval.cost_of(best), SolveFast.pre_lb(n, g, ws))
-              == True{} : Bool} =
-        NatProof.Nat.is_le_eq_r(Eval.Eval.cost_of(best), Nat.add(n, n),
-          SolveFast.pre_lb(n, g, ws), epre,
-          FLB.FS.skippable_to_le(best, Nat.add(n, n), ele2n))
-      Arr.DPair{GWit{GCSkipPre{}, Arr.DPair{{==}, hle}}, hbuf}
-
-def FH.guess_items_nodup_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +has_buf: Bool, +row: U32, +g: +List<Nat>,
-    +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
-    +skip_self: Bool, buf: SolveFast.Buf5, le_2n: Bool,
-    +e2n: {le_2n == SolveFast.skippable(best, Nat.add(n, n)) : Bool},
-    +esk: {skip_self == Nat.is_eq(floor, Nat.add(n, n)) : Bool},
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd_s: {FN.FN.no_dup_ref(SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FH.gentry_ok_if(has_buf, G, n_root, row, g) == True{} : Bool},
-    +hS: {FH.cwords_ok_if(has_buf, G, C, n_root, S) == True{} : Bool},
-    +hbuf: FH.BufOk(G, C, n_root, has_buf, True{}, buf)) ->
-  FH.GuessSpec(G, C, n_root, has_buf, True{}, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.guess_items_nodup_buf(row, g, S, n, best, skip_self, buf, le_2n)):
-  match le_2n:
-    case False{}:
-      FH.guess_body_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor, best,
-        skip_self, buf, esk, en, hnd_s, hrow, hS, hbuf)
-    case True{}:
-      FH.guess_items_mem_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor,
-        best, skip_self, buf,
-        SolveFast.member_word_fast(g, SolveFast.cwords_words(S)), {==},
-        Equal.sym(Bool, True{}, SolveFast.skippable(best, Nat.add(n, n)), e2n),
-        esk, en, hnd_s, hrow, hS, hbuf)
-
 def FH.guess_body_dup_wit(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
     +n_root: Nat, +g: +List<Nat>, +ws: +List<+List<Nat>>, +n: Nat, +floor: Nat,
     +best: SolveRef.Best, +en: {n == Groups.len_words(ws) : Nat}) ->
@@ -10726,26 +10376,3 @@ def FH.guess_items_buf_false_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
                 SolveFast.Buf5{seen, bkts, tbl, gen}}),
             Logic.Proof.false_ne_true(hft))
 
-# Main theorem: `guess_items_buf` satisfies the 5-case `FH.GuessSpec` and
-# preserves `FH.BufOk`.
-def FH.guess_items_buf_spec(+G: +List<+List<Nat>>, +C: +List<+List<Nat>>,
-    +n_root: Nat, +has_buf: Bool, +nodup: Bool, +row: U32, +g: +List<Nat>,
-    +S: +List<SolveFast.CWord>, +n: Nat, +floor: Nat, +best: SolveRef.Best,
-    buf: SolveFast.Buf5,
-    +en: {n == Groups.len_words(SolveFast.cwords_words(S)) : Nat},
-    +hnd: {FN.FN.nodup_ok(nodup, SolveFast.cwords_words(S)) == True{} : Bool},
-    +hrow: {FH.gentry_ok_if(has_buf, G, n_root, row, g) == True{} : Bool},
-    +hS: {FH.cwords_ok_if(has_buf, G, C, n_root, S) == True{} : Bool},
-    +hbuf: FH.BufOk(G, C, n_root, has_buf, nodup, buf)) ->
-  FH.GuessSpec(G, C, n_root, has_buf, nodup, g, SolveFast.cwords_words(S), n,
-    floor, best,
-    SolveFast.guess_items_buf(nodup, row, g, S, n, floor, best, buf)):
-  match nodup:
-    case True{}:
-      FH.guess_items_nodup_buf_spec(G, C, n_root, has_buf, row, g, S, n, floor,
-        best, Nat.is_eq(floor, Nat.add(n, n)), buf,
-        SolveFast.skippable(best, Nat.add(n, n)), {==}, {==}, en, hnd, hrow,
-        hS, hbuf)
-    case False{}:
-      FH.guess_items_buf_false_spec(G, C, n_root, has_buf, g, S, n, floor,
-        best, buf, en, hbuf)

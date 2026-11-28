@@ -96,7 +96,7 @@ def FS.pop_guess_succ(+p: Nat, +row2: U32, +g2: +List<Nat>,
      False{}, False{}, SolveFast.GuessRes{Nil{}, buf})
    == SolveFast.step(1n+p, grest, 1n, Nil{}, gG, S, n, nodup, floor, inf,
         Nil{}, Nil{}, 0n, best, SolveFast.dummy_step_zero(), False{}, False{},
-        SolveFast.guess_items_buf(nodup, row2, g2, S, n, floor, best, buf))
+        SolveFast.guess_items_buf(nodup, row2, g2, gG, S, n, floor, best, buf))
    : SolveFast.StepRes}:
   {==}
 

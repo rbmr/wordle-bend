@@ -996,6 +996,20 @@ def GR.exp_of_guess_wit(+G: +List<+List<Nat>>, +C_root: +List<+List<Nat>>,
                          Groups.groups_build(g, S, Nil{})))
                      == True{} : Bool}, hgc)
           ExpNil{eits}
+        case FH.GCSkipBody{+ord, +body, +tot, +perm}:
+          +full = Groups.groups_build(g, S, Nil{})
+          +eits = Arr.Arr.dpair_l({items == Nil{} : +List<SolveFast.Item>},
+                    Arr.Arr.DPair<{Groups.groups_smaller(S, full) == True{} : Bool},
+                      Arr.Arr.DPair<FP.FP.PermOk(perm, full, ord),
+                        Arr.Arr.DPair<
+                          FH.FH.BodyMatch(G, C_root, n_root, True{}, True{},
+                            n, ord, body),
+                          Arr.Arr.DPair<
+                            {FH.FH.tail_lb_ok_b(G, True{}, n, body, tot)
+                             == True{} : Bool},
+                            {Nat.is_le(Eval.Eval.cost_of(SolveFast.dummy_inf(0n)),
+                               tot) == True{} : Bool}>>>>, hgc)
+          ExpNil{eits}
         case FH.GCLive{+ord, +body, +perm}:
           +full = Groups.groups_build(g, S, Nil{})
           +eits = Arr.Arr.dpair_l(
@@ -2026,8 +2040,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                           {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                            == True{} : Bool},
                                           Arr.Arr.DPair<
-                                            {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                             : Nat},
+                                            {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                             == True{} : Bool},
                                             Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                               FH.FH.BodyMatch(G, C_root, n_root,
                                                 True{}, True{}, n, restg,
@@ -2042,8 +2056,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                          {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                           == True{} : Bool},
                                          Arr.Arr.DPair<
-                                           {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                            : Nat},
+                                           {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                            == True{} : Bool},
                                            Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                              FH.FH.BodyMatch(G, C_root, n_root,
                                                True{}, True{}, n, restg,
@@ -2058,8 +2072,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                         {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                           : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               True{}, True{}, n, restg,
@@ -2073,8 +2087,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                         {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                          == True{} : Bool},
                                         Arr.Arr.DPair<
-                                          {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                           : Nat},
+                                          {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                           == True{} : Bool},
                                           Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                             FH.FH.BodyMatch(G, C_root, n_root,
                                               True{}, True{}, n, restg,
@@ -2088,8 +2102,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                       {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                        == True{} : Bool},
                                       Arr.Arr.DPair<
-                                        {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                         : Nat},
+                                        {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                         == True{} : Bool},
                                         Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                           FH.FH.BodyMatch(G, C_root, n_root,
                                             True{}, True{}, n, restg,
@@ -2100,8 +2114,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                        {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                         == True{} : Bool},
                                        Arr.Arr.DPair<
-                                         {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                          : Nat},
+                                         {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                          == True{} : Bool},
                                          Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                            FH.FH.BodyMatch(G, C_root, n_root,
                                              True{}, True{}, n, restg,
@@ -2112,8 +2126,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                     {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                       : Nat},
+                                      {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                         FH.FH.BodyMatch(G, C_root, n_root,
                                           True{}, True{}, n, restg,
@@ -2122,8 +2136,8 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                     {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                      == True{} : Bool},
                                     Arr.Arr.DPair<
-                                      {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                       : Nat},
+                                      {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                       == True{} : Bool},
                                       Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                         FH.FH.BodyMatch(G, C_root, n_root,
                                           True{}, True{}, n, restg,
@@ -2132,15 +2146,15 @@ def GR.greedy_body_ok(+rem: +List<Groups.Group>, +body: +List<SolveFast.Item>,
                                   {FT.FT.cwords_ok_b(G, C_root, n_root, cws)
                                    == True{} : Bool},
                                   Arr.Arr.DPair<
-                                    {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                     : Nat},
+                                    {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                     == True{} : Bool},
                                     Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                       FH.FH.BodyMatch(G, C_root, n_root,
                                         True{}, True{}, n, restg,
                                         restb2)>>, r4)
                           +r6 = Arr.Arr.dpair_r(
-                                  {tlb == FH.FH.body_lb(True{}, n, restb2)
-                                   : Nat},
+                                  {FH.FH.tail_lb_ok_b(G, True{}, n, restb2, tlb)
+                                   == True{} : Bool},
                                   Arr.Arr.DPair<{tlb2 == tlb : Nat},
                                     FH.FH.BodyMatch(G, C_root, n_root,
                                       True{}, True{}, n, restg, restb2)>, r5)
