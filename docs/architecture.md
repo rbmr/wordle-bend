@@ -76,23 +76,33 @@ is why the initial fuel, the candidate count, is enough. The result is exponenti
 count and is intended as the correctness reference, not the final fast path. See
 [performance.md](performance.md).
 
+### `src/greedy.bend`
+
+Root preparation for 5-letter duplicate-free runs (`root_prepare`). Given the root feedback-table
+buffer (`Buf5`), it makes one Pass-1 histogram sweep over the root guesses, drops unusable guesses,
+and bucket-sorts the usable root guesses in ascending order of their Pass-1 depth-two lower bound
+(`n + 2*m - k`, offset from the root floor `2*n - 1`). It then runs up to five table-backed
+`greedy(lb)` rollouts starting at the lowest-bound root guesses to seed a valid initial upper bound
+`b0` before exact search begins. Non-5-letter or duplicate-candidate runs (`NoBuf`) fall back to
+the unsorted guess list and neutral infinity bound.
+
 ### `src/solve_k.bend`
 
-The solver with a pure chunk count. `solve_k(guesses, candidates, k)` deals the root guess list
-into `2^d <= k` contiguous segments and evaluates each segment in parallel with the fast search
-machine (`SolveFast.step`) from the neutral accumulator, over only its own guesses, while every
-child node still sees the whole guess list. The chunk results are folded in guess order with the
-reference `better`, which keeps the first strictly cheapest result, so the folded tree is the
-sequential root's tree. A chunk owns a copy of the scratch buffer because a `Buf5` holds arrays and
-cannot be shared. `k <= 1` runs the sequential root unchanged. The chunk count follows the number
-of threads the runtime was started with (`IO.thread_count`), so the split follows the machine; see
-[cli.md](cli.md).
+The solver with a pure chunk count. For candidate lists of at least three words, `solve_k(guesses,
+candidates, k)` first runs `Greedy.root_prepare` on a single root buffer to obtain the sorted root
+guess queue `rgs` and seeded valid upper bound `b0`. When `k <= 1` (`d = 0`), it evaluates `rgs`
+directly on that root buffer from `b0`. When `k >= 2` (`d >= 1`), it deals `rgs` round-robin
+(`deal_even` / `deal_odd`) into `2^d <= k` balanced chunks so every chunk sees the same mix of
+low-bound and high-bound guesses, evaluates each chunk in parallel from the shared seeded bound `b0`
+with its own scratch buffer while every child node still sees the whole guess list, and folds the
+chunk results with `SolveRef.better`. The chunk count follows the number of threads the runtime was
+started with (`IO.thread_count`), so the split follows the machine; see [cli.md](cli.md).
 
 ### `src/solve.bend`
 
-The entry point the laws talk about. It is the `k = 1` instance of `src/solve_k.bend`, which is the
-bound-pruned solver in `src/solve_fast.bend` with the root loop left whole; `src/solve_ref.bend`
-stays in the tree as the reference specification.
+The entry point the laws talk about. It is the `k = 1` instance of `src/solve_k.bend`, running
+root preparation (`src/greedy.bend`) followed by the bound-pruned solver (`src/solve_fast.bend`)
+on the root buffer; `src/solve_ref.bend` stays in the tree as the reference specification.
 
 ### `src/solve_fast.bend`
 
@@ -187,8 +197,8 @@ LAWS.bend ── checked by PROOF.bend and proofs/ ──► validity and optima
 
 ## Current limits
 
-- `solve` is exact but exhaustive. The search is exponential and takes a few seconds at 10
-  candidates, so the full bundled lists are not practical yet. Planned work and the rule that every
-  optimisation must keep the laws proved are in [performance.md](performance.md).
+- The exact solver handles hundreds of candidates in seconds, but the full bundled lists in `words/`
+  still need tighter interior lower bounds and deeper move ordering. Planned work and the rule that
+  every optimisation must keep the laws proved are in [performance.md](performance.md).
 - All eight laws are proved, including validity and optimality for every input. There are no open
   laws in `PENDING_LAWS`.

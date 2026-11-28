@@ -2,35 +2,42 @@
 
 ## Current status
 
-The exact solver in `src/solve.bend` (delegating to `src/solve_fast.bend`) is proved directly valid
-and optimal for every input (`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend`). It uses
-a precomputed `|G| x |C|` `Array<U32>` feedback table and single root-threaded `Buf5` scratch
-buffer for 5-letter duplicate-free runs, depth-two lower bounds, tight recursive cutoff propagation,
-O(1) singleton, duplicate-free two-word, and table-backed three-word (`DoneItem`) class resolution,
-largest-class-first child ordering, candidate-first staged search (`S` before `G` with a `2*|S|`
-post-`S` floor and stage-2 self-guess skipping), and mid-histogram collision-budget early abort. The
-exhaustive reference solver in `src/solve_ref.bend` (`Ref.solve_valid`, `Ref.solve_optimal`) and the
-parallel root solver in `src/solve_par.bend` (`Par.solve_eq`) stay in the tree as specifications.
-The full bundled lists in `words/` still need stronger move ordering, greedy upper-bound seeding,
-and deeper capacity bounds; speed is the remaining work, correctness is not.
+The exact solver in `src/solve.bend` (the `k = 1` instance of `src/solve_k.bend`, combining
+`src/greedy.bend` and `src/solve_fast.bend`) is proved directly valid and optimal for every input
+(`Laws.solve_valid` and `Laws.solve_optimal` in `PROOF.bend`). It uses a precomputed `|G| x |C|`
+`Array<U32>` feedback table and single root-threaded `Buf5` scratch buffer for 5-letter
+duplicate-free runs, Pass-1 root bucket sorting by depth-two lower bound (`n + 2*m - k`), top-5
+table-backed `greedy(lb)` upper-bound seeding (`src/greedy.bend`), depth-two lower bounds, tight
+recursive cutoff propagation, O(1) singleton, duplicate-free two-word, and table-backed three-word
+(`DoneItem`) class resolution, largest-class-first child ordering, candidate-first staged search
+(`S` before `G` with a `2*|S|` post-`S` floor and stage-2 self-guess skipping), and mid-histogram
+collision-budget early abort. The exhaustive reference solver in `src/solve_ref.bend`
+(`Ref.solve_valid`, `Ref.solve_optimal`) and the parallel root solver in `src/solve_par.bend`
+(`Par.solve_eq`) stay in the tree as specifications. The full bundled lists in `words/` still need
+stronger interior lower bounds (such as sibling-level depth-two tightening and capacity bounds) and
+interior move ordering; speed is the remaining work, correctness is not.
 
-## Chunked root
+## Seeded and chunked root
 
-`src/solve_k.bend` can split the root guess list into `2^d <= k` contiguous segments and evaluate
-the segments in parallel, where `k` is the number of threads the runtime was started with. Each
-segment runs the fast search machine from the neutral accumulator over only its own guesses, with
-the full guess list still available at every child node, and the results are folded in guess order
-with the reference `better`. The fold keeps the first strictly cheapest result, which is the
-sequential root's tie-break, so the chunked run returns the same tree as the sequential one; only
-the amount of work done without a shared bound changes. `k <= 1` is the sequential root unchanged.
+For candidate lists of at least three words, `src/solve_k.bend` first calls `Greedy.root_prepare`
+(`src/greedy.bend`) on a single root buffer to bucket-sort usable root guesses by their Pass-1
+depth-two lower bound and run up to five `greedy(lb)` rollouts from the lowest-bound guesses to
+seed a valid initial upper bound `b0`.
 
-The split costs some pruning: the segments cannot share the running best cost, so each segment pays
-for its first guesses at the neutral bound. On the bundled benchmark inputs the four-thread split
-is about twice as fast as the sequential root. The chunked path is proved for every chunk count in
-`proofs/par_chunk.bend`: each segment's result is valid and at most the reference fold over its own
-guesses, folding the segment results in guess order is at most the reference fold over the whole
-root guess list, and the fold keeps the segment results' validity. The laws are proved through that
-general argument at the production entry point's chunk count.
+- When `k <= 1` (`d = 0`), the sorted root queue runs directly on the root buffer starting from
+  `b0`.
+- When `k >= 2` (`d >= 1`), the sorted root queue is dealt round-robin (`deal_even` / `deal_odd`)
+  into `2^d <= k` balanced chunks, every chunk starts from the shared seeded bound `b0` with its
+  own feedback-table buffer while child nodes still see the whole guess list, and the chunk results
+  are folded with `SolveRef.better`.
+
+Seeding `b0` before splitting gives every parallel chunk a tight initial upper bound immediately,
+and round-robin dealing balances low-bound and high-bound guesses across chunks. Both phases are
+proved in `proofs/greedy.bend` and `proofs/par_chunk.bend` for every chunk count `k`: every greedy
+rollout produces a valid tree within its reported cost, Pass-1 bucket sorting covers every usable
+root guess in `G`, every chunk result is valid and beats every usable guess in its chunk, and the
+folded result costs at most the reference solver over `G`. The laws are proved through that general
+argument at the production entry point's chunk count.
 
 ## Smoke baseline
 
